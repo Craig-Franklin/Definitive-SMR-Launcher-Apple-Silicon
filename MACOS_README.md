@@ -101,26 +101,38 @@ launcher operation is active, it waits for a later idle quit.
 
 The personal fork's `.github/workflows/macos-app.yml` runs synthetic tests
 and builds an arm64 development app on main and pull requests. A `vX.Y.Z` tag
-at the current `main` commit can publish a release only after all six Actions
-secrets below are configured and signing, notarization, stapling, and macOS
-assessment pass:
+at the current `main` commit can publish a release after its signing and
+notarization credentials are available from 1Password. Put the Developer ID
+Application `.p12` attachment, its export password in a concealed field, the
+Apple team ID, and a **team** App Store Connect API `.p8` attachment with its
+key and issuer IDs in a dedicated 1Password release vault. A 1Password service
+account needs **read-only** access to that vault. Built-in Personal, Private,
+Employee and default Shared vaults cannot be granted to a service account.
 
-| Secret | Purpose |
+Configure only `OP_SERVICE_ACCOUNT_TOKEN` as a GitHub Actions secret in the
+exact personal fork. Configure these GitHub Actions **variables** as 1Password
+`op://` references; the references point to credentials in the dedicated
+vault and contain no credential values:
+
+| Variable | 1Password target |
 | --- | --- |
-| `SMR_CERT_P12_BASE64` | Base64 Developer ID Application certificate and private key export |
-| `SMR_CERT_PASSWORD` | Export password for that `.p12` |
-| `SMR_APPLE_TEAM_ID` | Ten-character Apple Developer team ID |
-| `SMR_NOTARY_KEY_P8_BASE64` | Base64 App Store Connect API private key for notarization |
-| `SMR_NOTARY_KEY_ID` | Notarization API key ID |
-| `SMR_NOTARY_ISSUER_ID` | Notarization API issuer ID |
+| `SMR_CERT_P12_REF` | `.p12` file attachment |
+| `SMR_CERT_PASSWORD_REF` | Concealed `.p12` export password field |
+| `SMR_APPLE_TEAM_ID_REF` | Apple team ID field |
+| `SMR_NOTARY_KEY_P8_REF` | Team API `.p8` file attachment |
+| `SMR_NOTARY_KEY_ID_REF` | Team API key ID field |
+| `SMR_NOTARY_ISSUER_ID_REF` | Team API issuer ID field |
 
-Add these as secrets only in
-`Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon`; never commit their
-values. The workflow leaves the keychain on an ephemeral runner and removes it
-after packaging. It does not publish an unsigned fallback. The release archive
-also receives a GitHub artifact attestation. The signed update and two-version
-replacement path still need a real release and clean-Mac test before being
-described as proven.
+The workflow uses 1Password CLI to load attachments straight into temporary
+files on the release runner and reads the four fields at release time. It
+imports Apple's public Developer ID G2 intermediate, creates a temporary
+signing keychain, and deletes it after packaging. The repository's built-in
+`GITHUB_TOKEN` publishes the release; no separate GitHub release credential is
+needed. Missing references or credentials stop the release. Signing,
+notarization, stapling, and macOS assessment must pass; there is no unsigned
+fallback. The release archive also receives a GitHub artifact attestation.
+The signed update and two-version replacement path still need a real release
+and clean-Mac test before being described as proven.
 
 ## Development checks
 

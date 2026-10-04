@@ -61,19 +61,26 @@ jobs:
           assert tag == 'v' + version
           assert version == APP_VERSION
           PY
+      - name: Install 1Password CLI
+        uses: 1password/install-cli-action@v4
       - name: Build, sign, notarize and package
         env:
-          SMR_CERT_P12_BASE64: ${{ secrets.SMR_CERT_P12_BASE64 }}
-          SMR_CERT_PASSWORD: ${{ secrets.SMR_CERT_PASSWORD }}
-          SMR_APPLE_TEAM_ID: ${{ secrets.SMR_APPLE_TEAM_ID }}
-          SMR_NOTARY_KEY_P8_BASE64: ${{ secrets.SMR_NOTARY_KEY_P8_BASE64 }}
-          SMR_NOTARY_KEY_ID: ${{ secrets.SMR_NOTARY_KEY_ID }}
-          SMR_NOTARY_ISSUER_ID: ${{ secrets.SMR_NOTARY_ISSUER_ID }}
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          SMR_CERT_P12_REF: ${{ vars.SMR_CERT_P12_REF }}
+          SMR_CERT_PASSWORD_REF: ${{ vars.SMR_CERT_PASSWORD_REF }}
+          SMR_APPLE_TEAM_ID_REF: ${{ vars.SMR_APPLE_TEAM_ID_REF }}
+          SMR_NOTARY_KEY_P8_REF: ${{ vars.SMR_NOTARY_KEY_P8_REF }}
+          SMR_NOTARY_KEY_ID_REF: ${{ vars.SMR_NOTARY_KEY_ID_REF }}
+          SMR_NOTARY_ISSUER_ID_REF: ${{ vars.SMR_NOTARY_ISSUER_ID_REF }}
         run: |
           set -euo pipefail
-          for required in SMR_CERT_P12_BASE64 SMR_CERT_PASSWORD SMR_APPLE_TEAM_ID SMR_NOTARY_KEY_P8_BASE64 SMR_NOTARY_KEY_ID SMR_NOTARY_ISSUER_ID; do
-            if [[ -z "${!required}" ]]; then
-              echo "Required release signing or notarization secret is not configured: $required" >&2
+          if [[ -z "$OP_SERVICE_ACCOUNT_TOKEN" ]]; then
+            echo "Required 1Password service account token is not configured" >&2
+            exit 1
+          fi
+          for required in SMR_CERT_P12_REF SMR_CERT_PASSWORD_REF SMR_APPLE_TEAM_ID_REF SMR_NOTARY_KEY_P8_REF SMR_NOTARY_KEY_ID_REF SMR_NOTARY_ISSUER_ID_REF; do
+            if [[ "${!required}" != op://* ]]; then
+              echo "Required 1Password secret reference is not configured: $required" >&2
               exit 1
             fi
           done
@@ -82,13 +89,33 @@ jobs:
           keychain_password="$(uuidgen)"
           cleanup() { security delete-keychain "$keychain" >/dev/null 2>&1 || true; rm -rf "$temporary"; }
           trap cleanup EXIT
-          printf %s "$SMR_CERT_P12_BASE64" | /usr/bin/base64 -D > "$temporary/certificate.p12"
-          printf %s "$SMR_NOTARY_KEY_P8_BASE64" | /usr/bin/base64 -D > "$temporary/notary.p8"
+          op read --out-file "$temporary/certificate.p12" "$SMR_CERT_P12_REF"
+          op read --out-file "$temporary/notary.p8" "$SMR_NOTARY_KEY_P8_REF"
+          SMR_CERT_PASSWORD="$(op read --no-newline "$SMR_CERT_PASSWORD_REF")"
+          SMR_APPLE_TEAM_ID="$(op read --no-newline "$SMR_APPLE_TEAM_ID_REF")"
+          SMR_NOTARY_KEY_ID="$(op read --no-newline "$SMR_NOTARY_KEY_ID_REF")"
+          SMR_NOTARY_ISSUER_ID="$(op read --no-newline "$SMR_NOTARY_ISSUER_ID_REF")"
+          unset OP_SERVICE_ACCOUNT_TOKEN
+          for required in SMR_CERT_PASSWORD SMR_APPLE_TEAM_ID SMR_NOTARY_KEY_ID SMR_NOTARY_ISSUER_ID; do
+            if [[ -z "${!required}" ]]; then
+              echo "1Password returned an empty required field: $required" >&2
+              exit 1
+            fi
+            echo "::add-mask::${!required}"
+          done
+          test -s "$temporary/certificate.p12"
+          test -s "$temporary/notary.p8"
           chmod 600 "$temporary/certificate.p12" "$temporary/notary.p8"
+          curl --fail --silent --show-error --location \
+            https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer \
+            --output "$temporary/DeveloperIDG2CA.cer"
+          echo "f16cd3c54c7f83cea4bf1a3e6a0819c8aaa8e4a1528fd144715f350643d2df3a  $temporary/DeveloperIDG2CA.cer" | shasum -a 256 -c -
           security create-keychain -p "$keychain_password" "$keychain"
           security unlock-keychain -p "$keychain_password" "$keychain"
           security set-keychain-settings -lut 21600 "$keychain"
+          security import "$temporary/DeveloperIDG2CA.cer" -k "$keychain"
           security import "$temporary/certificate.p12" -k "$keychain" -P "$SMR_CERT_PASSWORD" -T /usr/bin/codesign
+          unset SMR_CERT_PASSWORD
           security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
           security list-keychains -d user -s "$keychain"
           identity="$(security find-identity -v -p codesigning "$keychain" | awk '/Developer ID Application:/ {print $2; exit}')"
