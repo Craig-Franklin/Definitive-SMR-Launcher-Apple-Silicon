@@ -23,7 +23,31 @@ The Mac app does not ship the commercial game or add personal maps and saves
 to the repository. Inherited upstream files retain their own provenance; the
 Mac app uses archives supplied by each user.
 
-## Build and run on an Apple Silicon Mac
+## Install the Mac app
+
+1. Install **Sid Meier's Railroads!** from Steam on an Apple Silicon Mac, using
+   Steam's default public branch. The game runs through Rosetta; accept macOS's
+   Rosetta installation prompt if needed.
+2. Open this fork's [latest Mac release](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/releases/latest)
+   and download `Definitive-SMR-Launcher-Apple-Silicon-vX.Y.Z-arm64.zip` from
+   **Assets**. The source-code ZIP is for development.
+3. Unzip the download and move **Definitive SMR Launcher Apple Silicon.app** to
+   your user Applications folder (`~/Applications`). In Finder, choose
+   **Go → Home** and create an **Applications** folder there if needed. This
+   location lets the updater replace the app without administrator access.
+4. Open the app and accept the normal macOS confirmation for a downloaded app.
+   Published apps must pass Developer ID signing and Apple notarization. If
+   macOS rejects the signature or reports damage, download again from the exact
+   fork and report the error; do not disable Gatekeeper.
+5. Follow the first-run steps below. The download includes the launcher's Python
+   and Tk runtime; Homebrew and a separate Python installation are only needed
+   when building from source.
+
+Each successful push to `main` publishes a new signed, notarized app after
+tests and release checks pass. A push containing multiple commits releases its
+head commit. Failed checks leave the last working release available.
+
+## Build from source
 
 1. Install **Sid Meier’s Railroads!** from Steam on its default public branch.
    Launch the stock Mac game once. Play a stock scenario, make a manual save,
@@ -46,8 +70,15 @@ Mac app uses archives supplied by each user.
 
 The script creates a local `.venv` and a `dist/` app bundle; both are ignored
 by Git. It checks the arm64 executable and local ad hoc code signature. This
-development build is not notarized. A downloadable signed release will need
-separate release validation.
+development build is not notarized. Use the published release for automatic
+updates.
+
+## First run and maps
+
+Before **Set Up Clean Game**, play a stock scenario in Steam, make a manual
+save, quit, reopen, and load it. Quit Railroads again before launcher setup.
+For an existing launcher library, use it as-is; do not repeat clean-game setup
+or remove maps or saves to install an app update.
 
 If Steam stores the game on another drive and the launcher cannot find it, use
 **File → Choose Steam Library Folder…** and choose that drive's `steamapps`
@@ -99,10 +130,24 @@ user can write, such as `~/Applications`. A source-built or ad hoc signed app
 does not automatically replace itself. If an update is staged while another
 launcher operation is active, it waits for a later idle quit.
 
-The personal fork's `.github/workflows/macos-app.yml` runs synthetic tests
-and builds an arm64 development app on main and pull requests. A `vX.Y.Z` tag
-at the current `main` commit can publish a release after its signing and
-notarization credentials are available from 1Password. Put the Developer ID
+The personal fork's `.github/workflows/macos-app.yml` runs synthetic tests on
+main and pull requests. Pull requests also build an ad hoc development app.
+Each successful main push builds and publishes a signed release automatically;
+no manual version commit or tag push is needed. Release jobs queue rather than
+cancel one another (up to GitHub's 100 pending-job limit). The source version
+declares the release series with patch zero, such as `0.3.0`; CI stamps the
+workflow run number as the patch, such as `0.3.6`, in both the runtime and bundle.
+Gaps in patch numbers are normal. Keep this workflow's identity stable so its
+run counter stays monotonic, and raise the source major/minor for a new series.
+Tags point to the exact triggering, GitHub-Verified source commit. CI version
+stamping does not create bot commits. The release notes link its source and run.
+
+Uploads are checked in a draft before publication. Rerunning an already
+published build verifies and preserves its existing artifacts; a delayed older
+build cannot replace a higher version as the latest update. The app's optional
+automatic update setting consumes this fork's latest stable release.
+
+Signing and notarization credentials come from 1Password. Put the Developer ID
 Application `.p12` attachment, its export password in a concealed field, the
 Apple team ID, and a **team** App Store Connect API `.p8` attachment with its
 key and issuer IDs in a dedicated 1Password release vault. A 1Password service

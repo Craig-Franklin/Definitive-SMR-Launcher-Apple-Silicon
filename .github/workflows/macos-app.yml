@@ -3,7 +3,6 @@ name: Mac app
 on:
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
     branches: [main]
 
@@ -15,56 +14,52 @@ jobs:
     if: github.repository == 'Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon'
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install arm64 build dependencies
         run: brew install python@3.12 python-tk@3.12
       - name: Run synthetic tests
         run: /opt/homebrew/bin/python3.12 -m unittest discover -s tests -v
       - name: Build development app
-        if: github.ref_type != 'tag'
+        if: github.event_name == 'pull_request'
         run: ./scripts/build_macos.sh
       - name: Verify development app
-        if: github.ref_type != 'tag'
+        if: github.event_name == 'pull_request'
         run: |
           app="dist/Definitive SMR Launcher Apple Silicon.app"
           codesign --verify --deep --strict "$app"
           test "$(lipo -archs "$app/Contents/MacOS/Definitive SMR Launcher Apple Silicon")" = arm64
 
   release:
-    if: github.repository == 'Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon' && github.ref_type == 'tag'
+    if: github.repository == 'Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon' && github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: macos-15
+    concurrency:
+      group: macos-stable-release
+      cancel-in-progress: false
+      queue: max
     permissions:
       contents: write
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Install arm64 build dependencies
         run: brew install python@3.12 python-tk@3.12
-      - name: Check exact repository, branch and version
+      - name: Prepare exact source release and unique version
+        id: release
         env:
-          SMR_TAG: ${{ github.ref_name }}
-        run: |
-          test "$GITHUB_REPOSITORY" = Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon
-          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
-          /opt/homebrew/bin/python3.12 - "$SMR_TAG" <<'PY'
-          import pathlib, re, sys
-          import tomllib
-          tag = sys.argv[1]
-          version = tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version']
-          sys.path.insert(0, 'src')
-          from smr_launcher import APP_VERSION
-          assert re.fullmatch(r'v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)', tag)
-          assert tag == 'v' + version
-          assert version == APP_VERSION
-          PY
+          GH_TOKEN: ${{ github.token }}
+        run: /opt/homebrew/bin/python3.12 scripts/release_macos.py prepare
       - name: Install 1Password CLI
+        if: steps.release.outputs.published != 'true'
         uses: 1password/install-cli-action@v4
       - name: Build, sign, notarize and package
+        if: steps.release.outputs.published != 'true'
         env:
+          SMR_TAG: ${{ steps.release.outputs.tag }}
+          SMR_VERSION: ${{ steps.release.outputs.version }}
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
           SMR_CERT_P12_REF: ${{ vars.SMR_CERT_P12_REF }}
           SMR_CERT_PASSWORD_REF: ${{ vars.SMR_CERT_PASSWORD_REF }}
@@ -125,6 +120,7 @@ jobs:
           ./scripts/build_macos.sh
           app="dist/Definitive SMR Launcher Apple Silicon.app"
           codesign --verify --deep --strict "$app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$SMR_VERSION"
           codesign -dv --verbose=4 "$app" 2>&1 | grep -Fx "TeamIdentifier=$SMR_APPLE_TEAM_ID"
           test "$(lipo -archs "$app/Contents/MacOS/Definitive SMR Launcher Apple Silicon")" = arm64
           /usr/bin/ditto -c -k --norsrc --keepParent "$app" "$temporary/notary.zip"
@@ -132,20 +128,17 @@ jobs:
           xcrun stapler staple "$app"
           xcrun stapler validate "$app"
           spctl --assess --type execute --verbose "$app"
-          asset="Definitive-SMR-Launcher-Apple-Silicon-${GITHUB_REF_NAME}-arm64.zip"
+          asset="Definitive-SMR-Launcher-Apple-Silicon-${SMR_TAG}-arm64.zip"
           /usr/bin/ditto -c -k --norsrc --keepParent "$app" "$asset"
           shasum -a 256 "$asset" > "$asset.sha256"
       - name: Attest exact release archive
+        if: steps.release.outputs.published != 'true'
         uses: actions/attest@v4
         with:
           subject-path: Definitive-SMR-Launcher-Apple-Silicon-*.zip
       - name: Publish personal-fork release
+        if: steps.release.outputs.published != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          test "$GITHUB_REPOSITORY" = Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon
-          gh release create "$GITHUB_REF_NAME" \
-            Definitive-SMR-Launcher-Apple-Silicon-*.zip \
-            Definitive-SMR-Launcher-Apple-Silicon-*.zip.sha256 \
-            --repo Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon \
-            --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
+          SMR_TAG: ${{ steps.release.outputs.tag }}
+        run: /opt/homebrew/bin/python3.12 scripts/release_macos.py publish
