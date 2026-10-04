@@ -14,8 +14,9 @@ switches complete profiles with an interruption recovery journal. It can also
 browse the Internet Archive collection, download archives in parallel, and
 verify them before private import. The app is **still in development**:
 San Francisco passed a short user gameplay/manual-save/reload check on the
-tested Steam build, while Arizona, Africa Diamonds, and Alternate Balkans
-still need gameplay checks. No extended campaign result or tested downloadable
+tested Steam build. Alternate Balkans crashed during initial track/train play;
+its cause is unresolved. Arizona and Africa Diamonds still need gameplay checks.
+No extended campaign result or tested downloadable
 release is claimed. Map tiles without a recorded gameplay check remain “Not
 verified.”
 

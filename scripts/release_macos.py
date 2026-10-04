@@ -34,6 +34,11 @@ def output(*args: str) -> str:
     return subprocess.check_output(args, text=True).strip()
 
 
+def validate_origin(url: str) -> None:
+    if url not in (f"https://github.com/{REPO}", f"https://github.com/{REPO}.git"):
+        raise RuntimeError("Unexpected CI checkout origin")
+
+
 def api(path: str, *, optional: bool = False):
     result = subprocess.run(["gh", "api", f"repos/{REPO}/{path}".rstrip("/")],
                             capture_output=True, text=True)
@@ -50,12 +55,10 @@ def guard() -> str:
             or os.environ.get("GITHUB_EVENT_NAME") != "push"
             or os.environ.get("GITHUB_REF") != "refs/heads/main"):
         raise RuntimeError("Releases require a main push in the personal fork")
-    expected_url = f"https://github.com/{REPO}.git"
     if output("git", "remote") != "origin":
         raise RuntimeError("Unexpected CI checkout remotes")
     for flags in ((), ("--push",)):
-        if output("git", "remote", "get-url", *flags, "origin") != expected_url:
-            raise RuntimeError("Unexpected CI checkout origin")
+        validate_origin(output("git", "remote", "get-url", *flags, "origin"))
     repo = api("")
     if (repo["id"], repo["full_name"], repo["html_url"],
             repo["owner"]["login"], repo["owner"]["type"], repo["parent"]["id"]) != (

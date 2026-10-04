@@ -18,6 +18,16 @@ def assets(version="0.3.6"):
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_checkout_origin_accepts_only_exact_personal_fork(self):
+        for suffix in ("", ".git"):
+            release.validate_origin("https://github.com/" + release.REPO + suffix)
+        for url in ("https://github.com/ageekhere/Definitive-SMR-Launcher",
+                    "https://github.com/" + release.REPO + "/other",
+                    "https://github.com.example/" + release.REPO,
+                    "https://user:token@github.com/" + release.REPO):
+            with self.subTest(url=url), self.assertRaises(RuntimeError):
+                release.validate_origin(url)
+
     def test_run_version_is_stable_and_monotonic(self):
         self.assertEqual(release.release_version("0.3.0", "6"), "0.3.6")
         self.assertEqual(release.release_version("0.3.0", "6"), "0.3.6")
