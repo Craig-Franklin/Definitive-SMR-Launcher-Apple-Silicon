@@ -125,6 +125,18 @@ class ApplicationTests(unittest.TestCase):
         self.assertEqual({item.variant_id for item in records}, {item.variant_id for item in self.application.catalogue()})
         self.assertEqual(len(self.application.catalogue()), 2)
 
+    def test_remote_archive_keeps_its_validated_collection_name(self):
+        self.application.setup()
+        downloaded = self.root / (hashlib.sha1(self.archive.read_bytes()).hexdigest() + ".7z")
+        downloaded.write_bytes(self.archive.read_bytes())
+        record = self.application.import_archive(
+            downloaded, original_filename="Friendly_Example_v1_00.7z",
+        )
+        self.assertEqual(record.name, "Friendly_Example_v1_00")
+        self.assertEqual(self.application.catalogue()[0].name, record.name)
+        with self.assertRaises(ApplicationError):
+            self.application.import_archive(downloaded, original_filename="../unsafe.7z")
+
 
 if __name__ == "__main__":
     unittest.main()

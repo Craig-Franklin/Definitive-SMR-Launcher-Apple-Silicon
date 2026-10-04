@@ -219,11 +219,18 @@ class LauncherApplication:
             stage.unlink(missing_ok=True)
             _fsync_dir(self.originals)
 
-    def import_archive(self, source: Path) -> MapRecord:
+    def import_archive(self, source: Path, *, original_filename: Optional[str] = None) -> MapRecord:
         with self._locked():
             self._stopped()
             self.profiles.recover()
             source = Path(source).expanduser()
+            if original_filename is not None:
+                if (not original_filename.lower().endswith(".7z")
+                        or len(original_filename) > 255
+                        or any(char in original_filename for char in ("/", "\\", ":"))
+                        or any(ord(char) < 32 or ord(char) == 127 for char in original_filename)):
+                    raise ApplicationError("Original archive name is unsafe")
+            display_name = original_filename[:-3] if original_filename is not None else source.stem
             inspection = inspect_package(source)
             existing = next((item for item in self.catalogue()
                              if item.archive_sha256 == inspection.source_sha256
@@ -243,7 +250,7 @@ class LauncherApplication:
             )
             self._prepare_icon(imported, variant.variant_id)
             profile_id = self.profiles.register_variant(variant.variant_id, prepared_path)
-            record = MapRecord(source.stem, inspection.source_sha256, variant.variant_id,
+            record = MapRecord(display_name, inspection.source_sha256, variant.variant_id,
                                profile_id, inspection.scenarios, prepared_name,
                                self.installation.executable_sha256, imported.name)
             records = list(self.catalogue())

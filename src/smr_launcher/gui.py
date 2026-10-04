@@ -12,6 +12,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from .activation import ORIGINAL
 from .application import LauncherApplication, MapRecord
+from .collection import RemoteMap, download_map, fetch_catalogue
 
 
 def _display_name(name: str) -> str:
@@ -29,6 +30,10 @@ class LauncherWindow:
         self.results: Queue[tuple[bool, object, Optional[Callable[[object], None]]]] = Queue()
         self.view = "maps"
         self.selected_profile: Optional[str] = None
+        self.remote_records: tuple[RemoteMap, ...] = ()
+        self.remote_rows: dict[str, RemoteMap] = {}
+        self.selected_remote: Optional[RemoteMap] = None
+        self.collection_loaded = False
         self.search = tk.StringVar()
         self.status = tk.StringVar(value="Checking the Steam Mac game…")
         self.images: dict[str, tk.PhotoImage] = {}
@@ -59,7 +64,7 @@ class LauncherWindow:
         menu = tk.Menu(self.root)
         file_menu = tk.Menu(menu, tearoff=0)
         file_menu.add_command(label="Import Map…", command=self.import_map, accelerator="⌘O")
-        file_menu.add_command(label="Find Steam Library…", command=self.choose_steam_library)
+        file_menu.add_command(label="Choose Steam Library Folder…", command=self.choose_steam_library)
         file_menu.add_separator()
         file_menu.add_command(label="Quit", command=self.root.destroy, accelerator="⌘Q")
         menu.add_cascade(label="File", menu=file_menu)
@@ -85,7 +90,8 @@ class LauncherWindow:
         self.sidebar.pack(side="left", fill="y")
         self.sidebar.pack_propagate(False)
         self.nav_buttons: dict[str, ttk.Button] = {}
-        for key, label in (("maps", "Map Library"), ("original", "Original Game"), ("setup", "Setup")):
+        for key, label in (("maps", "Map Library"), ("collection", "Collection"),
+                           ("original", "Original Game"), ("setup", "Setup")):
             button = ttk.Button(self.sidebar, text=label, command=lambda destination=key: self._show(destination))
             button.pack(fill="x", pady=(0, 7))
             self.nav_buttons[key] = button
@@ -93,7 +99,6 @@ class LauncherWindow:
         ttk.Label(self.sidebar, text="Steam Mac edition", font=("Helvetica Neue", 12, "bold")).pack(anchor="w")
         self.steam_label = ttk.Label(self.sidebar, text="Checking…", wraplength=185, foreground=self.secondary)
         self.steam_label.pack(anchor="w", pady=(5, 12))
-        ttk.Button(self.sidebar, text="Find Steam Library…", command=self.choose_steam_library).pack(fill="x")
 
         ttk.Separator(body, orient="vertical").pack(side="left", fill="y")
         self.content = ttk.Frame(body)
@@ -113,7 +118,9 @@ class LauncherWindow:
         for key, button in self.nav_buttons.items():
             button.state(["disabled"] if key == view else ["!disabled"])
         self.steam_label.configure(text="Installed" if self.app else "Game not found")
-        if self.app is None:
+        if view == "collection":
+            self._collection_view()
+        elif self.app is None:
             self._missing_game()
         elif view == "maps":
             self._maps_view()
@@ -128,7 +135,10 @@ class LauncherWindow:
         ttk.Label(frame, text="Steam Mac game required", font=("Helvetica Neue", 21, "bold")).pack(anchor="w")
         ttk.Label(frame, text="Install Sid Meier’s Railroads! from Steam on its default branch and launch it once. If Steam uses another drive, choose that drive’s steamapps folder.",
                   wraplength=550).pack(anchor="w", pady=(12, 18))
-        ttk.Button(frame, text="Find Steam Library…", command=self.choose_steam_library).pack(anchor="w")
+        ttk.Button(frame, text="Choose Steam Library Folder…",
+                   command=self.choose_steam_library).pack(anchor="w")
+        ttk.Label(frame, text="Choose a steamapps folder, not Steam.app.",
+                  foreground=self.secondary).pack(anchor="w", pady=(8, 0))
 
     def _maps_view(self) -> None:
         records = self._records()
@@ -177,6 +187,100 @@ class LauncherWindow:
     def _search_changed(self) -> None:
         if self.view == "maps" and self.app is not None and hasattr(self, "grid_frame"):
             self._render_gallery()
+        elif self.view == "collection" and hasattr(self, "collection_list"):
+            self._collection_rows()
+
+    def _collection_view(self) -> None:
+        top = ttk.Frame(self.content, padding=(24, 20, 24, 12))
+        top.pack(fill="x")
+        ttk.Label(top, text="Collection", font=("Helvetica Neue", 21, "bold")).pack(side="left")
+        count = f"{len(self.remote_records)} maps online" if self.collection_loaded else "Internet Archive"
+        ttk.Label(top, text=count, foreground=self.secondary).pack(side="left", padx=(12, 0))
+        self.download_button = ttk.Button(top, text="Download & Import", command=self._download_selected)
+        self.download_button.pack(side="right")
+        ttk.Button(top, text="Refresh", command=self._refresh_collection).pack(side="right", padx=(0, 8))
+        note = ("Browse the community collection. Downloaded archives are verified and kept "
+                "in your private library. Gameplay remains unverified until tested.")
+        ttk.Label(self.content, text=note, padding=(24, 0, 24, 12),
+                  foreground=self.secondary, wraplength=680).pack(fill="x")
+        self.collection_detail = tk.StringVar(value="Choose a map to see its archive identity.")
+        ttk.Label(self.content, textvariable=self.collection_detail, padding=(24, 0, 24, 12),
+                  foreground=self.secondary, wraplength=680).pack(fill="x")
+        frame = ttk.Frame(self.content, padding=(24, 0, 24, 20))
+        frame.pack(fill="both", expand=True)
+        self.collection_list = ttk.Treeview(frame, columns=("map", "size"), show="headings", selectmode="browse")
+        self.collection_list.heading("map", text="Map")
+        self.collection_list.heading("size", text="Archive size")
+        self.collection_list.column("map", width=520, stretch=True)
+        self.collection_list.column("size", width=110, stretch=False, anchor="e")
+        bar = ttk.Scrollbar(frame, orient="vertical", command=self.collection_list.yview)
+        self.collection_list.configure(yscrollcommand=bar.set)
+        bar.pack(side="right", fill="y")
+        self.collection_list.pack(side="left", fill="both", expand=True)
+        self.collection_list.bind("<<TreeviewSelect>>", self._collection_selected)
+        self._collection_rows()
+        self._controls()
+        if not self.collection_loaded and not self.busy:
+            self._refresh_collection()
+
+    def _collection_rows(self) -> None:
+        if not hasattr(self, "collection_list") or not self.collection_list.winfo_exists():
+            return
+        for child in self.collection_list.get_children():
+            self.collection_list.delete(child)
+        self.remote_rows.clear()
+        query = self.search.get().strip().casefold()
+        for index, item in enumerate(self.remote_records):
+            if query not in item.name.casefold():
+                continue
+            key = str(index)
+            self.remote_rows[key] = item
+            size = f"{item.size / (1024 * 1024):.1f} MB"
+            self.collection_list.insert("", "end", iid=key,
+                                        values=(_display_name(item.name[:-3]), size))
+        if self.selected_remote:
+            key = next((key for key, item in self.remote_rows.items()
+                        if item == self.selected_remote), None)
+            if key is not None:
+                self.collection_list.selection_set(key)
+            else:
+                self.selected_remote = None
+                self.collection_detail.set("Choose a map to see its archive identity.")
+        self._controls()
+
+    def _collection_selected(self, _event: tk.Event) -> None:
+        selection = self.collection_list.selection()
+        self.selected_remote = self.remote_rows.get(selection[0]) if selection else None
+        if self.selected_remote is None:
+            self.collection_detail.set("Choose a map to see its archive identity.")
+        else:
+            self.collection_detail.set(
+                f"{_display_name(self.selected_remote.name[:-3])}  ·  "
+                f"archive SHA-1 {self.selected_remote.sha1[:12]}  ·  Not verified"
+            )
+        self._controls()
+
+    def _refresh_collection(self) -> None:
+        self._submit("Loading the Internet Archive map collection…",
+                     fetch_catalogue, self._collection_loaded)
+
+    def _collection_loaded(self, result: object) -> None:
+        assert isinstance(result, tuple)
+        self.remote_records = result
+        self.collection_loaded = True
+        if self.view == "collection":
+            self.status.set(f"{len(self.remote_records)} maps available in the collection.")
+            self._show("collection")
+
+    def _download_selected(self) -> None:
+        if self.app is None or self.selected_remote is None:
+            return
+        record = self.selected_remote
+        self._submit("Downloading and checking " + record.name + "…",
+                     lambda: self.app.import_archive(
+                         download_map(record, self.app.library / "downloads"),
+                         original_filename=record.name),
+                     self._imported)
 
     def _resize_gallery(self, event: tk.Event) -> None:
         self.canvas.itemconfigure(self.canvas_window, width=event.width)
@@ -299,6 +403,9 @@ class LauncherWindow:
             self.original_button.configure(state="normal" if enrolled and not self.busy else "disabled")
         if hasattr(self, "setup_button") and self.setup_button.winfo_exists():
             self.setup_button.configure(state="normal" if not self.busy else "disabled")
+        if hasattr(self, "download_button") and self.download_button.winfo_exists():
+            ready = enrolled and self.selected_remote is not None and not self.busy
+            self.download_button.configure(state="normal" if ready else "disabled")
 
     def _submit(self, label: str, operation: Callable[[], object], finished: Optional[Callable[[object], None]] = None) -> None:
         if self.busy:
@@ -332,7 +439,7 @@ class LauncherWindow:
         self.root.after(100, self._poll)
 
     def choose_steam_library(self) -> None:
-        location = filedialog.askdirectory(parent=self.root, title="Choose the Steam steamapps folder")
+        location = filedialog.askdirectory(parent=self.root, title="Choose the steamapps folder, not Steam.app")
         if location:
             self._submit("Checking the selected Steam library…",
                          lambda: LauncherApplication.choose_steam_library(Path(location)), self._library_chosen)
