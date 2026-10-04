@@ -60,11 +60,25 @@ def _publish_exclusive(source: Path, destination: Path) -> None:
     function = ctypes.CDLL(None, use_errno=True).renamex_np
     function.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
     function.restype = ctypes.c_int
-    if function(os.fsencode(source), os.fsencode(destination), 0x00000004):
-        error = ctypes.get_errno()
-        if error == errno.EEXIST:
-            raise PackageError("Prepared destination already exists")
-        raise OSError(error, os.strerror(error), str(source), str(destination))
+    # The macOS 15 CI runner returned EACCES for a frozen mode-0500 directory.
+    # Keep its contents frozen and give only the source root temporary owner
+    # write permission. The open descriptor restores the exact same inode even
+    # after its name changes; the destination is never reopened to chmod it.
+    fd = os.open(source, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0))
+    original_mode = stat.S_IMODE(os.fstat(fd).st_mode)
+    try:
+        os.fchmod(fd, original_mode | stat.S_IWUSR)
+        if function(os.fsencode(source), os.fsencode(destination), 0x00000004):
+            error = ctypes.get_errno()
+            if error == errno.EEXIST:
+                raise PackageError("Prepared destination already exists")
+            raise OSError(error, os.strerror(error), str(source), str(destination))
+    finally:
+        try:
+            os.fchmod(fd, original_mode)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
     _fsync_directory(destination.parent)
 
 
