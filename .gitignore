@@ -1,0 +1,36 @@
+# Local project handoff and machine-specific evidence
+.handoff
+.handoff/
+.local/
+private/
+local-data/
+diagnostics/
+
+# Commercial game content, custom-map payloads, and saves
+*.pvm/
+*.hdd/
+*.7z
+*.zip
+*.exe
+*.dll
+*.FPK
+*.fpk
+*.tga
+*.dds
+*.sav
+*.save
+*.diag
+*.ips
+*.crash
+*.dmp
+
+# Local builds and credentials
+*.app/
+build/
+dist/
+.venv/
+__pycache__/
+.pytest_cache/
+.DS_Store
+.env
+.env.*
