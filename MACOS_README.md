@@ -11,12 +11,13 @@ An arm64 Mac app can now be built from this checkout. It finds a Steam Mac
 installation, preserves a clean Original Game profile, imports a local map
 archive into an independent private library, shows an image gallery, and
 switches complete profiles with an interruption recovery journal. It can also
-browse the Internet Archive collection and verify a selected download before
-private import. The app is
-**still in development**: it has passed synthetic safety tests and local
-clean-profile enrollment, but custom-map gameplay and save/reload checks are
-pending. There is no tested downloadable release yet. Map tiles marked “Not
-verified” have passed only static checks.
+browse the Internet Archive collection, download archives in parallel, and
+verify them before private import. The app is **still in development**:
+San Francisco passed a short user gameplay/manual-save/reload check on the
+tested Steam build, while Arizona, Africa Diamonds, and Alternate Balkans
+still need gameplay checks. No extended campaign result or tested downloadable
+release is claimed. Map tiles without a recorded gameplay check remain “Not
+verified.”
 
 The Mac app does not ship the commercial game or add personal maps and saves
 to the repository. Inherited upstream files retain their own provenance; the
@@ -64,8 +65,16 @@ external Steam or Finder start can race a profile switch.
 The **Collection** tab loads a searchable list of currently published map
 archives from the Internet Archive. Choose a map and **Download & Import** to
 check its declared length and SHA-1 before the normal package inspection and
-private import. A collection listing is only a download source; it does not
-indicate that the map is compatible with this Mac game build.
+private import. **Download & Import All…** retrieves the full collection with
+up to four parallel downloads, then inspects and imports each verified archive
+one at a time. Progress beside each map name shows download percentage,
+archive verification, import, and whether it was imported or failed. The
+button shows the collection's archive download size before starting, and
+**Cancel Imports** stops remaining work after the current safe operation.
+Imports require additional space for extracted map files and Railroads must be
+closed. Importing all maps does not activate them; choose one from Map Library.
+A collection listing or verified download does not establish compatibility
+with this Mac game build.
 
 The private map library is under
 `~/Library/Application Support/Definitive SMR Launcher Apple Silicon/`. It
@@ -74,6 +83,44 @@ saves. Do not edit its frozen original copies or the preservation backup. The
 app keeps future saves with the selected profile. If a switch is interrupted,
 quit Railroads and reopen the launcher to recover the journal before starting
 another game.
+
+## App updates and public releases
+
+The **Setup → App Updates** section has **Check for Updates** and an optional
+**Automatically install verified updates when I quit the launcher** setting.
+The setting is off by default. A new stable release is accepted only from this
+personal fork, at a higher version, with the expected release archive name,
+size, and GitHub SHA-256. Before an automatic replacement, the app also checks
+the Apple Developer ID publisher, exact bundle identity/version, arm64
+executable, and macOS acceptance of its notarization. The previous `.app` remains as a sibling
+backup. Maps, profiles, and saves remain in the separate private library.
+Automatic installation requires a Developer ID signed release in a folder the
+user can write, such as `~/Applications`. A source-built or ad hoc signed app
+does not automatically replace itself. If an update is staged while another
+launcher operation is active, it waits for a later idle quit.
+
+The personal fork's `.github/workflows/macos-app.yml` runs synthetic tests
+and builds an arm64 development app on main and pull requests. A `vX.Y.Z` tag
+at the current `main` commit can publish a release only after all six Actions
+secrets below are configured and signing, notarization, stapling, and macOS
+assessment pass:
+
+| Secret | Purpose |
+| --- | --- |
+| `SMR_CERT_P12_BASE64` | Base64 Developer ID Application certificate and private key export |
+| `SMR_CERT_PASSWORD` | Export password for that `.p12` |
+| `SMR_APPLE_TEAM_ID` | Ten-character Apple Developer team ID |
+| `SMR_NOTARY_KEY_P8_BASE64` | Base64 App Store Connect API private key for notarization |
+| `SMR_NOTARY_KEY_ID` | Notarization API key ID |
+| `SMR_NOTARY_ISSUER_ID` | Notarization API issuer ID |
+
+Add these as secrets only in
+`Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon`; never commit their
+values. The workflow leaves the keychain on an ephemeral runner and removes it
+after packaging. It does not publish an unsigned fallback. The release archive
+also receives a GitHub artifact attestation. The signed update and two-version
+replacement path still need a real release and clean-Mac test before being
+described as proven.
 
 ## Development checks
 

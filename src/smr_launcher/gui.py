@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from queue import Empty, Queue
-from threading import Thread
+from threading import Event, Thread
 from typing import Callable, Optional
 import math
 import re
@@ -12,7 +12,12 @@ from tkinter import filedialog, messagebox, ttk
 
 from .activation import ORIGINAL
 from .application import LauncherApplication, MapRecord
-from .collection import RemoteMap, download_map, fetch_catalogue
+from .collection import RemoteMap, download_all_maps, download_map, fetch_catalogue
+from . import APP_VERSION
+from .updates import (Release, UpdatePreferences, current_app_bundle, download_release,
+                      fetch_latest_release, pending_install, pending_install_manual,
+                      prepare_install, stage_release,
+                      start_install_helper, trusted_team_from_bundle)
 
 
 def _display_name(name: str) -> str:
@@ -28,12 +33,31 @@ class LauncherWindow:
         self.app: Optional[LauncherApplication] = None
         self.busy = False
         self.results: Queue[tuple[bool, object, Optional[Callable[[object], None]]]] = Queue()
+        self.download_events: Queue[tuple[RemoteMap, str, int, int, str]] = Queue()
+        self.download_states: dict[str, tuple[str, int, int, str]] = {}
+        self.bulk_cancel = Event()
+        self.bulk_active = False
+        self.close_when_idle = False
         self.view = "maps"
         self.selected_profile: Optional[str] = None
         self.remote_records: tuple[RemoteMap, ...] = ()
         self.remote_rows: dict[str, RemoteMap] = {}
         self.selected_remote: Optional[RemoteMap] = None
         self.collection_loaded = False
+        self.update_library = Path.home() / "Library/Application Support/Definitive SMR Launcher Apple Silicon"
+        self.update_preferences = UpdatePreferences(self.update_library)
+        try:
+            automatic = self.update_preferences.automatic()
+            initial_update_status = "No update check yet."
+        except Exception as exc:
+            automatic = False
+            initial_update_status = "Update settings need inspection: " + str(exc)
+        self.auto_updates = tk.BooleanVar(value=automatic)
+        self.update_status = tk.StringVar(value=initial_update_status)
+        self.available_update: Optional[Release] = None
+        self.pending_update: Optional[Path] = None
+        self.pending_update_manual = False
+        self.update_request_manual = False
         self.search = tk.StringVar()
         self.status = tk.StringVar(value="Checking the Steam Mac game…")
         self.images: dict[str, tk.PhotoImage] = {}
@@ -57,8 +81,23 @@ class LauncherWindow:
                 self.status.set("Steam Mac game found. Play and reload a stock save before first setup.")
         except Exception as exc:
             self.status.set("Steam Mac game unavailable: " + str(exc))
+        try:
+            if trusted_team_from_bundle():
+                self.pending_update = pending_install(self.update_library, current_app_bundle(), APP_VERSION)
+                if self.pending_update:
+                    self.pending_update_manual = pending_install_manual(self.pending_update)
+                    if self.pending_update_manual or automatic:
+                        self.update_status.set("A staged update is ready; it will be rechecked when you quit to install it.")
+                    else:
+                        self.update_status.set("A staged update is ready. Automatic installation is off.")
+        except Exception as exc:
+            self.update_status.set("Pending update needs inspection: " + str(exc))
         self._show("maps")
         self.root.after(100, self._poll)
+        self.root.protocol("WM_DELETE_WINDOW", self._close)
+        self.root.createcommand("::tk::mac::Quit", self._close)
+        if automatic and self.pending_update is None:
+            self.root.after(1500, self.check_for_updates)
 
     def _menu(self) -> None:
         menu = tk.Menu(self.root)
@@ -66,12 +105,34 @@ class LauncherWindow:
         file_menu.add_command(label="Import Map…", command=self.import_map, accelerator="⌘O")
         file_menu.add_command(label="Choose Steam Library Folder…", command=self.choose_steam_library)
         file_menu.add_separator()
-        file_menu.add_command(label="Quit", command=self.root.destroy, accelerator="⌘Q")
+        file_menu.add_command(label="Quit", command=self._close, accelerator="⌘Q")
         menu.add_cascade(label="File", menu=file_menu)
         self.root.configure(menu=menu)
         self.root.bind("<Command-o>", lambda _: self.import_map())
         self.root.bind("<Command-f>", lambda _: self.search_entry.focus_set())
-        self.root.bind("<Command-q>", lambda _: self.root.destroy())
+        self.root.bind("<Command-q>", lambda _: self._close())
+
+    def _close(self) -> None:
+        if self.busy or self.bulk_active:
+            self.close_when_idle = True
+            if self.bulk_active:
+                self.bulk_cancel.set()
+            self.status.set("Finishing the current safe operation before closing…")
+            self._controls()
+            return
+        if self.pending_update is not None and (self.pending_update_manual or self.auto_updates.get()):
+            try:
+                start_install_helper(self.pending_update, self.update_library)
+            except Exception as exc:
+                self.close_when_idle = False
+                if not messagebox.askyesno(
+                    "Update not installed",
+                    f"The update could not start: {exc}\n\nQuit without installing it? "
+                    "The staged update will remain available for inspection or retry.",
+                    parent=self.root,
+                ):
+                    return
+        self.root.destroy()
 
     def _layout(self) -> None:
         header = ttk.Frame(self.root, padding=(22, 14, 22, 12))
@@ -120,6 +181,8 @@ class LauncherWindow:
         self.steam_label.configure(text="Installed" if self.app else "Game not found")
         if view == "collection":
             self._collection_view()
+        elif view == "setup":
+            self._setup_view()
         elif self.app is None:
             self._missing_game()
         elif view == "maps":
@@ -198,9 +261,11 @@ class LauncherWindow:
         ttk.Label(top, text=count, foreground=self.secondary).pack(side="left", padx=(12, 0))
         self.download_button = ttk.Button(top, text="Download & Import", command=self._download_selected)
         self.download_button.pack(side="right")
+        self.bulk_button = ttk.Button(top, text="Download & Import All…", command=self._download_all)
+        self.bulk_button.pack(side="right", padx=(0, 8))
         ttk.Button(top, text="Refresh", command=self._refresh_collection).pack(side="right", padx=(0, 8))
-        note = ("Browse the community collection. Downloaded archives are verified and kept "
-                "in your private library. Gameplay remains unverified until tested.")
+        note = ("Download & Import All verifies archives in parallel, then prepares each map "
+                "in your private library. Maps are never activated together. Gameplay still needs testing.")
         ttk.Label(self.content, text=note, padding=(24, 0, 24, 12),
                   foreground=self.secondary, wraplength=680).pack(fill="x")
         self.collection_detail = tk.StringVar(value="Choose a map to see its archive identity.")
@@ -208,10 +273,12 @@ class LauncherWindow:
                   foreground=self.secondary, wraplength=680).pack(fill="x")
         frame = ttk.Frame(self.content, padding=(24, 0, 24, 20))
         frame.pack(fill="both", expand=True)
-        self.collection_list = ttk.Treeview(frame, columns=("map", "size"), show="headings", selectmode="browse")
+        self.collection_list = ttk.Treeview(frame, columns=("map", "progress", "size"), show="headings", selectmode="browse")
         self.collection_list.heading("map", text="Map")
+        self.collection_list.heading("progress", text="Download progress")
         self.collection_list.heading("size", text="Archive size")
-        self.collection_list.column("map", width=520, stretch=True)
+        self.collection_list.column("map", width=440, stretch=True)
+        self.collection_list.column("progress", width=145, stretch=False, anchor="w")
         self.collection_list.column("size", width=110, stretch=False, anchor="e")
         bar = ttk.Scrollbar(frame, orient="vertical", command=self.collection_list.yview)
         self.collection_list.configure(yscrollcommand=bar.set)
@@ -237,7 +304,8 @@ class LauncherWindow:
             self.remote_rows[key] = item
             size = f"{item.size / (1024 * 1024):.1f} MB"
             self.collection_list.insert("", "end", iid=key,
-                                        values=(_display_name(item.name[:-3]), size))
+                                        values=(_display_name(item.name[:-3]),
+                                                self._download_label(item.name), size))
         if self.selected_remote:
             key = next((key for key, item in self.remote_rows.items()
                         if item == self.selected_remote), None)
@@ -254,11 +322,38 @@ class LauncherWindow:
         if self.selected_remote is None:
             self.collection_detail.set("Choose a map to see its archive identity.")
         else:
+            state = self.download_states.get(self.selected_remote.name)
+            detail = f"  ·  {state[3]}" if state and state[3] else ""
             self.collection_detail.set(
                 f"{_display_name(self.selected_remote.name[:-3])}  ·  "
-                f"archive SHA-1 {self.selected_remote.sha1[:12]}  ·  Not verified"
+                f"archive SHA-1 {self.selected_remote.sha1[:12]}  ·  "
+                f"{self._download_label(self.selected_remote.name)}{detail}"
             )
         self._controls()
+
+    def _download_label(self, name: str) -> str:
+        state, count, total, _ = self.download_states.get(name, ("Ready", 0, 0, ""))
+        if state == "Downloading" and total:
+            return f"Downloading {min(100, count * 100 // total)}%"
+        return state
+
+    def _download_event(self, record: RemoteMap, state: str, count: int,
+                        total: int, detail: str) -> None:
+        self.download_events.put((record, state, count, total, detail))
+
+    def _update_download_rows(self) -> None:
+        try:
+            while True:
+                record, state, count, total, detail = self.download_events.get_nowait()
+                self.download_states[record.name] = (state, count, total, detail)
+                if self.view == "collection" and hasattr(self, "collection_list") and self.collection_list.winfo_exists():
+                    key = next((key for key, item in self.remote_rows.items() if item.name == record.name), None)
+                    if key is not None:
+                        self.collection_list.set(key, "progress", self._download_label(record.name))
+                    if self.selected_remote == record:
+                        self._collection_selected(None)
+        except Empty:
+            pass
 
     def _refresh_collection(self) -> None:
         self._submit("Loading the Internet Archive map collection…",
@@ -276,11 +371,62 @@ class LauncherWindow:
         if self.app is None or self.selected_remote is None:
             return
         record = self.selected_remote
-        self._submit("Downloading and checking " + record.name + "…",
-                     lambda: self.app.import_archive(
-                         download_map(record, self.app.library / "downloads"),
-                         original_filename=record.name),
-                     self._imported)
+        def operation() -> MapRecord:
+            try:
+                path = download_map(record, self.app.library / "downloads",
+                                    progress=lambda count, total: self._download_event(
+                                        record, "Downloading", count, total, ""))
+                self._download_event(record, "Archive verified", record.size, record.size, "")
+                result = self.app.import_archive(path, original_filename=record.name)
+                self._download_event(record, "Imported", record.size, record.size, "")
+                return result
+            except Exception as exc:
+                self._download_event(record, "Failed", 0, record.size, str(exc))
+                raise
+        self._submit("Downloading and checking " + record.name + "…", operation, self._imported)
+
+    def _download_all(self) -> None:
+        if self.bulk_active:
+            self.bulk_cancel.set()
+            self.status.set("Stopping downloads after the current network reads…")
+            self._controls()
+            return
+        if self.app is None or self.busy or not self.collection_loaded or not self.remote_records:
+            return
+        try:
+            self.app._stopped()
+        except Exception as exc:
+            self.status.set("Quit Railroads before importing the collection: " + str(exc))
+            return
+        total = sum(record.size for record in self.remote_records)
+        if not messagebox.askyesno(
+            "Download and import all maps",
+            f"Download all {len(self.remote_records)} map archives (up to {total / (1024 ** 3):.2f} GiB) "
+            "and import them into your private library? Four downloads can run at once; imports are checked "
+            "one at a time. This also needs space for extracted map files. Maps will not be activated.",
+            parent=self.root,
+        ):
+            return
+        self.bulk_cancel.clear()
+        self.bulk_active = True
+        for record in self.remote_records:
+            self.download_states[record.name] = ("Queued", 0, record.size, "")
+        self._collection_rows()
+        self._submit(f"Downloading and importing {len(self.remote_records)} maps with four parallel downloads…",
+                     lambda: download_all_maps(self.remote_records, self.app.library / "downloads",
+                                               self._download_event, self.bulk_cancel,
+                                               importer=lambda record, path: self.app.import_archive(
+                                                   path, original_filename=record.name)),
+                     self._download_all_finished)
+
+    def _download_all_finished(self, result: object) -> None:
+        completed, failed, canceled = result
+        self.bulk_active = False
+        self.status.set(f"Bulk import finished: {completed} imported, {failed} failed, {canceled} canceled. "
+                        "Choose a map in Map Library to test it.")
+        if self.view == "maps":
+            self._show("maps")
+        self._controls()
 
     def _resize_gallery(self, event: tk.Event) -> None:
         self.canvas.itemconfigure(self.canvas_window, width=event.width)
@@ -339,7 +485,7 @@ class LauncherWindow:
                              foreground=self.text, font=("Helvetica Neue", 12, "bold"),
                              anchor="nw", justify="left", height=2, wraplength=174)
             label.pack(fill="x", padx=10)
-            state = "Not verified"
+            state = self._verification_text(record)
             badge = tk.Label(card, text=state, background=self.surface, foreground=self.secondary,
                              font=("Helvetica Neue", 10), anchor="w")
             badge.pack(fill="x", padx=10, pady=(2, 0))
@@ -362,8 +508,20 @@ class LauncherWindow:
         if record is None:
             self.detail.set("Choose a map to see its scenario and source details.")
         else:
-            self.detail.set(f"{_display_name(record.name)}  ·  {len(record.scenarios)} scenario file(s)  ·  archive {record.archive_sha256[:12]}  ·  Not verified")
+            self.detail.set(f"{_display_name(record.name)}  ·  {len(record.scenarios)} scenario file(s)  ·  archive {record.archive_sha256[:12]}  ·  {self._verification_text(record, detail=True)}")
         self._controls()
+
+    def _verification_text(self, record: MapRecord, *, detail: bool = False) -> str:
+        if self.app is None:
+            return "Not verified"
+        try:
+            result = self.app.verification_for(record)
+        except Exception as exc:
+            self.status.set("Gameplay record needs inspection: " + str(exc))
+            return "Needs inspection"
+        if result is None:
+            return "Not verified"
+        return result.status + (" · " + result.scope if detail else "")
 
     def _original_view(self) -> None:
         frame = ttk.Frame(self.content, padding=28)
@@ -390,6 +548,89 @@ class LauncherWindow:
             self.setup_button.pack(anchor="w")
         ttk.Label(frame, text="The launcher preserves each source archive and keeps future saves with the selected map.",
                   wraplength=590, foreground=self.secondary).pack(anchor="w", pady=(20, 0))
+        ttk.Separator(frame).pack(fill="x", pady=(24, 18))
+        ttk.Label(frame, text="App Updates", font=("Helvetica Neue", 16, "bold")).pack(anchor="w")
+        ttk.Label(frame, text=f"Installed launcher version {APP_VERSION}. Releases come only from the Craig-Franklin personal fork.",
+                  foreground=self.secondary, wraplength=590).pack(anchor="w", pady=(6, 10))
+        ttk.Checkbutton(frame, text="Automatically install verified updates when I quit the launcher",
+                        variable=self.auto_updates, command=self._save_update_setting).pack(anchor="w")
+        ttk.Label(frame, textvariable=self.update_status, foreground=self.secondary,
+                  wraplength=590).pack(anchor="w", pady=(8, 10))
+        buttons = ttk.Frame(frame)
+        buttons.pack(anchor="w")
+        self.check_update_button = ttk.Button(buttons, text="Check for Updates", command=self.check_for_updates)
+        self.check_update_button.pack(side="left")
+        self.install_update_button = ttk.Button(buttons, text="Download & Install Update…",
+                                                command=self._download_update)
+        self.install_update_button.pack(side="left", padx=(8, 0))
+        self._controls()
+
+    def _save_update_setting(self) -> None:
+        try:
+            self.update_preferences.set_automatic(bool(self.auto_updates.get()))
+        except Exception as exc:
+            self.auto_updates.set(False)
+            self.update_status.set("Could not save update setting: " + str(exc))
+            return
+        if self.auto_updates.get():
+            self.update_status.set("Automatic updates enabled. A verified release installs when you quit.")
+            self.check_for_updates()
+        else:
+            if self.pending_update_manual:
+                self.update_status.set("Automatic updates disabled. Your manually requested update will install when you quit.")
+            elif self.pending_update is not None:
+                self.update_status.set("Automatic updates disabled. The staged update will wait for you to re-enable it.")
+            else:
+                self.update_status.set("Automatic updates disabled. You can still check manually.")
+
+    def check_for_updates(self) -> None:
+        if self.busy or self.pending_update is not None:
+            return
+        self._submit("Checking the personal fork for an app update…",
+                     lambda: fetch_latest_release(APP_VERSION), self._update_checked)
+
+    def _update_checked(self, result: object) -> None:
+        self.available_update = result if isinstance(result, Release) else None
+        if self.available_update is None:
+            self.update_status.set("No newer stable release is available.")
+            self.status.set("Launcher is current; no newer stable release is available.")
+        else:
+            self.update_status.set(f"Version {self.available_update.version} is available from the personal fork.")
+            self.status.set(f"Launcher update {self.available_update.version} is available.")
+            if self.auto_updates.get():
+                self._download_update(manual=False)
+        self._controls()
+
+    def _download_update(self, manual: bool = True) -> None:
+        if self.available_update is None or self.busy or self.pending_update is not None:
+            return
+        self.update_request_manual = manual
+        release = self.available_update
+        team = trusted_team_from_bundle()
+        if not team:
+            self.update_status.set("Automatic installation requires a Developer ID signed launcher release.")
+            return
+
+        def operation() -> Path:
+            installed = current_app_bundle()
+            archive = download_release(release, self.update_library / "updates")
+            staged = stage_release(archive, release, self.update_library, team)
+            return prepare_install(staged, installed, release, self.update_library, team,
+                                   APP_VERSION, manual_install=manual)
+
+        self._submit(f"Downloading and verifying launcher {release.version}…",
+                     operation, self._update_staged)
+
+    def _update_staged(self, result: object) -> None:
+        self.pending_update = Path(result)
+        self.pending_update_manual = self.update_request_manual
+        version = self.available_update.version if self.available_update else "new"
+        if self.pending_update_manual or self.auto_updates.get():
+            self.update_status.set(f"Version {version} is verified and ready. It will install when you quit this launcher.")
+            self.status.set(f"Launcher update {version} ready; quit the launcher to install it.")
+        else:
+            self.update_status.set(f"Version {version} is verified and staged. Automatic installation is off.")
+            self.status.set(f"Launcher update {version} is staged; enable automatic installation to apply it.")
         self._controls()
 
     def _controls(self) -> None:
@@ -406,6 +647,16 @@ class LauncherWindow:
         if hasattr(self, "download_button") and self.download_button.winfo_exists():
             ready = enrolled and self.selected_remote is not None and not self.busy
             self.download_button.configure(state="normal" if ready else "disabled")
+        if hasattr(self, "bulk_button") and self.bulk_button.winfo_exists():
+            ready = ((self.bulk_active and not self.bulk_cancel.is_set())
+                     or (enrolled and self.collection_loaded and not self.busy))
+            self.bulk_button.configure(text="Cancel Imports" if self.bulk_active else "Download & Import All…",
+                                       state="normal" if ready else "disabled")
+        if hasattr(self, "check_update_button") and self.check_update_button.winfo_exists():
+            self.check_update_button.configure(state="normal" if not self.busy else "disabled")
+        if hasattr(self, "install_update_button") and self.install_update_button.winfo_exists():
+            ready = self.available_update is not None and self.pending_update is None and not self.busy
+            self.install_update_button.configure(state="normal" if ready else "disabled")
 
     def _submit(self, label: str, operation: Callable[[], object], finished: Optional[Callable[[object], None]] = None) -> None:
         if self.busy:
@@ -423,6 +674,7 @@ class LauncherWindow:
         Thread(target=worker, daemon=True).start()
 
     def _poll(self) -> None:
+        self._update_download_rows()
         try:
             while True:
                 successful, value, finished = self.results.get_nowait()
@@ -431,11 +683,17 @@ class LauncherWindow:
                     if finished:
                         finished(value)
                 else:
+                    self.bulk_active = False
                     self.status.set("Action stopped: " + str(value))
                     messagebox.showerror("Railroads launcher", str(value), parent=self.root)
                 self._controls()
         except Empty:
             pass
+        if self.close_when_idle and not self.busy and not self.bulk_active:
+            self.close_when_idle = False
+            self._close()
+            if not self.root.winfo_exists():
+                return
         self.root.after(100, self._poll)
 
     def choose_steam_library(self) -> None:

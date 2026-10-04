@@ -1,0 +1,123 @@
+name: Mac app
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.repository == 'Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install arm64 build dependencies
+        run: brew install python@3.12 python-tk@3.12
+      - name: Run synthetic tests
+        run: /opt/homebrew/bin/python3.12 -m unittest discover -s tests -v
+      - name: Build development app
+        if: github.ref_type != 'tag'
+        run: ./scripts/build_macos.sh
+      - name: Verify development app
+        if: github.ref_type != 'tag'
+        run: |
+          app="dist/Definitive SMR Launcher Apple Silicon.app"
+          codesign --verify --deep --strict "$app"
+          test "$(lipo -archs "$app/Contents/MacOS/Definitive SMR Launcher Apple Silicon")" = arm64
+
+  release:
+    if: github.repository == 'Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon' && github.ref_type == 'tag'
+    needs: build
+    runs-on: macos-15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install arm64 build dependencies
+        run: brew install python@3.12 python-tk@3.12
+      - name: Check exact repository, branch and version
+        env:
+          SMR_TAG: ${{ github.ref_name }}
+        run: |
+          test "$GITHUB_REPOSITORY" = Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          /opt/homebrew/bin/python3.12 - "$SMR_TAG" <<'PY'
+          import pathlib, re, sys
+          import tomllib
+          tag = sys.argv[1]
+          version = tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version']
+          sys.path.insert(0, 'src')
+          from smr_launcher import APP_VERSION
+          assert re.fullmatch(r'v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)', tag)
+          assert tag == 'v' + version
+          assert version == APP_VERSION
+          PY
+      - name: Build, sign, notarize and package
+        env:
+          SMR_CERT_P12_BASE64: ${{ secrets.SMR_CERT_P12_BASE64 }}
+          SMR_CERT_PASSWORD: ${{ secrets.SMR_CERT_PASSWORD }}
+          SMR_APPLE_TEAM_ID: ${{ secrets.SMR_APPLE_TEAM_ID }}
+          SMR_NOTARY_KEY_P8_BASE64: ${{ secrets.SMR_NOTARY_KEY_P8_BASE64 }}
+          SMR_NOTARY_KEY_ID: ${{ secrets.SMR_NOTARY_KEY_ID }}
+          SMR_NOTARY_ISSUER_ID: ${{ secrets.SMR_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          for required in SMR_CERT_P12_BASE64 SMR_CERT_PASSWORD SMR_APPLE_TEAM_ID SMR_NOTARY_KEY_P8_BASE64 SMR_NOTARY_KEY_ID SMR_NOTARY_ISSUER_ID; do
+            if [[ -z "${!required}" ]]; then
+              echo "Required release signing or notarization secret is not configured: $required" >&2
+              exit 1
+            fi
+          done
+          temporary="$(mktemp -d)"
+          keychain="$temporary/release.keychain-db"
+          keychain_password="$(uuidgen)"
+          cleanup() { security delete-keychain "$keychain" >/dev/null 2>&1 || true; rm -rf "$temporary"; }
+          trap cleanup EXIT
+          printf %s "$SMR_CERT_P12_BASE64" | /usr/bin/base64 -D > "$temporary/certificate.p12"
+          printf %s "$SMR_NOTARY_KEY_P8_BASE64" | /usr/bin/base64 -D > "$temporary/notary.p8"
+          chmod 600 "$temporary/certificate.p12" "$temporary/notary.p8"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security import "$temporary/certificate.p12" -k "$keychain" -P "$SMR_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain"
+          identity="$(security find-identity -v -p codesigning "$keychain" | awk '/Developer ID Application:/ {print $2; exit}')"
+          test -n "$identity"
+          export SMR_RELEASE_IDENTITY="$identity"
+          ./scripts/build_macos.sh
+          app="dist/Definitive SMR Launcher Apple Silicon.app"
+          codesign --verify --deep --strict "$app"
+          codesign -dv --verbose=4 "$app" 2>&1 | grep -Fx "TeamIdentifier=$SMR_APPLE_TEAM_ID"
+          test "$(lipo -archs "$app/Contents/MacOS/Definitive SMR Launcher Apple Silicon")" = arm64
+          /usr/bin/ditto -c -k --norsrc --keepParent "$app" "$temporary/notary.zip"
+          xcrun notarytool submit "$temporary/notary.zip" --key "$temporary/notary.p8" --key-id "$SMR_NOTARY_KEY_ID" --issuer "$SMR_NOTARY_ISSUER_ID" --wait
+          xcrun stapler staple "$app"
+          xcrun stapler validate "$app"
+          spctl --assess --type execute --verbose "$app"
+          asset="Definitive-SMR-Launcher-Apple-Silicon-${GITHUB_REF_NAME}-arm64.zip"
+          /usr/bin/ditto -c -k --norsrc --keepParent "$app" "$asset"
+          shasum -a 256 "$asset" > "$asset.sha256"
+      - name: Attest exact release archive
+        uses: actions/attest@v4
+        with:
+          subject-path: Definitive-SMR-Launcher-Apple-Silicon-*.zip
+      - name: Publish personal-fork release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$GITHUB_REPOSITORY" = Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon
+          gh release create "$GITHUB_REF_NAME" \
+            Definitive-SMR-Launcher-Apple-Silicon-*.zip \
+            Definitive-SMR-Launcher-Apple-Silicon-*.zip.sha256 \
+            --repo Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon \
+            --verify-tag --title "$GITHUB_REF_NAME" --generate-notes

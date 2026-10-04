@@ -18,6 +18,7 @@ from .extraction import _freeze_tree, _publish_exclusive, _unfreeze_directories,
 from .packages import _digest, inspect_package
 from .steam import SteamInstallation
 from .variants import _tree_manifest, prepare_original_variant
+from .verification import GameplayVerification, VerificationStore
 
 
 class ApplicationError(RuntimeError):
@@ -65,6 +66,7 @@ class LauncherApplication:
         self.prepared = self.library / "prepared"
         self.icons = self.library / "icons"
         self.catalogue_file = self.library / "catalogue.json"
+        self.verification_store = VerificationStore(self.library / "gameplay-verification.json")
         self.installation_binding = self.library / "installation-binding.json"
         self.profiles = FilesystemProfiles(
             installation.profile_root, self.managed,
@@ -298,6 +300,43 @@ class LauncherApplication:
         if path.is_file():
             return path
         return None
+
+    def verification_for(self, record: MapRecord) -> Optional[GameplayVerification]:
+        """Return gameplay evidence only for the current build and exact live assets."""
+        candidates = [item for item in self.verification_store.records()
+                      if (item.archive_sha256, item.game_executable_sha256, item.variant_id)
+                      == (record.archive_sha256, record.game_executable_sha256, record.variant_id)]
+        if not candidates:
+            return None
+        with self._locked():
+            self._verify_installation_binding()
+            if self.profiles.journal.exists():
+                return None
+            state = self.profiles._state()
+            root = (self.profiles.live if state["active"] == record.profile_id
+                    else self.profiles._profile_path(record.profile_id))
+            marker = self.profiles._marker(root, record.profile_id)
+            return self.verification_store.latest(
+                record.archive_sha256, self.installation.executable_sha256,
+                record.variant_id, marker["assets_sha256"])
+
+    def record_gameplay(self, record: MapRecord, observed_at: str, reporter: str,
+                        checks: dict[str, bool], scope: str, issue: str = "") -> GameplayVerification:
+        """Record an externally observed stopped-game result for the active map."""
+        with self._locked():
+            self._stopped()
+            self._authorize_profile(record.profile_id)
+            if record not in self.catalogue() or self.profiles.journal.exists():
+                raise ApplicationError("Map is absent or a profile switch needs recovery")
+            if self.profiles._state()["active"] != record.profile_id:
+                raise ApplicationError("Gameplay result must be recorded for the active map")
+            marker = self.profiles._marker(self.profiles.live, record.profile_id)
+            verification = GameplayVerification(
+                record.archive_sha256, self.installation.executable_sha256,
+                record.variant_id, marker["assets_sha256"], observed_at,
+                reporter, checks, scope, issue)
+            self.verification_store.append(verification)
+            return verification
 
     def active(self) -> str:
         with self._locked():

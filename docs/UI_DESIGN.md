@@ -21,8 +21,10 @@ source file is copied into the app.
 The app does not bundle the upstream background or downloaded map artwork.
 Thumbnails come from a user-selected map archive and remain in that user’s
 private launcher library. The imported-map gallery uses those thumbnails. A
-separate searchable Collection table shows remote archive names and sizes,
-then exposes Download & Import for a selected map. Remote entries have no
+separate searchable Collection table shows remote archive names, per-map
+download progress, and sizes. Download & Import All uses four parallel transfers
+and serial guarded imports into private storage; Download & Import prepares a
+selected map. Remote entries have no
 artwork until their archives are imported. macOS accessibility and keyboard
 behavior require release testing on the packaged app; visual inspection alone
 does not establish VoiceOver support.

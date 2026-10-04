@@ -25,18 +25,22 @@ def _status(app: LauncherApplication) -> dict:
             active = app.profiles._state()["active"]
         except Exception:
             pass
+    maps = []
+    for record in app.catalogue():
+        verification = app.verification_for(record)
+        maps.append(dict(name=record.name, profile_id=record.profile_id,
+                         variant_id=record.variant_id,
+                         archive_sha256=record.archive_sha256,
+                         scenarios=list(record.scenarios),
+                         icon_path=str(app.map_icon(record)) if app.map_icon(record) else None,
+                         verification=verification.status if verification else "Not verified"))
     return dict(
         installed=True, enrolled=enrolled, running=running, active=active,
         binding_error=binding_error,
         recovery_pending=app.profiles.journal.exists(),
         steam_buildid=installation.steam_buildid,
         bundle_version=installation.bundle_version,
-        maps=[dict(name=record.name, profile_id=record.profile_id,
-                   variant_id=record.variant_id,
-                   archive_sha256=record.archive_sha256,
-                   scenarios=list(record.scenarios),
-                   icon_path=str(app.map_icon(record)) if app.map_icon(record) else None,
-                   verification="Not verified") for record in app.catalogue()],
+        maps=maps,
     )
 
 

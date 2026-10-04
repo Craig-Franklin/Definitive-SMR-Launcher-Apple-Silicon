@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from threading import Event
+from typing import Callable, Optional
 from urllib.parse import quote, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 import hashlib
@@ -113,21 +116,35 @@ def fetch_catalogue() -> tuple[RemoteMap, ...]:
     return parse_catalogue(payload)
 
 
-def download_map(record: RemoteMap, private_directory: Path) -> Path:
+Progress = Callable[[RemoteMap, str, int, int, str], None]
+
+
+def _verified_cached(target: Path, record: RemoteMap) -> bool:
+    if not target.is_file() or target.stat().st_size != record.size:
+        return False
+    digest = hashlib.sha1()
+    with target.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest() == record.sha1
+
+
+def download_map(record: RemoteMap, private_directory: Path, *,
+                 progress: Optional[Callable[[int, int], None]] = None,
+                 cancelled: Optional[Callable[[], bool]] = None) -> Path:
     """Download once to a private file, checking the archive's declared length and SHA-1."""
     directory = Path(private_directory).expanduser()
     _assert_no_symlink_ancestor(directory)
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / (record.sha1 + ".7z")
     _assert_no_symlink_ancestor(target)
+    if cancelled and cancelled():
+        raise CollectionError("Download canceled")
     if target.exists():
-        if target.is_file() and target.stat().st_size == record.size:
-            with target.open("rb") as stream:
-                digest = hashlib.sha1()
-                for chunk in iter(lambda: stream.read(1 << 20), b""):
-                    digest.update(chunk)
-            if digest.hexdigest() == record.sha1:
-                return target
+        if _verified_cached(target, record):
+            if progress:
+                progress(record.size, record.size)
+            return target
         raise CollectionError("Previously downloaded map differs from collection metadata")
     fd, name = tempfile.mkstemp(prefix=".map-download-", dir=directory)
     stage = Path(name)
@@ -136,7 +153,11 @@ def download_map(record: RemoteMap, private_directory: Path) -> Path:
         with os.fdopen(fd, "wb") as output, _opener().open(request, timeout=60) as response:
             count = 0
             digest = hashlib.sha1()
+            if progress:
+                progress(0, record.size)
             while True:
+                if cancelled and cancelled():
+                    raise CollectionError("Download canceled")
                 chunk = response.read(1 << 20)
                 if not chunk:
                     break
@@ -145,14 +166,80 @@ def download_map(record: RemoteMap, private_directory: Path) -> Path:
                     raise CollectionError("Map download exceeds its declared size")
                 output.write(chunk)
                 digest.update(chunk)
+                if progress:
+                    progress(count, record.size)
             output.flush()
             os.fsync(output.fileno())
         if count != record.size or digest.hexdigest() != record.sha1:
             raise CollectionError("Map download failed size or SHA-1 verification")
+        if cancelled and cancelled():
+            raise CollectionError("Download canceled")
         stage.chmod(0o400)
-        os.link(stage, target)
+        try:
+            os.link(stage, target)
+        except FileExistsError:
+            if not _verified_cached(target, record):
+                raise CollectionError("Concurrent map download differs from collection metadata")
         _fsync_dir(directory)
         return target
     finally:
         stage.unlink(missing_ok=True)
         _fsync_dir(directory)
+
+
+def download_all_maps(records: tuple[RemoteMap, ...], private_directory: Path,
+                      progress: Progress, cancelled: Event, *,
+                      importer: Optional[Callable[[RemoteMap, Path], object]] = None,
+                      max_workers: int = 4) -> tuple[int, int, int]:
+    """Download in a bounded pool; import verified archives serially if asked."""
+    if not 1 <= max_workers <= 4:
+        raise CollectionError("Parallel download worker count is outside the limit")
+    completed = failed = stopped = 0
+
+    def one(record: RemoteMap) -> tuple[str, Optional[Path]]:
+        if cancelled.is_set():
+            progress(record, "Canceled", 0, record.size, "")
+            return "canceled", None
+        progress(record, "Downloading", 0, record.size, "")
+        try:
+            path = download_map(record, private_directory,
+                                progress=lambda count, total: progress(record, "Downloading", count, total, ""),
+                                cancelled=cancelled.is_set)
+        except CollectionError as exc:
+            if cancelled.is_set() and str(exc) == "Download canceled":
+                progress(record, "Canceled", 0, record.size, "")
+                return "canceled", None
+            progress(record, "Failed", 0, record.size, str(exc))
+            return "failed", None
+        except OSError as exc:
+            progress(record, "Failed", 0, record.size, str(exc))
+            return "failed", None
+        progress(record, "Archive verified", record.size, record.size, "")
+        return "completed", path
+
+    with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="map-download") as pool:
+        futures = {pool.submit(one, record): record for record in records}
+        for future in as_completed(futures):
+            record = futures[future]
+            result, path = future.result()
+            if result == "completed":
+                if importer is not None:
+                    if cancelled.is_set():
+                        progress(record, "Canceled", record.size, record.size, "Archive retained")
+                        stopped += 1
+                        continue
+                    progress(record, "Importing", record.size, record.size, "")
+                    try:
+                        importer(record, path)
+                    except Exception as exc:
+                        progress(record, "Failed", record.size, record.size, str(exc))
+                        failed += 1
+                        continue
+                progress(record, "Imported" if importer is not None else "Archive verified",
+                         record.size, record.size, "")
+                completed += 1
+            elif result == "failed":
+                failed += 1
+            else:
+                stopped += 1
+    return completed, failed, stopped
