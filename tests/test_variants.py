@@ -7,7 +7,9 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from smr_launcher.variants import prepare_original_variant
+from smr_launcher.rules import CompatibilityRule, TokenPatch
+from smr_launcher.extraction import _freeze_tree, _unfreeze_directories
+from smr_launcher.variants import prepare_original_variant, prepare_compatibility_variant
 
 
 class VariantPreparationTests(unittest.TestCase):
@@ -41,6 +43,34 @@ class VariantPreparationTests(unittest.TestCase):
         self.assertEqual((first / asset).read_bytes(), b"<Scenario/>")
         self.assertNotEqual((first / asset).stat().st_ino, (self.imported / asset).stat().st_ino)
         self.assertEqual(stat.S_IMODE(first.stat().st_mode), 0o500)
+
+    def test_compatibility_edition_has_distinct_repeatable_identity_and_keeps_original(self):
+        archive = hashlib.sha256(b"archive").hexdigest()
+        game = hashlib.sha256(b"game executable").hexdigest()
+        asset = "UserMaps/Example/RRT_Scenario_User_Example.xml"
+        before = b"<Scenario/>"
+        after = b"<Scenario version='1'/>"
+        patch = TokenPatch(asset, hashlib.sha256(before).hexdigest(),
+                           hashlib.sha256(after).hexdigest(), before, after)
+        rule = CompatibilityRule("example-attribute", 1, "synthetic fixture",
+                                 "Explicit sample repair", archive, game, (patch,))
+        original = prepare_original_variant(self.clean, self.imported, self.root / "original",
+                                            archive, game)
+        _freeze_tree(self.imported)
+        try:
+            one = prepare_compatibility_variant(self.clean, self.imported, self.root / "compatible-a",
+                                                archive, game, (rule,))
+            two = prepare_compatibility_variant(self.clean, self.imported, self.root / "compatible-b",
+                                                archive, game, (rule,))
+        finally:
+            _unfreeze_directories(self.imported)
+        self.assertNotEqual(one.variant_id, original.variant_id)
+        self.assertEqual(one.variant_id, two.variant_id)
+        self.assertEqual(one.rules, ("example-attribute@1",))
+        self.assertEqual((self.root / "compatible-a" / asset).read_bytes(), after)
+        self.assertEqual((self.root / "original" / asset).read_bytes(), before)
+        self.assertEqual((self.imported / asset).read_bytes(), before)
+        self.assertEqual((self.clean / "Saves/stock.sav").read_bytes(), b"stock save")
 
 
 if __name__ == "__main__":

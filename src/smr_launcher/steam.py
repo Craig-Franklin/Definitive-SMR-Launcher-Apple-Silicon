@@ -42,13 +42,20 @@ class SteamInstallation:
     support_root: Path
     profile_root: Path
     beta_keys: tuple[str, ...]
+    steamapps_root: Path
+    home: Path
 
     @classmethod
-    def discover(cls, home: Path) -> "SteamInstallation":
+    def discover(cls, home: Path, steamapps_root: Optional[Path] = None,
+                 allow_running_state: bool = False) -> "SteamInstallation":
         if sys.platform != "darwin":
             raise BindingError("Railroads Steam binding requires macOS")
         home = Path(home).expanduser()
-        steam = home / "Library/Application Support/Steam/steamapps"
+        steam = (home / "Library/Application Support/Steam/steamapps"
+                 if steamapps_root is None else Path(steamapps_root).expanduser())
+        steam = steam.absolute()
+        if any(part.is_symlink() for part in (steam, *steam.parents)):
+            raise BindingError("Steam library path contains a link")
         manifest = steam / "appmanifest_7600.acf"
         game = steam / "common/Sid Meier's Railroads/Sid Meiers Railroads.app"
         executable = game / "Contents/MacOS/Sid Meiers Railroads"
@@ -63,24 +70,32 @@ class SteamInstallation:
         state = _acf_value(document, "StateFlags")
         buildid = _acf_value(document, "buildid")
         beta_keys = tuple(re.findall(r'"BetaKey"\s*"([^"\r\n]+)"', document))
-        if appid != "7600" or state != "4" or not beta_keys or any(key != "public" for key in beta_keys):
-            raise BindingError("Steam app 7600 is not fully installed on the public branch")
+        try:
+            observed_state = int(state)
+        except ValueError as exc:
+            raise BindingError("Steam app 7600 has invalid install state") from exc
+        permitted_states = (4, 68) if allow_running_state else (4,)
+        if appid != "7600" or observed_state not in permitted_states or any(key != "public" for key in beta_keys):
+            raise BindingError("Steam app 7600 is not ready on the public branch")
         info = plistlib.loads((game / "Contents/Info.plist").read_bytes())
         bundle_id = info.get("CFBundleIdentifier")
         version = info.get("CFBundleVersion")
         if bundle_id != "com.feralinteractive.railroads" or not isinstance(version, str):
             raise BindingError("Installed Mac bundle identity is unexpected")
-        return cls(appid, buildid, bundle_id, version, _sha256(executable), executable, support, profile, beta_keys)
+        return cls(appid, buildid, bundle_id, version, _sha256(executable), executable,
+                   support, profile, beta_keys, steam, home)
 
     def check_current(self) -> None:
-        current = self.discover(Path.home())
+        current = self.discover(self.home, self.steamapps_root)
         if current != self:
             raise BindingError("Steam game build or support binding changed; reverify before switching")
 
     def game_running(self) -> Optional[bool]:
         """Return False only after successful macOS process enumeration."""
         try:
-            self.check_current()
+            current = self.discover(self.home, self.steamapps_root, allow_running_state=True)
+            if current != self:
+                return None
             location = ctypes.util.find_library("proc")
             if not location:
                 return None

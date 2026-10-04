@@ -3,8 +3,9 @@
 Copyright (c) 2026 Craig Franklin
 
 The MIT terms below apply to the Apple Silicon files added by Craig Franklin in
-`src/smr_launcher/`, `tests/`, `pyproject.toml`, `.gitignore`, and Mac-specific
-documentation added in this fork. They do not apply to files or history inherited
+`src/smr_launcher/`, `tests/`, `scripts/`, `pyproject.toml`,
+`requirements-build.txt`, `.gitignore`, and Mac-specific documentation added in
+this fork. They do not apply to files or history inherited
 from `ageekhere/Definitive-SMR-Launcher`, including its launcher, images, archives,
 or map data. This file makes no license claim on upstream material.
 

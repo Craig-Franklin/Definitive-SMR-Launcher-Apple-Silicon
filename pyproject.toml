@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools==84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -11,6 +11,9 @@ requires-python = ">=3.9"
 license = {file = "APPLE_SILICON_LICENSE.md"}
 authors = [{name = "Craig Franklin"}]
 dependencies = []
+
+[project.gui-scripts]
+smr-launcher-mac = "smr_launcher.gui:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

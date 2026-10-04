@@ -10,9 +10,10 @@ import os
 import shutil
 import tempfile
 
-from .activation import ActivationError, _assert_regular_tree
+from .activation import ActivationError, _assert_regular_tree, _make_writable_tree
 from .extraction import _freeze_tree, _fsync_directory, _private_parent, _publish_exclusive, _unfreeze_directories
 from .packages import PackageError, _digest
+from .rules import CompatibilityRule, RuleError, apply_rules
 
 
 PREPARATION_SCHEMA = 1
@@ -26,6 +27,7 @@ class PreparedVariant:
     assets_sha256: str
     files: Dict[str, str]
     directories: Tuple[str, ...]
+    rules: Tuple[str, ...] = ()
 
 
 def _tree_manifest(root: Path) -> Tuple[Dict[str, str], Tuple[str, ...]]:
@@ -41,12 +43,13 @@ def _tree_manifest(root: Path) -> Tuple[Dict[str, str], Tuple[str, ...]]:
     return dict(sorted(files.items())), tuple(sorted(directories))
 
 
-def prepare_original_variant(
+def _prepare_variant(
     clean_profile: Path,
     imported_package: Path,
     destination: Path,
     archive_sha256: str,
     game_executable_sha256: str,
+    rules: Tuple[CompatibilityRule, ...],
 ) -> PreparedVariant:
     """Build a frozen map generation without copying the stock profile's saves."""
     if any(len(value) != 64 or any(char not in "0123456789abcdef" for char in value) for value in (archive_sha256, game_executable_sha256)):
@@ -88,6 +91,9 @@ def prepare_original_variant(
                 (stage / name).mkdir()
         (stage / "Saves").mkdir()
         _assert_regular_tree(stage)
+        if rules:
+            _make_writable_tree(stage)
+        applied = apply_rules(stage, archive_sha256, game_executable_sha256, rules) if rules else None
         assets_files = {}
         assets_directories = []
         for name in ("CustomAssets", "UserMaps"):
@@ -96,7 +102,13 @@ def prepare_original_variant(
             assets_directories.extend(name + "/" + path for path in directories)
         assets_record = json.dumps({"files": dict(sorted(assets_files.items())), "directories": sorted(assets_directories)}, sort_keys=True, separators=(",", ":")).encode()
         assets_sha256 = hashlib.sha256(assets_record).hexdigest()
-        identity = json.dumps({"schema": PREPARATION_SCHEMA, "recipe": "original", "archive": archive_sha256, "game": game_executable_sha256, "assets": assets_sha256}, sort_keys=True, separators=(",", ":")).encode()
+        identity_fields = {"schema": PREPARATION_SCHEMA, "recipe": "original",
+                           "archive": archive_sha256, "game": game_executable_sha256,
+                           "assets": assets_sha256}
+        if applied is not None:
+            identity_fields.update(schema=2, recipe="compatibility",
+                                   rules=applied.fingerprint)
+        identity = json.dumps(identity_fields, sort_keys=True, separators=(",", ":")).encode()
         variant_id = hashlib.sha256(identity).hexdigest()
         expected_files, expected_directories = _tree_manifest(stage)
         _freeze_tree(stage)
@@ -104,8 +116,31 @@ def prepare_original_variant(
         if (readback_files, readback_directories) != (expected_files, expected_directories):
             raise PackageError("Prepared variant failed readback")
         _publish_exclusive(stage, destination)
-        return PreparedVariant(variant_id, archive_sha256, game_executable_sha256, assets_sha256, expected_files, expected_directories)
+        return PreparedVariant(variant_id, archive_sha256, game_executable_sha256, assets_sha256,
+                               expected_files, expected_directories,
+                               applied.rule_keys if applied else ())
     finally:
         if stage.exists():
             _unfreeze_directories(stage)
             shutil.rmtree(stage)
+
+
+def prepare_original_variant(
+    clean_profile: Path, imported_package: Path, destination: Path,
+    archive_sha256: str, game_executable_sha256: str,
+) -> PreparedVariant:
+    """Prepare the exact imported original with no compatibility rule."""
+    return _prepare_variant(clean_profile, imported_package, destination,
+                            archive_sha256, game_executable_sha256, ())
+
+
+def prepare_compatibility_variant(
+    clean_profile: Path, imported_package: Path, destination: Path,
+    archive_sha256: str, game_executable_sha256: str,
+    rules: Tuple[CompatibilityRule, ...],
+) -> PreparedVariant:
+    """Prepare a separately identified edition with explicit, exact rules."""
+    if not rules:
+        raise RuleError("A compatibility edition needs at least one explicit rule")
+    return _prepare_variant(clean_profile, imported_package, destination,
+                            archive_sha256, game_executable_sha256, tuple(rules))

@@ -1,4 +1,10 @@
 # Definitive-SMR-Launcher
+
+> **Apple Silicon Mac fork:** See [Mac build, setup, and current verification status](MACOS_README.md).
+> The Windows features described below are inherited from the
+> [original project](https://github.com/ageekhere/Definitive-SMR-Launcher);
+> they are not claims about the Mac app.
+
 <img width="1914" height="996" alt="interface" src="https://github.com/user-attachments/assets/bcd5bcad-4acf-408c-a1d4-504c0a8f4c7b" />
 
 All aboard, aspiring tycoon! Definitive-SMR-Launcher puts the full power of the rails in your hands, taking your Sid Meier’s Railroads! experience to the next level. Whether you’re laying your first tracks or expanding a sprawling empire, this launcher keeps your engines running smoothly and your journeys exciting:
