@@ -28,6 +28,13 @@ def catalogue(*files: dict) -> bytes:
 
 
 class CollectionTests(unittest.TestCase):
+    def test_archive_modification_is_separate_from_creation_date(self):
+        record, = parse_catalogue(catalogue({"name": "Map.7z", "source": "original", "size": "3",
+                                             "sha1": "a" * 40, "mtime": "1767841069"}))
+        self.assertEqual(record.archive_modified, "2026-01-08")
+        self.assertIn("/details/", record.source_url)
+        self.assertFalse(hasattr(record, "created"))
+
     def test_catalogue_keeps_only_original_archives_and_sorts(self):
         document = catalogue(
             {"name": "Zulu_v1_00.7z", "source": "original", "size": "3", "sha1": "a" * 40},

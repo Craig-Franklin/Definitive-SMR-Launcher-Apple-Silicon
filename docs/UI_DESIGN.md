@@ -19,6 +19,9 @@ competing with the maps. This document credits that guidance; no Uncodixfy
 source file is copied into the app.
 
 The app does not bundle the upstream background or downloaded map artwork.
+It does use the original launcher icon, converted from the inherited 64 × 64
+ICO into an ICNS bundle. Attribution is included in the app; see
+[`UPSTREAM_ASSETS.md`](UPSTREAM_ASSETS.md).
 Thumbnails come from a user-selected map archive and remain in that user’s
 private launcher library. The imported-map gallery uses those thumbnails. A
 separate searchable Collection table shows remote archive names, per-map
@@ -28,3 +31,15 @@ selected map. Remote entries have no
 artwork until their archives are imported. macOS accessibility and keyboard
 behavior require release testing on the packaged app; visual inspection alone
 does not establish VoiceOver support.
+
+Map tiles show author and declared creation date. Map Details contains the
+complete metadata, source links, original text, briefing with macOS read-aloud,
+community information and exact local testing evidence. Date sorting keeps
+unknown dates last. Archive modification dates are explicitly separate from
+map creation dates. Collection supports multiple selection and labels already
+imported archives. Known local failures produce a launch confirmation.
+
+Signed releases launched outside Applications offer an Install in Applications
+button. Installation copies into the user's Applications folder, validates the
+copy and then opens it, retaining the downloaded source. Development builds
+explain that installation is available with the signed release.

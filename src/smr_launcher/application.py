@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import replace
+from datetime import datetime, timezone
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Iterator, Optional
 import fcntl
+import hashlib
 import json
 import os
 import shutil
@@ -19,6 +22,8 @@ from .packages import _digest, inspect_package
 from .steam import SteamInstallation
 from .variants import _tree_manifest, prepare_original_variant
 from .verification import GameplayVerification, VerificationStore
+from .collection import RemoteMap
+from .map_metadata import MapMetadata, read_map_metadata
 
 
 class ApplicationError(RuntimeError):
@@ -35,6 +40,11 @@ class MapRecord:
     prepared_directory: str
     game_executable_sha256: str
     imported_directory: str = ""
+    archive_filename: str = ""
+    source_url: str = ""
+    source_label: str = "Local archive · origin not recorded"
+    archive_modified: str = ""
+    imported_at: str = ""
 
     @classmethod
     def from_json(cls, value: dict) -> "MapRecord":
@@ -43,6 +53,9 @@ class MapRecord:
             value["profile_id"], tuple(value["scenarios"]),
             value["prepared_directory"], value["game_executable_sha256"],
             value.get("imported_directory", ""),
+            value.get("archive_filename", ""), value.get("source_url", ""),
+            value.get("source_label", "Local archive · origin not recorded"),
+            value.get("archive_modified", ""), value.get("imported_at", ""),
         )
 
     def as_json(self) -> dict:
@@ -50,7 +63,11 @@ class MapRecord:
                     variant_id=self.variant_id, profile_id=self.profile_id,
                     scenarios=list(self.scenarios), prepared_directory=self.prepared_directory,
                     game_executable_sha256=self.game_executable_sha256,
-                    imported_directory=self.imported_directory)
+                    imported_directory=self.imported_directory,
+                    archive_filename=self.archive_filename, source_url=self.source_url,
+                    source_label=self.source_label, archive_modified=self.archive_modified,
+                    imported_at=self.imported_at)
+
 
 
 class LauncherApplication:
@@ -221,7 +238,8 @@ class LauncherApplication:
             stage.unlink(missing_ok=True)
             _fsync_dir(self.originals)
 
-    def import_archive(self, source: Path, *, original_filename: Optional[str] = None) -> MapRecord:
+    def import_archive(self, source: Path, *, original_filename: Optional[str] = None,
+                       remote: Optional[RemoteMap] = None) -> MapRecord:
         with self._locked():
             self._stopped()
             self.profiles.recover()
@@ -234,11 +252,14 @@ class LauncherApplication:
                     raise ApplicationError("Original archive name is unsafe")
             display_name = original_filename[:-3] if original_filename is not None else source.stem
             inspection = inspect_package(source)
+            if remote is not None:
+                if original_filename != remote.name or not self._matches_remote(source.resolve(strict=True), remote):
+                    raise ApplicationError("Archive does not match its collection source")
             existing = next((item for item in self.catalogue()
                              if item.archive_sha256 == inspection.source_sha256
                              and item.game_executable_sha256 == self.installation.executable_sha256), None)
             if existing is not None:
-                return existing
+                return self._record_source(existing, remote) if remote else existing
             archive = self._preserve_archive(source, inspection.source_sha256)
             self.imports.mkdir(parents=True, exist_ok=True)
             imported = self.imports / uuid.uuid4().hex
@@ -254,13 +275,65 @@ class LauncherApplication:
             profile_id = self.profiles.register_variant(variant.variant_id, prepared_path)
             record = MapRecord(display_name, inspection.source_sha256, variant.variant_id,
                                profile_id, inspection.scenarios, prepared_name,
-                               self.installation.executable_sha256, imported.name)
+                               self.installation.executable_sha256, imported.name,
+                               original_filename or source.name,
+                               remote.source_url if remote else "",
+                               "Internet Archive · verified archive" if remote else "Local archive",
+                               remote.archive_modified if remote else "",
+                               datetime.now(timezone.utc).isoformat())
             records = list(self.catalogue())
             if any(item.variant_id == record.variant_id for item in records):
                 raise ApplicationError("Prepared variant identity already exists in the catalogue")
             records.append(record)
             _atomic_json(self.catalogue_file, dict(schema=1, maps=[item.as_json() for item in records]))
             return record
+
+    @staticmethod
+    def _matches_remote(path: Path, remote: RemoteMap) -> bool:
+        _assert_no_symlink_ancestor(path)
+        if not path.is_file() or path.stat().st_size != remote.size:
+            return False
+        digest = hashlib.sha1()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1 << 20), b""):
+                digest.update(chunk)
+        return digest.hexdigest() == remote.sha1
+
+    def _record_source(self, record: MapRecord, remote: RemoteMap) -> MapRecord:
+        updated = replace(record, archive_filename=remote.name, source_url=remote.source_url,
+                          source_label="Internet Archive · verified archive",
+                          archive_modified=remote.archive_modified)
+        records = [updated if item.variant_id == record.variant_id else item for item in self.catalogue()]
+        _atomic_json(self.catalogue_file, dict(schema=1, maps=[item.as_json() for item in records]))
+        return updated
+
+    def match_collection_sources(self, remotes: tuple[RemoteMap, ...]) -> int:
+        """Attach provenance to old imports only after matching preserved bytes."""
+        candidates: dict[int, list[RemoteMap]] = {}
+        for remote in remotes:
+            candidates.setdefault(remote.size, []).append(remote)
+        matched = 0
+        with self._locked():
+            for record in self.catalogue():
+                if record.source_url:
+                    continue
+                archive = self.originals / (record.archive_sha256 + ".7z")
+                _assert_no_symlink_ancestor(archive)
+                if not archive.is_file():
+                    continue
+                for remote in candidates.get(archive.stat().st_size, []):
+                    if self._matches_remote(archive, remote):
+                        self._record_source(record, remote)
+                        matched += 1
+                        break
+        return matched
+
+    def map_metadata(self, record: MapRecord) -> MapMetadata:
+        # Catalogue paths are metadata, never permission to escape the library.
+        directory = record.imported_directory
+        if not directory or Path(directory).name != directory or directory in (".", ".."):
+            return MapMetadata()
+        return read_map_metadata(self.imports / directory / "mapInfo.txt")
 
     def _prepare_icon(self, imported: Path, variant_id: str) -> None:
         source = imported / "mapIcon.jpg"

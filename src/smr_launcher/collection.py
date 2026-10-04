@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Event
@@ -22,6 +23,7 @@ from .packages import MAX_ARCHIVE_BYTES
 IDENTIFIER = "sid-meiers-railroads-custom-maps-collection"
 METADATA_URL = "https://archive.org/metadata/" + IDENTIFIER
 DOWNLOAD_ROOT = "https://archive.org/download/" + IDENTIFIER + "/"
+COLLECTION_URL = "https://archive.org/details/" + IDENTIFIER
 MAX_METADATA_BYTES = 8 * 1024 * 1024
 USER_AGENT = "Definitive-SMR-Launcher-Apple-Silicon/0.2"
 
@@ -35,6 +37,7 @@ class RemoteMap:
     name: str
     size: int
     sha1: str
+    archive_modified: str = ""
 
     def __post_init__(self) -> None:
         if (not isinstance(self.name, str) or not self.name.lower().endswith(".7z")
@@ -50,6 +53,10 @@ class RemoteMap:
     @property
     def url(self) -> str:
         return DOWNLOAD_ROOT + quote(self.name, safe="")
+
+    @property
+    def source_url(self) -> str:
+        return COLLECTION_URL + "/" + quote(self.name, safe="")
 
 
 class _ArchiveRedirects(HTTPRedirectHandler):
@@ -102,7 +109,13 @@ def parse_catalogue(payload: bytes) -> tuple[RemoteMap, ...]:
         if key in names:
             raise CollectionError("Collection contains duplicate map names")
         names.add(key)
-        records.append(RemoteMap(name, size, sha1))
+        # Archive mtime describes the uploaded file, not the map's creation.
+        modified = ""
+        try:
+            modified = datetime.fromtimestamp(int(file.get("mtime", "")), timezone.utc).date().isoformat()
+        except (ValueError, TypeError, OverflowError, OSError):
+            pass
+        records.append(RemoteMap(name, size, sha1, modified))
     return tuple(sorted(records, key=lambda item: item.name.casefold()))
 
 

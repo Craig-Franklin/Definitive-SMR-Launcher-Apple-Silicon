@@ -12,6 +12,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from smr_launcher.application import ApplicationError, LauncherApplication
 from smr_launcher.activation import ORIGINAL
+from smr_launcher.collection import RemoteMap
 import smr_launcher.activation as activation_module
 
 
@@ -136,6 +137,27 @@ class ApplicationTests(unittest.TestCase):
         self.assertEqual(self.application.catalogue()[0].name, record.name)
         with self.assertRaises(ApplicationError):
             self.application.import_archive(downloaded, original_filename="../unsafe.7z")
+
+    def test_source_matching_requires_archive_bytes_and_preserves_profile(self):
+        self.application.setup()
+        record = self.application.import_archive(self.archive)
+        state = self.application.profiles.state_file.read_bytes()
+        save = (self.installation.profile_root / "Saves/stock.sav").read_bytes()
+        wrong = RemoteMap("Example.7z", self.archive.stat().st_size, "a" * 40)
+        self.assertEqual(self.application.match_collection_sources((wrong,)), 0)
+        self.assertEqual(self.application.catalogue()[0].source_url, "")
+        remote = RemoteMap("Exact_Source.7z", self.archive.stat().st_size,
+                           hashlib.sha1(self.archive.read_bytes()).hexdigest(), "2026-01-08")
+        self.assertEqual(self.application.match_collection_sources((remote,)), 1)
+        linked = self.application.catalogue()[0]
+        self.assertEqual(linked.source_url, remote.source_url)
+        self.assertEqual(linked.variant_id, record.variant_id)
+        self.assertEqual(linked.archive_modified, "2026-01-08")
+        self.assertIsNone(self.application.map_metadata(linked).created)
+        self.assertEqual(self.application.profiles.state_file.read_bytes(), state)
+        self.assertEqual((self.installation.profile_root / "Saves/stock.sav").read_bytes(), save)
+        with self.assertRaises(ApplicationError):
+            self.application.import_archive(self.archive, original_filename=wrong.name, remote=wrong)
 
 
 if __name__ == "__main__":

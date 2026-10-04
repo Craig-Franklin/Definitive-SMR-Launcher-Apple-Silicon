@@ -32,10 +32,13 @@ Mac app uses archives supplied by each user.
 2. Open this fork's [latest Mac release](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/releases/latest)
    and download `Definitive-SMR-Launcher-Apple-Silicon-vX.Y.Z-arm64.zip` from
    **Assets**. The source-code ZIP is for development.
-3. Unzip the download and move **Definitive SMR Launcher Apple Silicon.app** to
-   your user Applications folder (`~/Applications`). In Finder, choose
-   **Go → Home** and create an **Applications** folder there if needed. This
-   location lets the updater replace the app without administrator access.
+3. Unzip the download and open **Definitive SMR Launcher Apple Silicon.app**.
+   On first run, choose **Install in Applications**. The launcher copies itself
+   to your user Applications folder (`~/Applications`), verifies the copy, and
+   opens it. It creates the folder if needed and needs no administrator access.
+   The downloaded original is retained. If a launcher already exists there,
+   open that copy and use **Setup → App Updates**; installation never overwrites
+   an existing app. You can also move the app there in Finder yourself.
 4. Open the app and accept the normal macOS confirmation for a downloaded app.
    Published apps must pass Developer ID signing and Apple notarization. If
    macOS rejects the signature or reports damage, download again from the exact
@@ -107,6 +110,36 @@ Imports require additional space for extracted map files and Railroads must be
 closed. Importing all maps does not activate them; choose one from Map Library.
 A collection listing or verified download does not establish compatibility
 with this Mac game build.
+
+### Map details, dates and sources
+
+Select a gallery tile and choose **Map Details…**, or double-click the tile.
+The app reads the archive's original `mapInfo.txt`: author, modifiers, version,
+creation date, update date, player type and complete briefing. The original
+text is available in its own tab. **Read Briefing Aloud** uses the installed
+macOS speech voice, with a Stop control. Search includes author and briefing
+text; the library can sort by creation/update date or author and filter by
+declared player type or local Mac testing status.
+
+Creation and update dates are the map package's explicit declarations. Missing,
+invalid or ambiguous dates display **Not provided**. Internet Archive file
+modification dates are labelled separately and never used as creation dates.
+Refreshing Collection matches older imports to the preserved archive's length
+and SHA-1 before attaching a source link. Maps imported locally without a match
+retain their local-archive label. Source records and dates do not modify maps
+or saves.
+
+Use Command-click or Shift-click in Collection to download several selected
+maps. Refresh also updates cached upstream community reports. Map Details
+shows these reports separately from local Mac verification, with a link to
+the original community reviews and rating discussion. Community reports do
+not establish that a map works on the Mac. Maps with a recorded local issue
+show a warning before launch.
+
+The Mac app uses the original Windows launcher's icon artwork; see
+[asset provenance](docs/UPSTREAM_ASSETS.md). The current
+[Windows/Mac feature comparison](docs/FEATURE_PARITY.md) lists implemented,
+partial, pending and Windows-specific features. Full parity is not yet claimed.
 
 The private map library is under
 `~/Library/Application Support/Definitive SMR Launcher Apple Silicon/`. It

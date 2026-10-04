@@ -27,12 +27,15 @@ if [[ -n "${SMR_RELEASE_IDENTITY:-}" ]]; then
   signing=(--codesign-identity "$SMR_RELEASE_IDENTITY")
 fi
 mkdir -p build
+./scripts/create_macos_icon.sh
 print -r -- "{\"schema\":1,\"team_id\":\"${SMR_APPLE_TEAM_ID:-}\",\"repository\":\"Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon\",\"bundle_id\":\"com.craigfranklin.smrlauncher.applesilicon\"}" > build/release-policy.json
 .venv/bin/python -m PyInstaller \
   --noconfirm --clean --onedir --windowed --target-architecture arm64 \
   --name "Definitive SMR Launcher Apple Silicon" \
   --osx-bundle-identifier com.craigfranklin.smrlauncher.applesilicon \
+  --icon "$PWD/build/AppIcon.icns" \
   --add-data "$PWD/APPLE_SILICON_LICENSE.md:." \
+  --add-data "$PWD/docs/UPSTREAM_ASSETS.md:." \
   --add-data "$PWD/build/release-policy.json:." \
   "${signing[@]}" \
   --distpath "$dist_root" --workpath build/pyinstaller --specpath build/spec \
