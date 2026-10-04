@@ -121,6 +121,7 @@ jobs:
           identity="$(security find-identity -v -p codesigning "$keychain" | awk '/Developer ID Application:/ {print $2; exit}')"
           test -n "$identity"
           export SMR_RELEASE_IDENTITY="$identity"
+          export SMR_APPLE_TEAM_ID
           ./scripts/build_macos.sh
           app="dist/Definitive SMR Launcher Apple Silicon.app"
           codesign --verify --deep --strict "$app"
