@@ -16,9 +16,10 @@ verify them before private import. The app is **still in development**:
 San Francisco passed a short user gameplay/manual-save/reload check on the
 tested Steam build. Alternate Balkans crashed during initial track/train play;
 its cause is unresolved. Arizona and Africa Diamonds still need gameplay checks.
-No extended campaign result or tested downloadable
-release is claimed. Map tiles without a recorded gameplay check remain “Not
-verified.”
+Signed and notarized releases are published; downloaded v0.3.8 passed archive,
+publisher and Gatekeeper checks, and an isolated v0.3.0-to-v0.3.8 update passed.
+No extended campaign result is claimed. Map tiles without a recorded gameplay
+check remain “Not verified.”
 
 The Mac app does not ship the commercial game or add personal maps and saves
 to the repository. Inherited upstream files retain their own provenance; the
@@ -47,9 +48,11 @@ Mac app uses archives supplied by each user.
    and Tk runtime; Homebrew and a separate Python installation are only needed
    when building from source.
 
-Each successful push to `main` publishes a new signed, notarized app after
-tests and release checks pass. A push containing multiple commits releases its
-head commit. Failed checks leave the last working release available.
+Every push to `main` builds and runs tests. Conventional Commits determine
+whether to publish: `feat` adds a minor release, `fix`/`perf` add a patch, and
+breaking changes add a major release. Documentation, tests and chores alone do
+not create a release. A qualifying push releases its exact head after signing
+and notarization; failed checks leave the last working release available.
 
 ## Build from source
 
@@ -63,7 +66,10 @@ head commit. Failed checks leave the last working release available.
    brew install python@3.12 python-tk@3.12
    ```
 
-3. Clone this fork on the Mac and build the app:
+3. Install Xcode 26 or newer and select its developer tools with `xcode-select`.
+   The build compiles an Apple Translation helper; the launcher reports a clear
+   limitation when translation is unavailable on an older Mac.
+4. Clone this fork on the Mac and build the app:
 
    ```sh
    git clone https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon.git
