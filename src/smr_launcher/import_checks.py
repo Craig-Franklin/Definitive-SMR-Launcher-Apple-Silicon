@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
+from .model_checks import inspect_models
 
 MAX_XML_BYTES = 8 * 1024 * 1024
 MAX_TOTAL_XML = 64 * 1024 * 1024
@@ -54,5 +55,13 @@ def inspect_map(root: Path, stock_names: set[str] | None = None) -> dict:
         if len(warnings) >= 200:
             warnings = warnings[:200] + ["Further findings omitted; inspect the package manually."]
             break
-    return dict(schema=1, xml_files_checked=checked, warnings=list(dict.fromkeys(warnings)),
+    models = inspect_models(root)
+    for finding in models["findings"][:200]:
+        detail = ("legacy NIF " + finding["version"] +
+                  " uses a model-loading path implicated in a Mac crash; conversion review required (header-only risk flag)"
+                  if finding.get("legacy_collision_path") else finding["reason"])
+        warnings.append(finding["path"] + ": " + detail + ".")
+    if not models["complete"]:
+        warnings.append("Model scan incomplete: a scan limit, unreadable entry or skipped link prevented full header inspection.")
+    return dict(schema=1, xml_files_checked=checked, model_headers=models, warnings=list(dict.fromkeys(warnings)),
                 limitations="Static checks do not run the game, inspect packed FPK contents, or prove loading, train/bridge behavior, performance or save/reload reliability.")

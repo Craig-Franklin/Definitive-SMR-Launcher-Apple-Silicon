@@ -14,80 +14,66 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import stat
 import struct
 import sys
 import xml.etree.ElementTree as ET
 
-GAME_SHA256 = "981ca7180759d8578babf54cd9a4f76b93db503b33a7f1938c6b1427b95680f0"
-TABLE_ADDRESS = 0x1018CE910
-TABLE_COUNT = 36
+_SOURCE_ROOT = Path(__file__).resolve().parents[2] / "src"
+if str(_SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SOURCE_ROOT))
+from smr_launcher.industry_registry import (  # noqa: E402
+    INDUSTRY_TABLE_ADDRESS as TABLE_ADDRESS,
+    INDUSTRY_TABLE_COUNT as TABLE_COUNT,
+    SUPPORTED_GAME_SHA256 as GAME_SHA256,
+    IndustryRegistryError as AuditError,
+    _extract_registry,
+)
+
 MAX_XML_BYTES = 16 * 1024 * 1024
-
-
-class AuditError(ValueError):
-    pass
+MAX_TREE_ENTRIES = 100_000
 
 
 def extract_registry(data: bytes, expected_hash: str = GAME_SHA256,
                      address: int = TABLE_ADDRESS, count: int = TABLE_COUNT) -> tuple[str, ...]:
-    """Validate a thin x86_64 Mach-O and extract bounded file-backed strings."""
-    if hashlib.sha256(data).hexdigest() != expected_hash:
-        raise AuditError("Unsupported executable SHA-256; table offsets were not verified for this build")
-    if len(data) < 32 or struct.unpack_from("<II", data) != (0xFEEDFACF, 0x01000007):
-        raise AuditError("Expected a thin little-endian x86_64 Mach-O")
-    command_count, command_bytes = struct.unpack_from("<II", data, 16)
-    end = 32 + command_bytes
-    if end > len(data):
-        raise AuditError("Truncated Mach-O load commands")
-    offset = 32
-    segments = []
-    for _ in range(command_count):
-        if offset + 8 > end:
-            raise AuditError("Truncated Mach-O command")
-        command, size = struct.unpack_from("<II", data, offset)
-        if size < 8 or offset + size > end:
-            raise AuditError("Invalid Mach-O command length")
-        if command == 0x19:
-            if size < 72:
-                raise AuditError("Truncated 64-bit segment")
-            va, virtual_size, file_offset, file_size = struct.unpack_from("<QQQQ", data, offset + 24)
-            if file_offset + file_size > len(data) or file_size > virtual_size:
-                raise AuditError("Invalid file-backed segment")
-            segments.append((va, file_offset, file_size))
-        offset += size
-
-    def read(va: int, length: int) -> bytes:
-        for start, file_offset, file_size in segments:
-            if start <= va and va + length <= start + file_size:
-                pos = file_offset + va - start
-                return data[pos:pos + length]
-        raise AuditError("Registry address is outside file-backed segments")
-
-    names = []
-    for index in range(count):
-        pointer = struct.unpack("<Q", read(address + index * 8, 8))[0]
-        raw = bytearray()
-        for char_offset in range(256):
-            byte = read(pointer + char_offset, 1)[0]
-            if byte == 0:
-                break
-            if byte < 32 or byte > 126:
-                raise AuditError("Registry identity contains unexpected bytes")
-            raw.append(byte)
-        else:
-            raise AuditError("Unterminated registry identity")
-        if not raw:
-            raise AuditError("Empty registry identity")
-        names.append(raw.decode("ascii"))
-    if len(set(names)) != count:
-        raise AuditError("Duplicate registry identities")
-    return tuple(names)
+    """Backwards-compatible research wrapper around the runtime Mach-O reader."""
+    return _extract_registry(data, expected_hash, address, count)
 
 
 def read_xml(path: Path) -> tuple[ET.Element, str]:
-    if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_XML_BYTES:
-        raise AuditError("XML must be a regular file of at most 16 MiB")
-    data = path.read_bytes()
+    flags = os.O_RDONLY
+    if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_NONBLOCK"):
+        raise AuditError("Safe no-follow, nonblocking XML reads are unavailable")
+    flags |= os.O_NOFOLLOW | os.O_NONBLOCK
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise AuditError("XML could not be opened as a regular file") from error
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_XML_BYTES:
+            raise AuditError("XML must be a regular file of at most 16 MiB")
+        chunks = []
+        remaining = MAX_XML_BYTES + 1
+        while remaining:
+            chunk = os.read(descriptor, min(1024 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        data = b"".join(chunks)
+        after = os.fstat(descriptor)
+        current_path = os.stat(path, follow_symlinks=False)
+    except OSError as error:
+        raise AuditError("XML changed or could not be read safely") from error
+    finally:
+        os.close(descriptor)
+    identity = lambda item: (item.st_dev, item.st_ino, item.st_mode, item.st_size,
+                             item.st_mtime_ns, item.st_ctime_ns)
+    if (not stat.S_ISREG(current_path.st_mode) or len(data) != before.st_size
+            or len(data) > MAX_XML_BYTES
+            or identity(before) != identity(after) or identity(after) != identity(current_path)):
+        raise AuditError("XML changed, had a short read, or is not a regular file")
     declarations = data.replace(b"\0", b"").upper()
     if b"<!DOCTYPE" in declarations or b"<!ENTITY" in declarations:
         raise AuditError("DTD/entity declarations are outside this audit's supported XML subset")
@@ -98,10 +84,48 @@ def xml_files(root: Path) -> list[Path]:
     if root.is_symlink() or not root.is_dir():
         raise AuditError("Map root must be a regular directory")
     found = []
-    for directory, dirs, files in os.walk(root, followlinks=False):
-        dirs[:] = sorted(d for d in dirs if not (Path(directory) / d).is_symlink())
-        found.extend(Path(directory) / f for f in sorted(files)
-                     if f.lower().endswith(".xml") and not (Path(directory) / f).is_symlink())
+    entries = 0
+
+    def scan_error(error):
+        raise AuditError(f"XML tree traversal failed: {error}") from error
+
+    for directory, dirs, files in os.walk(root, followlinks=False, onerror=scan_error):
+        base = Path(directory)
+        dirs.sort()
+        files.sort()
+        for name in dirs:
+            entries += 1
+            if entries > MAX_TREE_ENTRIES:
+                raise AuditError("XML tree exceeds the bounded entry limit")
+            path = base / name
+            try:
+                info = path.lstat()
+                mode = info.st_mode
+            except OSError as error:
+                raise AuditError(f"XML tree entry could not be inspected: {path}") from error
+            if stat.S_ISLNK(mode):
+                raise AuditError(f"XML tree contains a symlink directory: {path}")
+            if not stat.S_ISDIR(mode):
+                raise AuditError(f"XML tree contains a non-directory traversal entry: {path}")
+        for name in files:
+            entries += 1
+            if entries > MAX_TREE_ENTRIES:
+                raise AuditError("XML tree exceeds the bounded entry limit")
+            path = base / name
+            try:
+                info = path.lstat()
+                mode = info.st_mode
+            except OSError as error:
+                raise AuditError(f"XML tree file entry could not be inspected: {path}") from error
+            if stat.S_ISLNK(mode):
+                raise AuditError(f"XML tree contains a symlink entry: {path}")
+            if not name.casefold().endswith(".xml"):
+                continue
+            if not stat.S_ISREG(mode):
+                raise AuditError(f"XML path is not a regular file: {path}")
+            if info.st_size > MAX_XML_BYTES:
+                raise AuditError(f"XML exceeds the 16 MiB limit: {path}")
+            found.append(path)
     return found
 
 

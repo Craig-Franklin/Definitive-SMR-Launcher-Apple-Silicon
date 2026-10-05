@@ -6,8 +6,9 @@ that the selected scenario reached gameplay. It does not mark maps Verified and
 does not test saves, autosaves, trains or campaign reliability.
 
 The supplied `orca_load_driver.py` uses the visible desktop. It is **not a
-background/headless test**, and it has not yet completed an end-to-end calibration
-through this runner. A runtime invocation requires `--run --allow-ui-control`.
+background/headless test**. It has completed live calibration through this runner;
+each new runner/driver/game configuration still requires its own successful
+calibration. A runtime invocation requires `--run --allow-ui-control`.
 Do not use the keyboard/mouse for other work during a foreground test.
 
 ## Plan first
@@ -110,6 +111,14 @@ which independent visual signals establish the loaded scene. Failure is
 `status: "automation_failed"` with a reason. The watchdog independently decides
 process exit, memory limit and timeout outcomes.
 
+At startup, the reference driver can cancel the observed Feral crash-report
+dialog. It requires the game's exact reporter title, anonymous-report wording,
+and an unambiguous Cancel control, then observes the window again. It never
+submits a report or presses a default button. Repeated dialogs are bounded and
+unknown dialogs remain automation failures. A reporter on a later launch does
+not attribute the earlier crash to the later map: join the macOS report to the
+original test's PID, process birth, executable, and scenario evidence.
+
 Driver commands run in a separate process group. On abort, the runner kills the
 group before reaping its leader and verifies that the group has disappeared, so
 outstanding OCR/GUI subprocesses cannot continue into restoration. If the leader
@@ -135,6 +144,17 @@ physical footprint and restoration status. `started_at` is Unix time in seconds;
 Only terminal results with verified restoration are skipped on resume. The key
 includes the full prepared manifest, archive/variant/game identity, scenario,
 runner source hash, driver command and file hashes, title, options and limits.
+It also includes resource content and nanosecond modification-time fingerprints
+for installed Assets and the map's CustomAssets/UserMaps, plus the fingerprint
+implementation hash. FPK bytes include their serialized member timestamps.
+Planning hashes stock once; each test rechecks source resources, the activated
+copy before launch, and resources after the game stops. Private JSON receipts
+retain paths, hashes and timestamps for each stage. Incomplete scans fail closed.
+Original-profile backup/restoration and new recovery receipts also check resource
+metadata. Saves, settings and logs are outside these resource fingerprints and
+remain protected by the existing full-profile content manifests.
+These conservative fingerprints detect changed inputs; they do not resolve the
+game's effective resource winners or establish portability of older receipts.
 `--retry` retests completed jobs. Changing those inputs produces new jobs. A torn
 JSONL record requires inspection; the script will not silently truncate evidence.
 

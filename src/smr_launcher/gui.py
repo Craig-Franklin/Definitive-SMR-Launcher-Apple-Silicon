@@ -78,6 +78,8 @@ class LauncherWindow:
         self.app: Optional[LauncherApplication] = None
         self.busy = False
         self.closed = False
+        self._search_refresh_after_id = None
+        self._search_refresh_generation = 0
         self.results: Queue[tuple[bool, object, Optional[Callable[[object], None]]]] = Queue()
         self.download_events: Queue[tuple[RemoteMap, str, int, int, str]] = Queue()
         self.download_states: dict[str, tuple[str, int, int, str]] = {}
@@ -181,6 +183,7 @@ class LauncherWindow:
         self.root.bind("<Command-q>", lambda _: self._close())
 
     def _close(self) -> None:
+        self._cancel_search_refresh()
         if self.busy or self.bulk_active:
             self.close_when_idle = True
             if self.bulk_active:
@@ -277,6 +280,7 @@ class LauncherWindow:
         self._submit("Looking for the Steam Mac game…", LauncherApplication.discover, self._library_chosen)
 
     def _show(self, view: str) -> None:
+        self._cancel_search_refresh()
         self.view = view
         self._clear_content()
         if view == "welcome":
@@ -406,6 +410,30 @@ class LauncherWindow:
         return self.metadata_cache[record.variant_id]
 
     def _search_changed(self) -> None:
+        if self.closed:
+            return
+        self._cancel_search_refresh()
+        generation = self._search_refresh_generation
+        self._search_refresh_after_id = self.root.after(
+            200, lambda: self._run_search_refresh(generation))
+
+    def _cancel_search_refresh(self) -> None:
+        self._search_refresh_generation = getattr(self, "_search_refresh_generation", 0) + 1
+        after_id = getattr(self, "_search_refresh_after_id", None)
+        self._search_refresh_after_id = None
+        if after_id is not None:
+            try:
+                self.root.after_cancel(after_id)
+            except tk.TclError:
+                # The callback may already have fired or Tk may be closing.
+                pass
+
+    def _run_search_refresh(self, generation: int) -> None:
+        if generation != self._search_refresh_generation:
+            return
+        self._search_refresh_after_id = None
+        if self.closed:
+            return
         if self.view == "maps" and self.app is not None and hasattr(self, "grid_frame"):
             self._render_gallery()
         elif self.view == "collection" and hasattr(self, "collection_list"):
@@ -721,6 +749,15 @@ class LauncherWindow:
 
     def _map_details(self, record: MapRecord) -> None:
         metadata = self._metadata(record)
+        verification = None
+        verification_error = ""
+        try:
+            verification = self.app.verification_for(record)
+            verification_status = verification.status if verification else "Not verified"
+        except Exception as exc:
+            verification_error = "Gameplay record needs inspection: " + str(exc)
+            self.status.set(verification_error)
+            verification_status = "Needs inspection"
         popup = tk.Toplevel(self.root)
         popup.title("Map Details — " + _display_name(record.name))
         popup.geometry("860x770")
@@ -731,7 +768,7 @@ class LauncherWindow:
         rows = [("Author", metadata.author), ("Modified by", metadata.modified_by),
                 ("Version", metadata.version), ("Created", metadata.created), ("Updated", metadata.updated),
                 ("Map type", metadata.map_type), ("Archive source", record.source_label),
-                ("Archive file modified", record.archive_modified), ("Mac testing", self._verification_text(record))]
+                ("Archive file modified", record.archive_modified), ("Mac testing", verification_status)]
         community = self.community_index.get(record.archive_filename or record.name + ".7z")
         facts = ttk.Frame(frame, padding=(0, 14))
         facts.pack(fill="x")
@@ -749,8 +786,11 @@ class LauncherWindow:
             ttk.Button(links, text="Community Reviews & Rating", command=lambda: webbrowser.open(community.discussion_url)).pack(side="left")
         notebook = ttk.Notebook(frame)
         notebook.pack(fill="both", expand=True)
-        verification = self.app.verification_for(record)
         identity = f"Archive: {record.archive_filename or record.name}\nSHA-256: {record.archive_sha256}\nVariant: {record.variant_id}\n\n" + (f"{verification.status} · {verification.observed_at}\nReported by: {verification.reporter}\n{verification.scope}\n\n" + "\n".join(("✓ " if verification.checks[key] else "○ ") + label for key, label in MAC_TEST_LABELS.items()) + "\n\n" + verification.issue if verification else "No local gameplay result recorded.")
+        if verification_error:
+            identity = f"Archive: {record.archive_filename or record.name}\nSHA-256: {record.archive_sha256}\nVariant: {record.variant_id}\n\n{verification_error}"
+        if verification and not verification.resources_sha256:
+            identity += "\n\nHistorical result: resource timestamps were not recorded. Repeat the play test before marking this map Verified. Any reported issue is retained as a historical warning."
         community_text = (f"Upstream community report: {community.stability}\nMultiplayer: "
                           + ({True: "Reported supported", False: "Reported unsupported", None: "Not reported"}[community.multiplayer])
                           + "\n\nThese are community reports for the original map, not verification on the Mac edition. "
@@ -775,6 +815,7 @@ class LauncherWindow:
             if widget.winfo_exists():
                 widget.configure(state="normal"); widget.delete("1.0", "end")
                 widget.insert("1.0", content); widget.configure(state="disabled")
+        self._compatibility_tab(notebook, record, popup)
         if community and community.discussion_url:
             cache = self.update_library / "ratings" / (community.discussion_url.rsplit("/", 1)[-1] + ".json")
             def display_rating(rating):
@@ -827,6 +868,67 @@ class LauncherWindow:
         ttk.Button(controls, text="Close", command=close).pack(side="right")
         popup.protocol("WM_DELETE_WINDOW", close)
         self._localize_widgets(popup)
+
+    def _compatibility_tab(self, notebook, record, details):
+        tab = ttk.Frame(notebook, padding=12)
+        notebook.add(tab, text=tr("Compatibility"))
+        try:
+            choices = self.app.compatibility_recipes(record)
+        except Exception as exc:
+            ttk.Label(tab, text="Compatibility options need inspection: " + str(exc),
+                      wraplength=650).pack(anchor="w")
+            return
+        if not choices:
+            text = ("This is a compiled compatibility edition. Use Mac Test & Identity "
+                    "to see observations for this exact edition."
+                    if getattr(record, "recipe_receipt_sha256", "") else
+                    "No reviewed repair recipe is available for this edition. "
+                    "A map can still work without a repair. Import checks and Mac "
+                    "test results describe what has been checked so far.")
+            ttk.Label(tab, text=text, wraplength=650).pack(anchor="w")
+            return
+        chooser = ttk.Combobox(tab, state="readonly",
+                               values=tuple(choice.title for choice in choices))
+        chooser.current(0)
+        chooser.pack(fill="x", pady=(0, 8))
+        def choice():
+            return choices[chooser.current() if chooser.current() >= 0 else 0]
+        ttk.Button(tab, text="Create Compatibility Edition", command=lambda:
+                   self._create_recipe(record, choice().recipe_id, details)).pack(side="bottom", anchor="w", pady=(8, 0))
+        body = ttk.Frame(tab)
+        body.pack(fill="both", expand=True)
+        text = tk.Text(body, wrap="word", font=("Helvetica Neue", 12), borderwidth=0,
+                       height=5, padx=6, pady=6)
+        bar = ttk.Scrollbar(body, command=text.yview)
+        text.configure(yscrollcommand=bar.set)
+        bar.pack(side="right", fill="y")
+        text.pack(fill="both", expand=True)
+        def describe(_event=None):
+            text.configure(state="normal")
+            text.delete("1.0", "end")
+            text.insert("1.0", choice().description + "\n\nCreates a separate edition with its own saves. "
+                        "Your original map and saves are kept. If this exact edition already exists, "
+                        "it is selected with its existing saves. Files are checked before creation; "
+                        "an unsupported installation will be refused.")
+            text.configure(state="disabled")
+        chooser.bind("<<ComboboxSelected>>", describe)
+        describe()
+
+    def _create_recipe(self, record, recipe_id, details):
+        if self.app is None or self.busy:
+            return
+        def completed(edition):
+            if details.winfo_exists():
+                details.destroy()
+            self.selected_profile = edition.profile_id
+            # A previous search/filter can hide the new or reused edition.
+            self.search.set("")
+            self.map_filter.set("All maps")
+            self._show("maps")
+            self.status.set("Compatibility edition ready. Select Play to test it. "
+                            "Your original map and saves are preserved; gameplay remains unverified.")
+        self._submit("Checking files and preparing a compatibility edition…",
+                     lambda: self.app.create_recipe_edition(record, recipe_id), completed)
 
     def _record_mac_test(self, record: MapRecord, details) -> None:
         if self.busy or self.app is None:
@@ -1265,7 +1367,12 @@ class LauncherWindow:
             return
         record = next((r for r in self._records() if r.profile_id == profile_id), None)
         if record:
-            verification = self.app.verification_for(record)
+            try:
+                verification = self.app.verification_for(record)
+            except Exception as exc:
+                self.status.set("Map verification needs inspection; launch cancelled.")
+                messagebox.showerror("Map verification needs inspection", str(exc), parent=self.root)
+                return
             if verification and verification.issue and not messagebox.askyesno(
                     "Known map issue", verification.issue + "\n\nLaunch this map anyway?", parent=self.root):
                 return

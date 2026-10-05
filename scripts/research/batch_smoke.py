@@ -25,6 +25,8 @@ from smr_launcher.application import LauncherApplication
 from smr_launcher.activation import (MARKER, _assert_no_symlink_ancestor,
     _assert_regular_tree, _atomic_json, _fsync_tree, _fsync_dir, _make_writable_tree)
 from smr_launcher.variants import _tree_manifest
+from smr_launcher.resource_identity import fingerprint_resources
+from smr_launcher import resource_identity
 
 VERSION = 1
 
@@ -80,6 +82,31 @@ def manifest(root):
     return dict(files=files, directories=list(directories))
 
 
+def stock_resources(app):
+    root = app.installation.steamapps_root / "common/Sid Meier's Railroads/SMRailroadsData/assets"
+    return fingerprint_resources({"installed_assets": root})
+
+
+def map_resources(root):
+    # Stable role names allow comparison of prepared, diagnostic and live copies.
+    return fingerprint_resources({"custom_assets": Path(root) / "CustomAssets",
+                                  "user_maps": Path(root) / "UserMaps"})
+
+
+def resource_binding(stock, custom):
+    return dict(schema=1, algorithm=stock["algorithm"],
+                implementation_sha256=digest(Path(resource_identity.__file__)),
+                stock=stock["identity"], custom=custom["identity"])
+
+
+def check_resources(app, root, expected, receipt_path=None):
+    stock, custom = stock_resources(app), map_resources(root)
+    if resource_binding(stock, custom) != expected:
+        raise SafetyError("Resource content or timestamps changed since planning")
+    if receipt_path is not None:
+        _atomic_json(receipt_path, dict(stock=stock, custom=custom))
+
+
 class BSDInfo(ctypes.Structure):
     _fields_ = [("prefix", ctypes.c_uint32 * 12), ("comm", ctypes.c_char * 16),
         ("name", ctypes.c_char * 32), ("suffix", ctypes.c_uint32 * 6),
@@ -123,16 +150,26 @@ class MacProcesses:
     def inspect(self, pid):
         path = ctypes.create_string_buffer(4096)
         if self.lib.proc_pidpath(pid, path, len(path)) <= 0:
-            try: os.kill(pid, 0)
-            except ProcessLookupError: return None
-            raise SafetyError("Cannot identify a live process")
+            return self._failed_inspection(pid, "Cannot identify a live process")
         executable = os.fsdecode(path.value)
         info = BSDInfo(); usage = Usage()
         if self.lib.proc_pidinfo(pid, 3, 0, ctypes.byref(info), ctypes.sizeof(info)) != ctypes.sizeof(info):
-            raise SafetyError("Cannot read process birth identity")
+            return self._failed_inspection(pid, "Cannot read process birth identity")
         if self.lib.proc_pid_rusage(pid, 0, ctypes.byref(usage)) != 0:
-            raise SafetyError("Cannot read process physical footprint")
+            return self._failed_inspection(pid, "Cannot read process physical footprint")
         return Process(pid, info.start_sec * 1000000 + info.start_usec, executable, usage.footprint)
+
+    @staticmethod
+    def _failed_inspection(pid, reason):
+        # Normal exit can race the separate libproc reads. Only independent
+        # evidence that the PID is gone permits treating that race as exit.
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return None
+        except PermissionError:
+            pass
+        raise SafetyError(reason)
 
     def games(self):
         count = self.lib.proc_listallpids(None, 0)
@@ -159,13 +196,27 @@ class MacProcesses:
             current = self.inspect(process.pid)
             if current is None: return
             if not process.same(current): raise SafetyError("PID identity changed; refusing to signal")
-            os.kill(process.pid, sig)
+            try:
+                os.kill(process.pid, sig)
+            except ProcessLookupError:
+                return
             deadline = time.monotonic() + seconds
+            unreadable = None
             while time.monotonic() < deadline:
-                current = self.inspect(process.pid)
+                try:
+                    current = self.inspect(process.pid)
+                except SafetyError as exc:
+                    # During termination macOS can retain the PID briefly after
+                    # its executable path disappears. Wait for independent exit
+                    # evidence, without sending another signal to an unknown PID.
+                    unreadable = exc
+                    time.sleep(0.1)
+                    continue
                 if current is None: return
                 if not process.same(current): raise SafetyError("PID was reused; refusing further signals")
+                unreadable = None
                 time.sleep(0.1)
+            if unreadable is not None: raise unreadable
         raise SafetyError("Test game did not stop; profiles retained")
 
 
@@ -245,9 +296,11 @@ def driver_identity(command):
 
 def jobs_for(app, records, driver_key, timeout, memory, expected_title=None):
     jobs = []
+    stock = stock_resources(app)
     for record in records:
         root = app._prepared_root(record)
         prepared = manifest(root)
+        resources = resource_binding(stock, map_resources(root))
         for scenario in record.scenarios:
             relative = Path(scenario)
             if relative.is_absolute() or ".." in relative.parts: raise SafetyError("Unsafe scenario path")
@@ -263,6 +316,7 @@ def jobs_for(app, records, driver_key, timeout, memory, expected_title=None):
             except (ET.ParseError, ValueError): pass
             binding = dict(schema=VERSION, variant_id=record.variant_id, archive_sha256=record.archive_sha256,
                 game_sha256=app.installation.executable_sha256, prepared=prepared, scenario=scenario,
+                resources=resources,
                 driver=driver_key, runner_sha256=digest(Path(__file__)), timeout=timeout, memory_bytes=memory,
                 expected_title=expected_title or title,
                 options=dict(skip_movies=True, ai_players=0, fullscreen=False, quickstart=False))
@@ -306,6 +360,12 @@ def stop_driver(driver):
     if driver.returncode is None:
         try: os.killpg(driver.pid, signal.SIGKILL)
         except ProcessLookupError: pass
+        except PermissionError:
+            # macOS can report EPERM for an already empty group. A separate
+            # enumeration must prove absence; a live/unknown group still blocks
+            # restoration. Do not fall back to signaling individual PIDs.
+            if group_exists(driver.pid):
+                raise
         driver.wait(timeout=3)
     deadline = time.monotonic() + 3
     while time.monotonic() < deadline:
@@ -318,6 +378,7 @@ def one_test(app, job, command, run_dir, timeout, memory, processes):
     source = Path(job["prepared_root"])
     if manifest(source) != job["binding"]["prepared"]:
         raise SafetyError("Prepared input changed since planning")
+    check_resources(app, source, job["binding"]["resources"], run_dir / "planned-resources.json")
     diagnostic = run_dir / "diagnostic-input"
     shutil.copytree(source, diagnostic, copy_function=shutil.copy2)
     _make_writable_tree(diagnostic)
@@ -334,6 +395,8 @@ def one_test(app, job, command, run_dir, timeout, memory, processes):
         if processes.games(): raise SafetyError("A game is already running")
         def launch():
             nonlocal process
+            check_resources(app, app.profiles.live, job["binding"]["resources"],
+                            run_dir / "launched-resources.json")
             opener = subprocess.Popen(["/usr/bin/open", "-a", str(app.installation.executable.parents[2])])
             try:
                 startup = min(deadline, time.monotonic() + 15)
@@ -385,6 +448,8 @@ def one_test(app, job, command, run_dir, timeout, memory, processes):
             if process is not None:
                 processes.stop(process)
                 app.profiles._marker(app.profiles.live, profile_id)
+                check_resources(app, app.profiles.live, job["binding"]["resources"],
+                                run_dir / "stopped-resources.json")
         finally:
             if driver_failure is not None: raise driver_failure
 
@@ -433,14 +498,19 @@ def run_batch(app, jobs, command, output, timeout, memory, retry=False):
                 raise SafetyError("Unfinished test session requires recovery: " + str(pending))
         previous = app.profiles.active_profile()
         original = manifest(app.profiles.live)
+        original_resources = map_resources(app.profiles.live)["identity"]
         session = output / ("session-" + uuid.uuid4().hex)
         session.mkdir(mode=0o700)
         snapshot = session / "original-profile"
         shutil.copytree(app.profiles.live, snapshot, copy_function=shutil.copy2)
         if manifest(snapshot) != original or manifest(app.profiles.live) != original:
             raise SafetyError("Original profile changed while backing up")
+        if (map_resources(snapshot)["identity"] != original_resources
+                or map_resources(app.profiles.live)["identity"] != original_resources):
+            raise SafetyError("Original resource metadata changed while backing up")
         _fsync_tree(snapshot)
         recovery = dict(schema=VERSION, previous_profile=previous, original_manifest=original,
+                        original_resources_identity=original_resources,
                         library=str(app.library), game_sha256=app.installation.executable_sha256,
                         snapshot=str(snapshot), session=str(session), restoration_pending=True)
         _atomic_json(session / "recovery.json", recovery)
@@ -482,7 +552,8 @@ def run_batch(app, jobs, command, output, timeout, memory, retry=False):
                     time.sleep(0.2)
                 app._stopped()
                 app.profiles.switch(previous)
-                if manifest(app.profiles.live) != original:
+                if (manifest(app.profiles.live) != original
+                        or map_resources(app.profiles.live)["identity"] != original_resources):
                     result.update(restored=False, restoration_error="Original profile manifest mismatch; backup retained")
                     result["elapsed_seconds"] = round(time.monotonic() - started, 3)
                     append_result(results, result)
@@ -513,6 +584,9 @@ def recover_session(app, session):
     snapshot = session / "original-profile"
     if manifest(snapshot) != recovery["original_manifest"]:
         raise SafetyError("Recovery snapshot changed; inspection required")
+    resource_identity = recovery.get("original_resources_identity")
+    if resource_identity and map_resources(snapshot)["identity"] != resource_identity:
+        raise SafetyError("Recovery resource metadata changed; inspection required")
     with app._locked():
         app._stopped()
         # Never signal this persisted group: its identity may have been reused.
@@ -525,9 +599,13 @@ def recover_session(app, session):
         original = app.profiles.live if active == previous else app.profiles._profile_path(previous)
         if manifest(original) != recovery["original_manifest"]:
             raise SafetyError("Original profile changed; independent backup retained for inspection")
+        if resource_identity and map_resources(original)["identity"] != resource_identity:
+            raise SafetyError("Original resource metadata changed; independent backup retained")
         app.profiles.switch(previous)
         if manifest(app.profiles.live) != recovery["original_manifest"]:
             raise SafetyError("Restoration manifest mismatch")
+        if resource_identity and map_resources(app.profiles.live)["identity"] != resource_identity:
+            raise SafetyError("Restoration resource metadata mismatch")
         recovery["restoration_pending"] = False
         _atomic_json(session / "recovery.json", recovery)
     return "restored"
@@ -588,6 +666,7 @@ def main(argv=None):
                 if (row.get("schema") == VERSION and row.get("status") == "loaded"
                         and row.get("restored") is True and binding.get("driver") == driver_key
                         and binding.get("game_sha256") == app.installation.executable_sha256
+                        and binding.get("resources", {}).get("implementation_sha256") == digest(Path(resource_identity.__file__))
                         and binding.get("runner_sha256") == digest(Path(__file__))):
                     calibrated = True
         if not calibrated: parser.error("No restored successful single-scenario calibration for this runner/driver/game")

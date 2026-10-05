@@ -1,5 +1,24 @@
 # Engine research and map diagnostics
 
+## Broader per-scenario audit
+
+`audit_map_library.py` extends the narrow identity screen with reconstructed
+factory merge/pruning rules and typed goods/car/annex checks. It also reports
+industry alias capacity, the fixed bridge registry, unresolved XML, duplicate
+definitions and bridge-range review leads. It never launches or repairs maps.
+
+```sh
+.venv/bin/python scripts/research/audit_map_library.py --installed-library \
+  > /absolute/private/compatibility-library-audit.json
+.venv/bin/python -m unittest discover -s tests -p test_map_library_audit.py -v
+```
+
+The report contains local paths and per-map findings; keep it private. Engine
+resource precedence and packed assets remain unresolved, so reports describe
+candidate effective definitions rather than claiming full runtime simulation.
+See the [audit and implementation plan](../../docs/COMPATIBILITY_AUDIT_PLAN.md)
+for measured coverage, failure mechanisms and the gates for production use.
+
 ## Background industry identity audit
 
 `check_industry_registry.py` inspects map XML without launching the game, moving

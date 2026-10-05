@@ -1,6 +1,7 @@
 """A completed remote fetch must preserve the tab chosen while it ran."""
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
+from types import SimpleNamespace
 import sys
 import unittest
 
@@ -22,7 +23,127 @@ class SelectionTree:
     def selection(self): return self.selected
 
 
+class ScheduledRoot:
+    def __init__(self):
+        self.callbacks = {}
+        self.cancelled = []
+        self.next_id = 0
+
+    def after(self, delay, callback):
+        self.next_id += 1
+        key = f"after#{self.next_id}"
+        self.callbacks[key] = (delay, callback)
+        return key
+
+    def after_cancel(self, key):
+        self.cancelled.append(key)
+
+    def destroy(self): pass
+
+
 class NavigationTests(unittest.TestCase):
+    def test_search_refresh_debounces_and_dispatches_to_view_current_at_firing(self):
+        window = LauncherWindow.__new__(LauncherWindow)
+        window.root = ScheduledRoot()
+        window.closed = False
+        window.view = "maps"
+        window.app = object()
+        window.grid_frame = object()
+        window.collection_list = object()
+        window._render_gallery = Mock()
+        window._collection_rows = Mock()
+
+        window._search_changed()
+        first_id = window._search_refresh_after_id
+        first_callback = window.root.callbacks[first_id][1]
+        window._search_changed()
+        second_id = window._search_refresh_after_id
+        second_callback = window.root.callbacks[second_id][1]
+
+        self.assertEqual(window.root.callbacks[first_id][0], 200)
+        self.assertEqual(window.root.cancelled, [first_id])
+        first_callback()  # A canceled callback that was already queued must be harmless.
+        window.view = "collection"
+        second_callback()
+
+        window._render_gallery.assert_not_called()
+        window._collection_rows.assert_called_once_with()
+
+    def test_search_refresh_is_invalidated_by_navigation_and_close(self):
+        window = LauncherWindow.__new__(LauncherWindow)
+        window.root = ScheduledRoot()
+        window.closed = False
+        window.view = "maps"
+        window.app = object()
+        window.grid_frame = object()
+        window._render_gallery = Mock()
+        window._clear_content = Mock()
+        window.sidebar = Mock(); window.sidebar_separator = Mock()
+        window.search_entry = Mock(); window.search_label = Mock()
+        window.content = Mock(); window.nav_buttons = {}
+        window.steam_label = Mock(); window._activity_view = Mock()
+        window._localize_widgets = Mock()
+        window.pending_update = None
+        window.busy = False; window.bulk_active = False
+        window._stop_speech = Mock()
+
+        window._search_changed()
+        navigation_id = window._search_refresh_after_id
+        navigation_callback = window.root.callbacks[navigation_id][1]
+        window._show("activity")
+        navigation_callback()
+        window._render_gallery.assert_not_called()
+        self.assertIn(navigation_id, window.root.cancelled)
+
+        window.view = "maps"
+        window._search_changed()
+        close_id = window._search_refresh_after_id
+        close_callback = window.root.callbacks[close_id][1]
+        window._close()
+        close_callback()
+        window._render_gallery.assert_not_called()
+        self.assertIn(close_id, window.root.cancelled)
+        self.assertTrue(window.closed)
+
+    def test_play_reports_verification_error_and_does_not_launch(self):
+        window = LauncherWindow.__new__(LauncherWindow)
+        window.app = Mock(); window.root = Mock(); window.status = Mock()
+        record = SimpleNamespace(profile_id="map-example")
+        window._records = Mock(return_value=(record,))
+        window._submit = Mock()
+        window.app.verification_for.side_effect = RuntimeError("Resource changed during inspection")
+        with patch("smr_launcher.gui.messagebox.showerror") as error:
+            window._play(record.profile_id)
+            error.assert_called_once()
+            self.assertIn("Resource changed", error.call_args.args[1])
+        window._submit.assert_not_called()
+        window.app.play.assert_not_called()
+
+    def test_map_details_survives_resource_inspection_failure_without_second_read(self):
+        window = LauncherWindow.__new__(LauncherWindow)
+        window.root = Mock(); window.status = Mock(); window.secondary = "grey"
+        window.app = Mock()
+        window.app.verification_for.side_effect = RuntimeError("Resource changed during inspection")
+        window.app.compatibility_recipes.return_value = ()
+        window.community_index = {}
+        window.language_preferences = SimpleNamespace(language="en")
+        window._localize_widgets = Mock()
+        window._metadata = Mock(return_value=SimpleNamespace(
+            name="Example", author="", modified_by="", version="", created="", updated="",
+            map_type="", source_urls=(), description="Briefing", raw_text=""))
+        record = SimpleNamespace(name="Example", source_label="Local", archive_modified="",
+            archive_filename="Example.7z", source_url="", archive_sha256="a" * 64,
+            variant_id="b" * 64)
+        with patch("smr_launcher.gui.tk") as tk, patch("smr_launcher.gui.ttk") as ttk, \
+             patch("smr_launcher.gui._checks_text", return_value="Static checks"):
+            window._map_details(record)
+            window.app.verification_for.assert_called_once_with(record)
+            self.assertTrue(any(c.kwargs.get("text") == "Needs inspection"
+                                for c in ttk.Label.call_args_list))
+            contents = [c.args[1] for c in tk.Text.return_value.insert.call_args_list]
+            self.assertTrue(any("Resource changed during inspection" in text for text in contents))
+            self.assertFalse(any("No local gameplay result recorded" in text for text in contents))
+
     def test_collection_rebuild_retains_visible_multiple_selection(self):
         window = LauncherWindow.__new__(LauncherWindow)
         a = RemoteMap("Alpha.7z", 2, "a" * 40)

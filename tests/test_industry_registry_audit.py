@@ -1,10 +1,12 @@
 """Synthetic fixtures only; no installed game or third-party map data needed."""
 import hashlib
 import importlib.util
+import os
 from pathlib import Path
 import struct
 import tempfile
 import unittest
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/research/check_industry_registry.py"
 SPEC = importlib.util.spec_from_file_location("industry_registry_audit", SCRIPT)
@@ -92,6 +94,70 @@ class RegistryAuditTests(unittest.TestCase):
         with self.assertRaisesRegex(audit.AuditError, "DTD/entity"):
             audit.read_xml(path)
         self.assertEqual(path.read_bytes(), before)
+
+    def test_xml_tree_traversal_error_fails_closed(self):
+        def failing_walk(root, *, followlinks, onerror):
+            yield str(root), [], []
+            onerror(PermissionError("denied directory"))
+
+        with patch.object(audit.os, "walk", side_effect=failing_walk):
+            with self.assertRaisesRegex(audit.AuditError, "traversal failed"):
+                audit.xml_files(self.map)
+
+    def test_xml_tree_symlink_directory_and_file_fail_closed(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "industry.xml").write_text("<RRTIndustries/>")
+        directory_link = self.map / "linked-directory"
+        try:
+            directory_link.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("Symlinks are unavailable")
+        with self.assertRaisesRegex(audit.AuditError, "symlink directory"):
+            audit.xml_files(self.map)
+        directory_link.unlink()
+
+        xml_link = self.map / "industry.xml"
+        xml_link.symlink_to(outside / "industry.xml")
+        with self.assertRaisesRegex(audit.AuditError, "symlink entry"):
+            audit.xml_files(self.map)
+
+    def test_dangling_non_xml_symlink_fails_closed(self):
+        link = self.map / "unclassified-entry"
+        try:
+            link.symlink_to(self.root / "missing-target")
+        except (OSError, NotImplementedError):
+            self.skipTest("Symlinks are unavailable")
+        with self.assertRaisesRegex(audit.AuditError, "symlink entry"):
+            audit.xml_files(self.map)
+
+    def test_nonregular_xml_is_rejected_without_blocking(self):
+        fifo = self.map / "industry.xml"
+        try:
+            os.mkfifo(fifo)
+        except (AttributeError, OSError, NotImplementedError):
+            self.skipTest("Named pipes are unavailable")
+        with self.assertRaisesRegex(audit.AuditError, "not a regular file"):
+            audit.xml_files(self.map)
+        with self.assertRaisesRegex(audit.AuditError, "regular file"):
+            audit.read_xml(fifo)
+
+    def test_short_xml_read_fails_even_when_file_metadata_is_stable(self):
+        path = self.map / "stable.xml"
+        path.write_text("<root><value>complete</value></root>")
+        real_read = audit.os.read
+        calls = 0
+
+        def short_read(descriptor, count):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return real_read(descriptor, min(count, 4))
+            return b""
+
+        with patch.object(audit.os, "read", side_effect=short_read):
+            with self.assertRaisesRegex(audit.AuditError, "short read"):
+                audit.read_xml(path)
 
 
 if __name__ == "__main__":

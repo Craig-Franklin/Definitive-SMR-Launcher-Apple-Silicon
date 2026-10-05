@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import tempfile
 import uuid
@@ -26,6 +27,8 @@ from .collection import RemoteMap
 from .map_metadata import MapMetadata, read_map_metadata
 from . import removal
 from .import_checks import inspect_map
+from .launch_preferences import prepare_settings
+from .resource_identity import ContentHashCache, fingerprint_resources
 
 
 class ApplicationError(RuntimeError):
@@ -48,6 +51,7 @@ class MapRecord:
     archive_modified: str = ""
     imported_at: str = ""
     archive_sha1: str = ""
+    recipe_receipt_sha256: str = ""
 
     @classmethod
     def from_json(cls, value: dict) -> "MapRecord":
@@ -60,10 +64,11 @@ class MapRecord:
             value.get("source_label", "Local archive · origin not recorded"),
             value.get("archive_modified", ""), value.get("imported_at", ""),
             value.get("archive_sha1", ""),
+            value.get("recipe_receipt_sha256", ""),
         )
 
     def as_json(self) -> dict:
-        return dict(name=self.name, archive_sha256=self.archive_sha256,
+        result = dict(name=self.name, archive_sha256=self.archive_sha256,
                     variant_id=self.variant_id, profile_id=self.profile_id,
                     scenarios=list(self.scenarios), prepared_directory=self.prepared_directory,
                     game_executable_sha256=self.game_executable_sha256,
@@ -71,6 +76,9 @@ class MapRecord:
                     archive_filename=self.archive_filename, source_url=self.source_url,
                     source_label=self.source_label, archive_modified=self.archive_modified,
                     imported_at=self.imported_at, archive_sha1=self.archive_sha1)
+        if self.recipe_receipt_sha256:
+            result["recipe_receipt_sha256"] = self.recipe_receipt_sha256
+        return result
 
 
 
@@ -88,6 +96,7 @@ class LauncherApplication:
         self.icons = self.library / "icons"
         self.catalogue_file = self.library / "catalogue.json"
         self.verification_store = VerificationStore(self.library / "gameplay-verification.json")
+        self._resource_hash_cache = ContentHashCache()
         self.installation_binding = self.library / "installation-binding.json"
         self.profiles = FilesystemProfiles(
             installation.profile_root, self.managed,
@@ -393,12 +402,176 @@ class LauncherApplication:
             return MapMetadata()
         return read_map_metadata(self.imports / directory / "mapInfo.txt")
 
+    def create_compatibility_edition(self, record: MapRecord, rules: tuple, *, label: str) -> MapRecord:
+        """Build reviewed exact rules as an independent, explicitly labelled edition."""
+        with self._locked():
+            return self._create_compatibility_edition_locked(record, rules, label=label)
+
+    def create_recipe_edition(self, record: MapRecord, recipe_id: str) -> MapRecord:
+        """Compile a bundled reviewed recipe under one lock into separate saves."""
+        from .recipe_service import resolve_bundled_recipe
+        with self._locked():
+            self._stopped()
+            self.profiles.recover()
+            if record not in self.catalogue() or not self._is_original_variant(record):
+                raise ApplicationError("Recipe compilation requires a current original map")
+            rules, binding = resolve_bundled_recipe(self, record, recipe_id)
+            return self._create_compatibility_edition_locked(record, rules,
+                label=recipe_id, recipe_binding=binding)
+
+    def compatibility_recipes(self, record: MapRecord) -> tuple:
+        """Return menu candidates; creation performs the full input validation."""
+        from .recipe_service import recipe_choices
+        if record not in self.catalogue():
+            return ()
+        return recipe_choices(record, self.installation.executable_sha256)
+
+    def _create_compatibility_edition_locked(self, record: MapRecord, rules: tuple, *,
+                                              label: str, recipe_binding=None) -> MapRecord:
+        """Shared preparation transaction; caller must hold the application lock.
+
+        Recipe callers must additionally establish applicability and effective
+        base context. This private helper does not select or enable recipes.
+        """
+        from .rules import CompatibilityRule, RuleError, applicable_rules
+        from .variants import prepare_compatibility_variant, prepare_recipe_variant
+        from .recipe_identity import RecipePreparationBinding, map_file_context
+        if (not isinstance(label, str) or not label.strip() or len(label) > 120
+                or any(ord(c) < 32 or ord(c) == 127 for c in label)):
+            raise ApplicationError("Compatibility edition needs a short descriptive label")
+        rules = tuple(rules)
+        if not rules or any(not isinstance(rule, CompatibilityRule) for rule in rules):
+            raise ApplicationError("Compatibility edition needs explicit reviewed rules")
+        if recipe_binding is not None and not isinstance(recipe_binding, RecipePreparationBinding):
+            raise ApplicationError("Compiled edition needs a valid recipe binding")
+        self._stopped()
+        self.profiles.recover()
+        records = list(self.catalogue())
+        if (record not in records
+                or record.game_executable_sha256 != self.installation.executable_sha256
+                or not self._is_original_variant(record)):
+            raise ApplicationError("Compatibility preparation requires a current original map")
+        selected = applicable_rules(rules, record.archive_sha256, record.game_executable_sha256)
+        if len(selected) != len(rules):
+            raise RuleError("Every selected rule must match this archive and game build")
+        imported = removal._leaf(self.imports, record.imported_directory, r"[0-9a-f]{32}")
+        _assert_regular_tree(imported)
+        input_assets = assets_manifest_hash(imported)
+        if input_assets != assets_manifest_hash(self._prepared_root(record)):
+            raise ApplicationError("Original import and prepared assets differ; retained for inspection")
+        prepared_name = uuid.uuid4().hex
+        destination = self.prepared / prepared_name
+        if recipe_binding is not None:
+            if self._stock_file_context()["identity"] != recipe_binding.stock_files_sha256:
+                raise ApplicationError("Recipe stock resource context differs; revalidate preparation")
+            variant = prepare_recipe_variant(self.baseline, imported, destination,
+                record.archive_sha256, record.game_executable_sha256, selected, recipe_binding)
+            if self._stock_file_context()["identity"] != recipe_binding.stock_files_sha256:
+                raise ApplicationError("Recipe stock context changed during preparation; output retained")
+        else:
+            variant = prepare_compatibility_variant(self.baseline, imported, destination,
+                record.archive_sha256, record.game_executable_sha256, selected)
+        if assets_manifest_hash(imported) != input_assets:
+            raise ApplicationError("Original assets changed during preparation; output retained for inspection")
+        existing = next((item for item in records if item.variant_id == variant.variant_id), None)
+        if existing is not None:
+            if recipe_binding is not None:
+                self._validate_recipe_context(existing)
+            _unfreeze_directories(destination)
+            shutil.rmtree(destination)
+            return existing
+        profile_id = self.profiles.register_variant(variant.variant_id, destination,
+            saved_games=removal.retained_saves(self, variant.variant_id))
+        if recipe_binding is not None:
+            profile = (self.profiles.live if self.profiles._state()["active"] == profile_id
+                       else self.profiles._profile_path(profile_id))
+            if map_file_context(profile)["identity"] != variant.recipe_binding["output_files_sha256"]:
+                raise ApplicationError("Registered recipe resource metadata differs; output retained")
+        new = replace(record, name=record.name + " — Experimental " + label.strip(),
+            variant_id=variant.variant_id, profile_id=profile_id,
+            prepared_directory=prepared_name, imported_at=datetime.now(timezone.utc).isoformat())
+        # Store original metadata, hashes and rationale, never game/map bytes.
+        receipt = dict(schema=1, parent_variant=record.variant_id,
+            variant_id=variant.variant_id, assets_sha256=variant.assets_sha256,
+            archive_sha256=record.archive_sha256, game_executable_sha256=record.game_executable_sha256,
+            rules=[dict(id=rule.rule_id, version=rule.version, provenance=rule.provenance,
+                reason=rule.reason, files=[dict(path=p.path, before=p.before_sha256,
+                after=p.after_sha256) for p in rule.patches]) for rule in selected])
+        if variant.recipe_binding is not None:
+            receipt.update(schema=2, recipe_binding=variant.recipe_binding)
+            new = replace(new, recipe_receipt_sha256=self._recipe_receipt_hash(receipt))
+        receipts = self.library / "compatibility-preparations"
+        _assert_no_symlink_ancestor(receipts)
+        receipts.mkdir(exist_ok=True)
+        _atomic_json(receipts / (variant.variant_id + ".json"), receipt)
+        self._prepare_icon(imported, variant.variant_id)
+        self._write_import_checks(new)
+        records.append(new)
+        _atomic_json(self.catalogue_file, dict(schema=1, maps=[r.as_json() for r in records]))
+        return new
+
+    @staticmethod
+    def _recipe_receipt_hash(receipt: dict) -> str:
+        return hashlib.sha256(json.dumps(receipt, sort_keys=True, separators=(",", ":"),
+                                         ensure_ascii=True).encode("ascii")).hexdigest()
+
+    def _stock_file_context(self) -> dict:
+        from .recipe_identity import file_context
+        stock = self.installation.steamapps_root / "common/Sid Meier's Railroads/SMRailroadsData/assets"
+        return file_context({"installed_assets": stock}, required_roles=("installed_assets",),
+                            hash_cache=self._resource_hash_cache)
+
+    def _validate_recipe_context(self, record: MapRecord) -> None:
+        """Reject missing/changed receipts or resource context before activation."""
+        if not record.recipe_receipt_sha256:
+            return
+        from .recipe_identity import map_file_context
+        from .resource_identity import ResourceFingerprintError
+        path = self.library / "compatibility-preparations" / (record.variant_id + ".json")
+        _assert_no_symlink_ancestor(path)
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            try:
+                before = os.fstat(fd)
+                if not stat.S_ISREG(before.st_mode) or before.st_size > 1024 * 1024:
+                    raise ValueError("receipt is not a bounded regular file")
+                chunks, size = [], 0
+                while size <= 1024 * 1024:
+                    chunk = os.read(fd, min(65536, 1024 * 1024 + 1 - size))
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    size += len(chunk)
+                same = lambda st: (st.st_dev, st.st_ino, st.st_mode, st.st_size,
+                                   st.st_mtime_ns, st.st_ctime_ns)
+                if (size != before.st_size or same(before) != same(os.fstat(fd))
+                        or same(before) != same(path.lstat())):
+                    raise ValueError("receipt changed while reading")
+                receipt = json.loads(b"".join(chunks))
+            finally:
+                os.close(fd)
+            if (not isinstance(receipt, dict) or receipt.get("schema") != 2 or receipt.get("variant_id") != record.variant_id
+                    or receipt.get("archive_sha256") != record.archive_sha256
+                    or receipt.get("game_executable_sha256") != record.game_executable_sha256
+                    or self._recipe_receipt_hash(receipt) != record.recipe_receipt_sha256):
+                raise ValueError("receipt binding differs")
+            binding = receipt["recipe_binding"]
+            root = (self.profiles.live if self.profiles._state()["active"] == record.profile_id
+                    else self.profiles._profile_path(record.profile_id))
+            if (map_file_context(root, hash_cache=self._resource_hash_cache)["identity"] != binding["output_files_sha256"]
+                    or self._stock_file_context()["identity"] != binding["stock_files_sha256"]):
+                raise ValueError("resource context differs")
+        except (OSError, ValueError, KeyError, TypeError, ResourceFingerprintError) as exc:
+            raise ApplicationError("Compiled map resources or receipt changed; revalidate this edition before playing") from exc
+
     def create_edition(self, record: MapRecord, *, editor: bool, difficulty: bool) -> MapRecord:
         """Prepare and register an opt-in edition without activating it or copying saves."""
         from .editions import SUPPORTED_GAME
         from .variants import _prepare_variant
         if editor:
             raise ApplicationError("Editor saving needs an isolated export workflow before it can be enabled safely")
+        if record.recipe_receipt_sha256:
+            raise ApplicationError("Options on a compiled map require a separately reviewed combined recipe")
         with self._locked():
             self._stopped()
             records = list(self.catalogue())
@@ -469,6 +642,13 @@ class LauncherApplication:
             return path
         return None
 
+    def _resource_snapshot(self, profile: Path) -> dict:
+        stock = self.installation.steamapps_root / "common/Sid Meier's Railroads/SMRailroadsData/assets"
+        return fingerprint_resources({"installed_assets": stock,
+                                      "custom_assets": profile / "CustomAssets",
+                                      "user_maps": profile / "UserMaps"},
+                                     hash_cache=self._resource_hash_cache)
+
     def verification_for(self, record: MapRecord) -> Optional[GameplayVerification]:
         """Return gameplay evidence only for the current build and exact live assets."""
         candidates = [item for item in self.verification_store.records()
@@ -484,25 +664,39 @@ class LauncherApplication:
             root = (self.profiles.live if state["active"] == record.profile_id
                     else self.profiles._profile_path(record.profile_id))
             marker = self.profiles._marker(root, record.profile_id)
-            return self.verification_store.latest(
+            latest = self.verification_store.latest(
                 record.archive_sha256, self.installation.executable_sha256,
                 record.variant_id, marker["assets_sha256"])
+            if latest is None or not latest.resources_sha256:
+                # Keep historical failures visible, but legacy successes never
+                # earn Verified without a metadata-bound retest.
+                return latest
+            current = self._resource_snapshot(root)
+            return self.verification_store.latest(
+                record.archive_sha256, self.installation.executable_sha256,
+                record.variant_id, marker["assets_sha256"],
+                resources_sha256=current["identity"])
 
     def record_gameplay(self, record: MapRecord, observed_at: str, reporter: str,
                         checks: dict[str, bool], scope: str, issue: str = "") -> GameplayVerification:
         """Record an externally observed stopped-game result for the active map."""
         with self._locked():
             self._stopped()
-            self._authorize_profile(record.profile_id)
             if record not in self.catalogue() or self.profiles.journal.exists():
                 raise ApplicationError("Map is absent or a profile switch needs recovery")
+            self._authorize_profile(record.profile_id)
             if self.profiles._state()["active"] != record.profile_id:
                 raise ApplicationError("Gameplay result must be recorded for the active map")
             marker = self.profiles._marker(self.profiles.live, record.profile_id)
+            resources = self._resource_snapshot(self.profiles.live)
             verification = GameplayVerification(
                 record.archive_sha256, self.installation.executable_sha256,
                 record.variant_id, marker["assets_sha256"], observed_at,
-                reporter, checks, scope, issue)
+                reporter, checks, scope, issue, resources["identity"])
+            receipt = self.library / "verification-resources" / (resources["identity"] + ".json")
+            _assert_no_symlink_ancestor(receipt)
+            receipt.parent.mkdir(exist_ok=True, mode=0o700)
+            _atomic_json(receipt, resources)
             self.verification_store.append(verification)
             return verification
 
@@ -519,18 +713,61 @@ class LauncherApplication:
             raise ApplicationError("Choose an imported map")
         if record.game_executable_sha256 != self.installation.executable_sha256:
             raise ApplicationError("This map was prepared for another game build; preserve its saves and revalidate")
+        self._validate_recipe_context(record)
 
     def activate(self, profile_id: str) -> str:
         with self._locked():
             self._stopped()
+            self.profiles.recover()
             self._authorize_profile(profile_id)
             return self.profiles.switch(profile_id)
 
     def play(self, profile_id: str, launch: Optional[Callable[[], None]] = None) -> str:
         with self._locked():
             self._stopped()
+            self.profiles.recover()
             self._authorize_profile(profile_id)
+            settings_before = settings_after = None
+            if profile_id != ORIGINAL:
+                record = next(r for r in self.catalogue() if r.profile_id == profile_id)
+                root = (self.profiles.live if self.profiles._state()["active"] == profile_id
+                        else self.profiles._profile_path(profile_id))
+                for scenario in record.scenarios:
+                    candidate = root / scenario
+                    _assert_no_symlink_ancestor(candidate)
+                    if not candidate.is_file() or not candidate.resolve().is_relative_to(root.resolve()):
+                        raise ApplicationError("The selected map's scenario file needs inspection")
+                settings = root / "Settings.ini"
+                _assert_no_symlink_ancestor(settings)
+                if not settings.is_file() or settings.stat().st_size > 256 * 1024:
+                    raise ApplicationError("The selected map's settings need inspection")
+                settings_before = settings.read_bytes()
+                settings_after = prepare_settings(settings_before, record.scenarios)
             if launch is None:
                 bundle = self.installation.executable.parents[2]
                 launch = lambda: subprocess.Popen(["/usr/bin/open", "-a", str(bundle)])
-            return self.profiles.play(profile_id, launch)
+
+            def configured_launch() -> None:
+                # Called under both locks, after the complete profile switch and
+                # stopped-game check. Frozen prepared inputs and saves stay intact.
+                if settings_after is not None and settings_after != settings_before:
+                    target = self.profiles.live / "Settings.ini"
+                    _assert_no_symlink_ancestor(target)
+                    if target.read_bytes() != settings_before:
+                        raise ApplicationError("Map settings changed before launch; retry after inspection")
+                    temporary = None
+                    try:
+                        with tempfile.NamedTemporaryFile(dir=target.parent, prefix=".launch-settings-", delete=False) as stream:
+                            temporary = Path(stream.name)
+                            stream.write(settings_after)
+                            stream.flush()
+                            os.fsync(stream.fileno())
+                        os.chmod(temporary, target.stat().st_mode & 0o777)
+                        os.replace(temporary, target)
+                        _fsync_dir(target.parent)
+                    finally:
+                        if temporary is not None and temporary.exists():
+                            temporary.unlink()
+                launch()
+
+            return self.profiles.play(profile_id, configured_launch)

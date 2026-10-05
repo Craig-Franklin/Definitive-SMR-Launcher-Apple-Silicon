@@ -44,6 +44,51 @@ class SmokeTests(unittest.TestCase):
         return dict(self.request, status="loaded", loaded_scene=True, assertion="Loaded HUD and expected scenario",
                     screenshot=str(shot), screenshot_sha256=batch.digest(shot))
 
+    def test_libproc_exit_race_requires_independent_pid_absence(self):
+        for fail_at in ("path", "birth", "footprint"):
+            with self.subTest(fail_at=fail_at):
+                probe = object.__new__(batch.MacProcesses)
+                def path(pid, buffer, size):
+                    buffer.value = b"/synthetic/game"
+                    return 0 if fail_at == "path" else len(buffer.value)
+                probe.lib = SimpleNamespace(
+                    proc_pidpath=path,
+                    proc_pidinfo=lambda *args: 0 if fail_at == "birth" else batch.ctypes.sizeof(batch.BSDInfo),
+                    proc_pid_rusage=lambda *args: -1)
+                with patch.object(batch.os, "kill", side_effect=ProcessLookupError):
+                    self.assertIsNone(probe.inspect(123))
+                for result in (None, PermissionError):
+                    with patch.object(batch.os, "kill", side_effect=result), self.assertRaises(batch.SafetyError):
+                        probe.inspect(123)
+
+    def test_termination_waits_for_absence_after_transient_identity_loss(self):
+        probe = object.__new__(batch.MacProcesses)
+        with patch.object(probe, "inspect", side_effect=[self.process,
+                    batch.SafetyError("terminating"), None]), \
+             patch.object(batch.os, "kill") as kill, patch.object(batch.time, "sleep"):
+            probe.stop(self.process)
+        kill.assert_called_once_with(123, signal.SIGTERM)
+
+    def test_exit_between_identity_read_and_signal_is_already_stopped(self):
+        probe = object.__new__(batch.MacProcesses)
+        with patch.object(probe, "inspect", return_value=self.process), \
+             patch.object(batch.os, "kill", side_effect=ProcessLookupError) as kill:
+            probe.stop(self.process)
+        kill.assert_called_once_with(123, signal.SIGTERM)
+
+    def test_termination_never_escalates_signal_to_unidentified_or_reused_pid(self):
+        probe = object.__new__(batch.MacProcesses)
+        reused = batch.Process(123, 999, "/synthetic/game", 100)
+        for observations in ([self.process, batch.SafetyError("unidentified")],
+                             [self.process, reused]):
+            with self.subTest(observations=observations), \
+                 patch.object(probe, "inspect", side_effect=observations), \
+                 patch.object(batch.os, "kill") as kill, \
+                 patch.object(batch.time, "monotonic", side_effect=[0, 0, 3]), \
+                 patch.object(batch.time, "sleep"), self.assertRaises(batch.SafetyError):
+                probe.stop(self.process)
+            kill.assert_called_once_with(123, signal.SIGTERM)
+
     def test_denied_group_probe_requires_independent_absence_evidence(self):
         with patch.object(batch.os, "killpg", side_effect=PermissionError), \
              patch.object(batch.subprocess, "run") as run:
@@ -54,12 +99,31 @@ class SmokeTests(unittest.TestCase):
             with self.assertRaises(batch.SafetyError):
                 batch.group_exists(333)
 
+    def test_denied_cleanup_signal_requires_proven_empty_group(self):
+        child = SimpleNamespace(pid=123, returncode=None, wait=lambda timeout: 0)
+        with patch.object(batch.os, "killpg", side_effect=PermissionError), \
+             patch.object(batch, "group_exists", return_value=False):
+            batch.stop_driver(child)
+        with patch.object(batch.os, "killpg", side_effect=PermissionError), \
+             patch.object(batch, "group_exists", return_value=True):
+            with self.assertRaises(PermissionError):
+                batch.stop_driver(child)
+        with patch.object(batch.os, "killpg", side_effect=PermissionError), \
+             patch.object(batch, "group_exists", side_effect=batch.SafetyError("unknown")):
+            with self.assertRaises(batch.SafetyError):
+                batch.stop_driver(child)
+
     def test_plan_uses_scenario_title_instead_of_package_or_nested_name(self):
+        stock = self.root / "steamapps/common/Sid Meier's Railroads/SMRailroadsData/assets"
+        stock.mkdir(parents=True)
+        for name in ("CustomAssets", "UserMaps"):
+            (self.root / name).mkdir()
         (self.root / "scenario.xml").write_text(
             '<RRTScenario><szMapName>Scenario Display Title</szMapName>'
             '<Goal><szName>Unrelated Goal</szName></Goal></RRTScenario>')
         app = SimpleNamespace(_prepared_root=lambda record: self.root,
-                              installation=SimpleNamespace(executable_sha256="a" * 64))
+                              installation=SimpleNamespace(executable_sha256="a" * 64,
+                                                           steamapps_root=self.root / "steamapps"))
         record = SimpleNamespace(variant_id="b" * 64, archive_sha256="c" * 64,
                                  scenarios=("scenario.xml",), name="Package_v9")
         jobs = batch.jobs_for(app, [record], {}, 90, 1024)
@@ -119,6 +183,32 @@ class SmokeTests(unittest.TestCase):
         with path.open("a") as stream: stream.write('{"torn":')
         with self.assertRaises(ValueError): batch.completed(path)
 
+    def test_resource_binding_changes_when_only_stock_or_map_mtime_changes(self):
+        stock = self.root / "steamapps/common/Sid Meier's Railroads/SMRailroadsData/assets"
+        stock.mkdir(parents=True)
+        (stock / "RRT_Goods.xml").write_bytes(b"stock")
+        prepared = self.root / "prepared"
+        for name in ("CustomAssets", "UserMaps"):
+            (prepared / name).mkdir(parents=True)
+        resource = prepared / "UserMaps/RRT_Goods.xml"
+        resource.write_bytes(b"custom")
+        app = SimpleNamespace(installation=SimpleNamespace(steamapps_root=self.root / "steamapps"))
+        initial = batch.resource_binding(batch.stock_resources(app), batch.map_resources(prepared))
+        receipt = self.root / "resources.json"
+        batch.check_resources(app, prepared, initial, receipt)
+        self.assertEqual(json.loads(receipt.read_text())["custom"]["identity"], initial["custom"])
+        for path in (resource, stock / "RRT_Goods.xml"):
+            with self.subTest(path=path):
+                before = path.stat()
+                os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns+1_000_000))
+                with self.assertRaisesRegex(batch.SafetyError, "timestamps changed"):
+                    batch.check_resources(app, prepared, initial)
+                os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+        batch.check_resources(app, prepared, initial)
+        (prepared / "Saves").mkdir()
+        (prepared / "Saves/new.sav").write_bytes(b"unrelated save")
+        batch.check_resources(app, prepared, initial)
+
     def test_run_requires_foreground_ack_before_discovery(self):
         with patch.object(batch.LauncherApplication, "discover", side_effect=AssertionError("must not discover")):
             with self.assertRaises(SystemExit):
@@ -170,13 +260,15 @@ class RestoreTests(unittest.TestCase):
         import shutil
         installation = FakeInstallation(self.root)
         installation.executable = self.root / "fake.app/Contents/MacOS/game"
+        (installation.steamapps_root / "common/Sid Meier's Railroads/SMRailroadsData/assets").mkdir(parents=True)
         app = LauncherApplication(installation, self.root / "library")
         app.setup(); original = batch.manifest(app.profiles.live)
         prepared = self.root / "prepared"
         shutil.copytree(app.profiles.live, prepared)
         job = dict(input_identity="a" * 64, name="Synthetic", scenario="map.xml",
                    scenario_name="map.xml", scenario_title="Synthetic", prepared_root=str(prepared),
-                   binding=dict(prepared=batch.manifest(prepared)))
+                   binding=dict(prepared=batch.manifest(prepared), resources=batch.resource_binding(
+                       batch.stock_resources(app), batch.map_resources(prepared))))
         processes = Processes(None)
         stopped = []
         def stop(process):
@@ -250,6 +342,14 @@ class RestoreTests(unittest.TestCase):
         recovery.update(restoration_pending=True, diagnostic_profile=profile)
         recovery_file.write_text(json.dumps(recovery))
         app.profiles.switch(profile)
+        asset_root = app.profiles._profile_path(ORIGINAL) / "CustomAssets"
+        stat_before = asset_root.stat()
+        os.utime(asset_root, ns=(stat_before.st_atime_ns, stat_before.st_mtime_ns+1_000_000))
+        self.assertEqual(batch.manifest(app.profiles._profile_path(ORIGINAL)), original)
+        with self.assertRaisesRegex(batch.SafetyError, "Original resource metadata changed"):
+            batch.recover_session(app, session)
+        self.assertEqual(app.profiles.active_profile(), profile)
+        os.utime(asset_root, ns=(stat_before.st_atime_ns, stat_before.st_mtime_ns))
         self.assertEqual(batch.recover_session(app, session), "restored")
         self.assertEqual(batch.manifest(app.profiles.live), original)
 
