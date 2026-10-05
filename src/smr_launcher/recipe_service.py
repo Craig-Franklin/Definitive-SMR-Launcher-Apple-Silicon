@@ -71,8 +71,9 @@ _RECIPES = {
         "35c0bd07ed3f38e2ab1bad8ea5adc85499d0d737c6530e6e79414110686f7bd5",
         (("Military Barracks", 33, "Doll Factory"), ("Port", 34, "Bakery")),
     ),
-    # Diagnostic-only: bounded trial reached a separate null-access crash.
-    # Deliberately absent from _CHOICES until a complete repair is established.
+    # Diagnostic recipe: the original alias-only trial crashed during train-car
+    # precache; the additive edition now has an independent bounded fresh-load
+    # pass. Gameplay remains unverified.
     "hill-valley-steaks-tannery-city-v1": _IdentityRecipe(
         "hill-valley-steaks-tannery-city-v1",
         "2e2d21399a6a887f9ead7755c0f504c41367e6838a9af45ca00f0f86baa70597",
@@ -115,7 +116,15 @@ _CHOICES = {
         "saving, reopening and reloading. Check Mac Test & Identity for results "
         "recorded against your exact prepared edition. "
         "Trains, cargo, bridges, objectives and extended play still need testing. "
-        "This edition remains experimental.")
+        "This edition remains experimental."),
+    "hill-valley-steaks-tannery-city-v1": RecipeChoice(
+        "hill-valley-steaks-tannery-city-v1", "Hill Valley train-car compatibility v1",
+        "Adds the reviewed Cowhide Car v1/v2 model, dummy, texture and icon family "
+        "from a preserved compatible import, and repairs the Tannery identity used "
+        "by this scenario. The exact prepared edition passed a bounded fresh-load "
+        "test and reached the Hill Valley Steaks HUD. Trains, cargo, bridges, "
+        "objectives, save/reload and extended play remain unverified; this edition "
+        "is experimental and should keep its own saves."),
 }
 
 
