@@ -14,6 +14,9 @@ was run on this Mac. Full feature parity remains a project goal.
 | Read community compatibility reports | Implemented | Cached upstream stability/multiplayer reports appear separately from local Mac tests. Refresh Collection refreshes this information. |
 | Community reviews and voting | Implemented | Inline cached public poll results, total votes, approximate stars and separate Not Working share. Explicit refresh; voting opens the original discussion. Hidden results remain unavailable. |
 | Read a briefing aloud | Implemented | Select any installed macOS voice; manage additional voices in System Settings. Reads original or translated text. |
+| Record local Mac play tests | Implemented | Map Details checklist with scope/date, exact input binding, partial results and Known issue reporting. |
+| Inspect imports | Implemented with limits | Bounded XML/reference diagnostics; never a runtime compatibility guarantee. |
+| Remove imported maps and downloads | Implemented | Inactive-map removal, retained exact-variant saves, shared archive protection and interrupted-removal recovery. |
 | Return to the original game | Implemented | Complete Original Game profile with its own preserved saves. |
 | Launcher installation and updates | Implemented; fresh-Mac UI QA pending | Drag-to-Applications DMG, guided first launch and verified automatic updates. Actual isolated v0.3.0-to-v0.3.8 replacement verified; fresh-Mac validation remains. |
 | Original launcher icon | Implemented | Same inherited Windows artwork, converted to macOS ICNS. Original is 64 × 64. |

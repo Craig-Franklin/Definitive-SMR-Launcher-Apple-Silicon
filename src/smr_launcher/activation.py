@@ -330,7 +330,7 @@ class FilesystemProfiles:
                 self._write_marker(self.live, ORIGINAL, None)
             _atomic_json(self.state_file, dict(schema=SCHEMA, active=ORIGINAL))
 
-    def register_variant(self, variant_id: str, prepared_root: Path) -> str:
+    def register_variant(self, variant_id: str, prepared_root: Path, *, saved_games: Optional[Path] = None) -> str:
         """Make an independent writable generation from an immutable prepared tree."""
         if not _SHA256.fullmatch(variant_id):
             raise ValueError("Variant identity must be a lowercase SHA-256 digest")
@@ -363,6 +363,18 @@ class FilesystemProfiles:
                 _make_writable_tree(temporary)
                 if self._asset_hash(temporary) != expected_hash or self._asset_hash(source) != expected_hash:
                     raise ActivationError("Prepared source changed during registration")
+                if saved_games is not None:
+                    from .variants import _tree_manifest
+                    _assert_no_symlink_ancestor(saved_games)
+                    _assert_regular_tree(saved_games)
+                    saved_manifest = _tree_manifest(saved_games)
+                    # Never merge retained saves into a generation with existing saves.
+                    (temporary / "Saves").rmdir()
+                    shutil.copytree(saved_games, temporary / "Saves", copy_function=shutil.copy2)
+                    if (_tree_manifest(temporary / "Saves") != saved_manifest
+                            or _tree_manifest(saved_games) != saved_manifest):
+                        raise ActivationError("Retained saves changed during restoration")
+                    _make_writable_tree(temporary / "Saves")
                 self._write_marker(temporary, profile_id, variant_id)
                 _fsync_tree(temporary)
                 os.rename(temporary, destination)

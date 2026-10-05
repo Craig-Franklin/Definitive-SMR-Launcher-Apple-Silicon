@@ -43,6 +43,17 @@ def _tree_manifest(root: Path) -> Tuple[Dict[str, str], Tuple[str, ...]]:
     return dict(sorted(files.items())), tuple(sorted(directories))
 
 
+def assets_manifest_hash(root: Path) -> str:
+    assets_files = {}
+    assets_directories = []
+    for name in ("CustomAssets", "UserMaps"):
+        files, directories = _tree_manifest(root / name)
+        assets_files.update({name + "/" + path: digest for path, digest in files.items()})
+        assets_directories.extend(name + "/" + path for path in directories)
+    assets_record = json.dumps({"files": dict(sorted(assets_files.items())), "directories": sorted(assets_directories)}, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(assets_record).hexdigest()
+
+
 def _prepare_variant(
     clean_profile: Path,
     imported_package: Path,
@@ -99,14 +110,7 @@ def _prepare_variant(
         if edition_options:
             from .editions import apply_options
             edition = apply_options(stage, edition_options)
-        assets_files = {}
-        assets_directories = []
-        for name in ("CustomAssets", "UserMaps"):
-            files, directories = _tree_manifest(stage / name)
-            assets_files.update({name + "/" + path: digest for path, digest in files.items()})
-            assets_directories.extend(name + "/" + path for path in directories)
-        assets_record = json.dumps({"files": dict(sorted(assets_files.items())), "directories": sorted(assets_directories)}, sort_keys=True, separators=(",", ":")).encode()
-        assets_sha256 = hashlib.sha256(assets_record).hexdigest()
+        assets_sha256 = assets_manifest_hash(stage)
         identity_fields = {"schema": PREPARATION_SCHEMA, "recipe": "original",
                            "archive": archive_sha256, "game": game_executable_sha256,
                            "assets": assets_sha256}

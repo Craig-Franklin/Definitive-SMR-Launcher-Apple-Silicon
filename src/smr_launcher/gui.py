@@ -5,6 +5,8 @@ from pathlib import Path
 from queue import Empty, Queue
 from threading import Event, Thread
 from typing import Callable, Optional
+from datetime import datetime
+import getpass
 import math
 import re
 import subprocess
@@ -17,6 +19,7 @@ from .map_updates import find_map_updates
 from .ratings import fetch_rating, read_cached_rating
 from .language import LANGUAGES, LanguagePreferences, set_language, tr, translate_briefing, open_translation_settings
 from .voices import list_voices, speak, open_voice_settings
+from .verification import CHECKS
 from .activation import ORIGINAL
 from .application import LauncherApplication, MapRecord
 from .collection import RemoteMap, download_all_maps, download_map, fetch_catalogue
@@ -31,6 +34,25 @@ from .updates import (Release, UpdatePreferences, current_app_bundle, download_r
 
 def _display_name(name: str) -> str:
     return re.sub(r"\bv(\d+) (\d{2})\b", r"v\1.\2", name.replace("_", " "))
+
+
+MAC_TEST_LABELS = dict(
+    scenario_loaded="Fresh scenario loaded successfully",
+    gameplay="Track, stations and trains worked during gameplay",
+    autosave_written="An autosave was written",
+    manual_save_written="A manual save was written",
+    manual_save_reloaded="Quit, reopened the game and loaded the manual save",
+    continued_after_reload="Continued playing successfully after reloading",
+)
+
+
+def _checks_text(report):
+    if report is None:
+        return "No current static report. Choose Run Import Checks. Gameplay remains unverified until a Mac play test is recorded."
+    findings = report["warnings"]
+    return (f"Checked: {report['checked_at']}\nXML files inspected: {report['xml_files_checked']}\n\n"
+            + ("Potential problems to inspect:\n\n" + "\n\n".join(findings) if findings else "No problems found by these static checks.")
+            + "\n\n" + report["limitations"])
 
 
 class TranslatedChoice(tk.StringVar):
@@ -728,7 +750,7 @@ class LauncherWindow:
         notebook = ttk.Notebook(frame)
         notebook.pack(fill="both", expand=True)
         verification = self.app.verification_for(record)
-        identity = f"Archive: {record.archive_filename or record.name}\nSHA-256: {record.archive_sha256}\nVariant: {record.variant_id}\n\n" + (verification.scope + "\n\n" + verification.issue if verification else "No local gameplay result recorded.")
+        identity = f"Archive: {record.archive_filename or record.name}\nSHA-256: {record.archive_sha256}\nVariant: {record.variant_id}\n\n" + (f"{verification.status} · {verification.observed_at}\nReported by: {verification.reporter}\n{verification.scope}\n\n" + "\n".join(("✓ " if verification.checks[key] else "○ ") + label for key, label in MAC_TEST_LABELS.items()) + "\n\n" + verification.issue if verification else "No local gameplay result recorded.")
         community_text = (f"Upstream community report: {community.stability}\nMultiplayer: "
                           + ({True: "Reported supported", False: "Reported unsupported", None: "Not reported"}[community.multiplayer])
                           + "\n\nThese are community reports for the original map, not verification on the Mac edition. "
@@ -738,7 +760,8 @@ class LauncherWindow:
         for title, content in (("Briefing", metadata.description or "No briefing provided."),
                                ("Original mapInfo", metadata.raw_text or "No mapInfo.txt provided."),
                                ("Community", community_text),
-                               ("Mac Test & Identity", identity)):
+                               ("Mac Test & Identity", identity),
+                               ("Import Checks", _checks_text(self.app.import_checks(record)))):
             tab = ttk.Frame(notebook)
             notebook.add(tab, text=tr(title))
             text = tk.Text(tab, wrap="word", font=("Helvetica Neue", 12), padx=12, pady=12, borderwidth=0)
@@ -770,6 +793,16 @@ class LauncherWindow:
                 replace_text("Community", text)
             display_rating(read_cached_rating(community.discussion_url, cache))
             ttk.Button(links, text="Refresh Rating", command=lambda: self._submit("Refreshing public community votes…", lambda: fetch_rating(community.discussion_url, cache), display_rating)).pack(side="left", padx=8)
+        actions = ttk.Frame(frame, padding=(0, 6))
+        actions.pack(side="bottom", fill="x", before=notebook)
+        ttk.Button(actions, text="Record Mac Test…", command=lambda: self._record_mac_test(record, popup)).pack(side="left")
+        ttk.Button(actions, text="Run Import Checks", command=lambda: self._submit(
+            "Checking map XML and file references…", lambda: self.app.import_checks(record, refresh=True),
+            lambda report: replace_text("Import Checks", _checks_text(report)))).pack(side="left", padx=8)
+        ttk.Button(actions, text="Switch to Original Game", command=lambda: self._submit(
+            "Switching to Original Game…", lambda: self.app.activate(ORIGINAL),
+            lambda _: self.status.set("Original Game is active. The map can now be removed."))).pack(side="left")
+        ttk.Button(actions, text="Remove Map…", command=lambda: self._remove_map(record, popup)).pack(side="right")
         translation = ttk.Frame(frame, padding=(0, 8))
         translation.pack(side="bottom", fill="x", before=notebook)
         source = tk.StringVar(value=LANGUAGES['en'])
@@ -794,6 +827,63 @@ class LauncherWindow:
         ttk.Button(controls, text="Close", command=close).pack(side="right")
         popup.protocol("WM_DELETE_WINDOW", close)
         self._localize_widgets(popup)
+
+    def _record_mac_test(self, record: MapRecord, details) -> None:
+        if self.busy or self.app is None:
+            return
+        popup = tk.Toplevel(details)
+        popup.title("Record Mac Test")
+        popup.geometry("640x680")
+        popup.minsize(610, 650)
+        frame = ttk.Frame(popup, padding=22)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text=_display_name(record.name), font=("Helvetica Neue", 17, "bold"), wraplength=570).pack(anchor="w")
+        ttk.Label(frame, text="Play this map, quit Railroads, then record your result before switching maps. Check only what you personally tested.", wraplength=570).pack(anchor="w", pady=12)
+        checks = {key: tk.BooleanVar(value=False) for key in CHECKS}
+        for key, label in MAC_TEST_LABELS.items():
+            ttk.Checkbutton(frame, text=label, variable=checks[key]).pack(anchor="w", pady=3)
+        ttk.Label(frame, text="Test scope / duration (required)").pack(anchor="w", pady=(16, 4))
+        scope = tk.Text(frame, height=3, wrap="word", borderwidth=1, relief="solid", highlightthickness=1, highlightbackground="#666666", padx=6, pady=6)
+        scope.pack(fill="x")
+        ttk.Label(frame, text="Example: 20 minutes; built track, stations and a train; tested a bridge.", wraplength=570).pack(anchor="w")
+        ttk.Label(frame, text="Crash or other issue (leave blank if none observed)").pack(anchor="w", pady=(14, 4))
+        issue = tk.Text(frame, height=3, wrap="word", borderwidth=1, relief="solid", highlightthickness=1, highlightbackground="#666666", padx=6, pady=6)
+        issue.pack(fill="x")
+        ttk.Label(frame, text="All six checks and no reported issue earn Verified for these exact map files and game build. Partial tests stay Not verified; an issue becomes Known issue. Short tests do not prove a full campaign.", wraplength=570).pack(anchor="w", pady=14)
+        controls = ttk.Frame(frame)
+        controls.pack(side="bottom", fill="x")
+        def finished(result):
+            if popup.winfo_exists(): popup.destroy()
+            if details.winfo_exists(): details.destroy()
+            self.status.set("Mac test recorded: " + result.status)
+            self._show("maps")
+        def save():
+            observation = scope.get("1.0", "end-1c").strip()
+            problem = issue.get("1.0", "end-1c").strip()
+            if not observation or len(observation) > 500 or len(problem) > 500:
+                messagebox.showerror("Test details", "Enter a test scope. Scope and issue must each be 500 characters or fewer.", parent=popup)
+                return
+            values = {key: variable.get() for key, variable in checks.items()}
+            self._submit("Recording your Mac play test…", lambda: self.app.record_gameplay(
+                record, datetime.now().astimezone().isoformat(), getpass.getuser(), values, observation, problem), finished)
+        ttk.Button(controls, text="Cancel", command=popup.destroy).pack(side="right")
+        ttk.Button(controls, text="Save Test Result", command=save).pack(side="right", padx=8)
+
+    def _remove_map(self, record: MapRecord, details) -> None:
+        if self.busy or self.app is None:
+            return
+        if self.app.profiles._state()["active"] == record.profile_id:
+            messagebox.showinfo("Map is active", "Quit Railroads, then use Switch to Original Game in Map Details. You can remove this map afterward.", parent=details)
+            return
+        if not messagebox.askyesno("Remove map?", "Remove “" + _display_name(record.name) + "” and its launcher-owned downloaded archive?\n\nSaved games will be kept and restored when you re-import this exact map version. Archives used by another edition will stay. Your source files outside the launcher library will stay.", parent=details, default="no"):
+            return
+        def finished(saved_games):
+            if details.winfo_exists(): details.destroy()
+            if self.selected_profile == record.profile_id: self.selected_profile = None
+            self.download_states.clear()
+            self.status.set("Map and unshared archives removed. Saved games kept for exact-version re-import.")
+            self._show("maps")
+        self._submit("Removing map and keeping saved games…", lambda: self.app.remove_map(record), finished)
 
     def _verification_text(self, record: MapRecord, *, detail: bool = False) -> str:
         if self.app is None:
@@ -1161,7 +1251,9 @@ class LauncherWindow:
     def _imported(self, result: object) -> None:
         assert isinstance(result, MapRecord)
         self.selected_profile = result.profile_id
-        self.status.set(result.name + " imported. Static checks passed; gameplay is not verified.")
+        report = self.app.import_checks(result)
+        findings = len(report["warnings"]) if report else 0
+        self.status.set(result.name + (f" imported with {findings} static findings — see Map Details → Import Checks." if findings else " imported. Gameplay is not verified; see Map Details for import checks."))
         self._show("maps")
 
     def play_selected(self) -> None:

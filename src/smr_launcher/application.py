@@ -20,10 +20,12 @@ from .activation import FilesystemProfiles, MARKER, ORIGINAL, _assert_no_symlink
 from .extraction import _freeze_tree, _publish_exclusive, _unfreeze_directories, extract_package
 from .packages import _digest, inspect_package
 from .steam import SteamInstallation
-from .variants import _tree_manifest, prepare_original_variant
+from .variants import _tree_manifest, prepare_original_variant, assets_manifest_hash
 from .verification import GameplayVerification, VerificationStore
 from .collection import RemoteMap
 from .map_metadata import MapMetadata, read_map_metadata
+from . import removal
+from .import_checks import inspect_map
 
 
 class ApplicationError(RuntimeError):
@@ -122,6 +124,7 @@ class LauncherApplication:
         fd = os.open(self.library / ".application.lock", os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX)
+            removal.resume(self)
             yield
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
@@ -259,7 +262,8 @@ class LauncherApplication:
                     raise ApplicationError("Archive does not match its collection source")
             existing = next((item for item in self.catalogue()
                              if item.archive_sha256 == inspection.source_sha256
-                             and item.game_executable_sha256 == self.installation.executable_sha256), None)
+                             and item.game_executable_sha256 == self.installation.executable_sha256
+                             and self._is_original_variant(item)), None)
             if existing is not None:
                 return self._record_source(existing, remote) if remote else existing
             archive = self._preserve_archive(source, inspection.source_sha256)
@@ -274,7 +278,8 @@ class LauncherApplication:
                 inspection.source_sha256, self.installation.executable_sha256,
             )
             self._prepare_icon(imported, variant.variant_id)
-            profile_id = self.profiles.register_variant(variant.variant_id, prepared_path)
+            profile_id = self.profiles.register_variant(variant.variant_id, prepared_path,
+                saved_games=removal.retained_saves(self, variant.variant_id))
             record = MapRecord(display_name, inspection.source_sha256, variant.variant_id,
                                profile_id, inspection.scenarios, prepared_name,
                                self.installation.executable_sha256, imported.name,
@@ -286,9 +291,60 @@ class LauncherApplication:
             records = list(self.catalogue())
             if any(item.variant_id == record.variant_id for item in records):
                 raise ApplicationError("Prepared variant identity already exists in the catalogue")
+            self._write_import_checks(record)
             records.append(record)
             _atomic_json(self.catalogue_file, dict(schema=1, maps=[item.as_json() for item in records]))
             return record
+
+    def _prepared_root(self, record: MapRecord) -> Path:
+        return removal._leaf(self.prepared, record.prepared_directory, r"[0-9a-f]{32}")
+
+    def _is_original_variant(self, record: MapRecord) -> bool:
+        # Editions share an archive; reimport must select the exact original.
+        identity = dict(schema=1, recipe="original", archive=record.archive_sha256,
+                        game=record.game_executable_sha256,
+                        assets=assets_manifest_hash(self._prepared_root(record)))
+        return hashlib.sha256(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()).hexdigest() == record.variant_id
+
+    def _write_import_checks(self, record: MapRecord) -> dict:
+        root = self._prepared_root(record)
+        _assert_regular_tree(root)
+        executable = getattr(self.installation, "executable", None)
+        stock_roots = (executable.parents[1] / "Resources",
+                       executable.parents[3] / "SMRailroadsData/assets/xml") if executable else ()
+        stock = {p.name.casefold() for root in stock_roots for p in root.rglob("*")
+                 if p.suffix.casefold() == ".xml" and p.is_file()}
+        report = inspect_map(root, stock)
+        report.update(variant_id=record.variant_id, archive_sha256=record.archive_sha256,
+                      game_executable_sha256=record.game_executable_sha256,
+                      assets_sha256=self.profiles._asset_hash(root),
+                      checked_at=datetime.now(timezone.utc).isoformat())
+        path = removal._leaf(self.library / "import-checks", record.variant_id + ".json", r"[0-9a-f]{64}\.json")
+        path.parent.mkdir(exist_ok=True)
+        _atomic_json(path, report)
+        return report
+
+    def import_checks(self, record: MapRecord, *, refresh: bool = False) -> Optional[dict]:
+        with self._locked():
+            if record not in self.catalogue():
+                raise ApplicationError("Map is no longer in this library")
+            path = removal._leaf(self.library / "import-checks", record.variant_id + ".json", r"[0-9a-f]{64}\.json")
+            if refresh:
+                self.installation.check_current()
+                return self._write_import_checks(record)
+            if not path.exists():
+                return None
+            report = json.loads(path.read_text())
+            if (report.get("schema") != 1 or report.get("variant_id") != record.variant_id
+                    or report.get("game_executable_sha256") != self.installation.executable_sha256
+                    or report.get("assets_sha256") != self.profiles._asset_hash(self._prepared_root(record))):
+                return None
+            return report
+
+    def remove_map(self, record: MapRecord) -> Path:
+        """Remove this map and unshared launcher archives; retain exact-variant saves."""
+        with self._locked():
+            return removal.remove(self, record, remove_download=True)
 
     @staticmethod
     def _matches_remote(path: Path, remote: RemoteMap) -> bool:
@@ -363,11 +419,13 @@ class LauncherApplication:
                 _unfreeze_directories(destination)
                 shutil.rmtree(destination)
                 return existing
-            profile_id = self.profiles.register_variant(variant.variant_id, destination)
+            profile_id = self.profiles.register_variant(variant.variant_id, destination,
+                saved_games=removal.retained_saves(self, variant.variant_id))
             label = " + ".join(name for name, enabled in (("Editor", editor), ("Custom difficulty", difficulty)) if enabled)
             new = replace(record, name=record.name + " — Experimental " + label,
                           variant_id=variant.variant_id, profile_id=profile_id,
                           prepared_directory=prepared_name, imported_at=datetime.now(timezone.utc).isoformat())
+            self._write_import_checks(new)
             records.append(new)
             _atomic_json(self.catalogue_file, dict(schema=1, maps=[r.as_json() for r in records]))
             return new

@@ -141,6 +141,38 @@ the original community reviews and rating discussion. Community reports do
 not establish that a map works on the Mac. Maps with a recorded local issue
 show a warning before launch.
 
+### Record a Mac test and inspect an import
+
+After playing a map, quit Railroads and open **Map Details → Record Mac Test…**
+before switching maps. Record only checks you completed: fresh scenario loading,
+gameplay, autosave, manual save, reopening and reloading that save, and continued
+play after reloading. Add the test scope and duration. All six checks with no
+reported issue earn **Verified** for the exact archive, prepared variant, assets
+and game build. Partial tests remain **Not verified**; a reported crash or other
+issue becomes **Known issue**. These are local observations, not a guarantee of
+campaign reliability or community certification.
+
+Imports automatically inspect bounded XML files for parse problems and explicit
+XML references missing from loose map/game files, including likely filename
+mismatches. **Map Details → Import Checks** shows findings and limitations;
+**Run Import Checks** also checks maps imported with older launcher versions.
+Packed assets and game behavior are outside this scan. A clean report never
+awards Verified, and warnings do not silently rewrite map files.
+
+### Remove a map while keeping its saves
+
+Quit Railroads. If the map is active, choose **Switch to Original Game** in its
+Map Details, then **Remove Map…**. Confirm to remove its installed/prepared map,
+imported files and launcher-owned archives. Archives and inputs still needed by
+another edition stay until that edition is removed. Source archives outside the
+launcher library are untouched.
+
+Saved games are independently copied, hashed and retained before removal starts.
+Reimporting the exact map/variant with the same game build restores those saves;
+a different map version receives its own empty save directory. Interrupted
+removals recover before another library operation. The retained saves and local
+test history remain in the private launcher library.
+
 ### Updates, language and activity
 
 - **Collection → Check Map Updates** compares exact filename families and known
