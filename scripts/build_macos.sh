@@ -27,6 +27,7 @@ if [[ -n "${SMR_RELEASE_IDENTITY:-}" ]]; then
   signing=(--codesign-identity "$SMR_RELEASE_IDENTITY")
 fi
 mkdir -p build
+xcrun swiftc -parse-as-library -target arm64-apple-macosx13.0 -O scripts/translate_macos.swift -o build/smr-translate
 ./scripts/create_macos_icon.sh
 print -r -- "{\"schema\":1,\"team_id\":\"${SMR_APPLE_TEAM_ID:-}\",\"repository\":\"Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon\",\"bundle_id\":\"com.craigfranklin.smrlauncher.applesilicon\"}" > build/release-policy.json
 .venv/bin/python -m PyInstaller \
@@ -36,6 +37,8 @@ print -r -- "{\"schema\":1,\"team_id\":\"${SMR_APPLE_TEAM_ID:-}\",\"repository\"
   --icon "$PWD/build/AppIcon.icns" \
   --add-data "$PWD/APPLE_SILICON_LICENSE.md:." \
   --add-data "$PWD/docs/UPSTREAM_ASSETS.md:." \
+  --add-binary "$PWD/build/smr-translate:." \
+  --add-data "$PWD/Definitive-SMR-Launcher/DSMRL_data/RRT_Difficulty.xml:Definitive-SMR-Launcher/DSMRL_data" \
   --add-data "$PWD/build/release-policy.json:." \
   "${signing[@]}" \
   --distpath "$dist_root" --workpath build/pyinstaller --specpath build/spec \

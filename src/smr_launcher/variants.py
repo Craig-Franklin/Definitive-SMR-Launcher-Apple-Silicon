@@ -50,6 +50,7 @@ def _prepare_variant(
     archive_sha256: str,
     game_executable_sha256: str,
     rules: Tuple[CompatibilityRule, ...],
+    edition_options: dict | None = None,
 ) -> PreparedVariant:
     """Build a frozen map generation without copying the stock profile's saves."""
     if any(len(value) != 64 or any(char not in "0123456789abcdef" for char in value) for value in (archive_sha256, game_executable_sha256)):
@@ -91,9 +92,13 @@ def _prepare_variant(
                 (stage / name).mkdir()
         (stage / "Saves").mkdir()
         _assert_regular_tree(stage)
-        if rules:
+        if rules or edition_options:
             _make_writable_tree(stage)
         applied = apply_rules(stage, archive_sha256, game_executable_sha256, rules) if rules else None
+        edition = None
+        if edition_options:
+            from .editions import apply_options
+            edition = apply_options(stage, edition_options)
         assets_files = {}
         assets_directories = []
         for name in ("CustomAssets", "UserMaps"):
@@ -108,6 +113,8 @@ def _prepare_variant(
         if applied is not None:
             identity_fields.update(schema=2, recipe="compatibility",
                                    rules=applied.fingerprint)
+        if edition is not None:
+            identity_fields.update(schema=3, recipe="experimental-options", options=edition)
         identity = json.dumps(identity_fields, sort_keys=True, separators=(",", ":")).encode()
         variant_id = hashlib.sha256(identity).hexdigest()
         expected_files, expected_directories = _tree_manifest(stage)

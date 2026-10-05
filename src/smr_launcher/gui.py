@@ -12,6 +12,11 @@ import webbrowser
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from .activity import ActivityLog
+from .map_updates import find_map_updates
+from .ratings import fetch_rating, read_cached_rating
+from .language import LANGUAGES, LanguagePreferences, set_language, tr, translate_briefing, open_translation_settings
+from .voices import list_voices, speak, open_voice_settings
 from .activation import ORIGINAL
 from .application import LauncherApplication, MapRecord
 from .collection import RemoteMap, download_all_maps, download_map, fetch_catalogue
@@ -27,6 +32,20 @@ from .updates import (Release, UpdatePreferences, current_app_bundle, download_r
 
 def _display_name(name: str) -> str:
     return re.sub(r"\bv(\d+) (\d{2})\b", r"v\1.\2", name.replace("_", " "))
+
+
+class TranslatedChoice(tk.StringVar):
+    """Display translated choices while retaining stable filtering keys."""
+    def __init__(self, *, value, choices):
+        self.choices = tuple(choices)
+        super().__init__(value=tr(value))
+
+    def get(self):
+        displayed = super().get()
+        return next((key for key in self.choices if tr(key) == displayed), displayed)
+
+    def set(self, value):
+        super().set(tr(value))
 
 
 class LauncherWindow:
@@ -52,6 +71,14 @@ class LauncherWindow:
         self.selected_remotes: tuple[RemoteMap, ...] = ()
         self.collection_loaded = False
         self.update_library = Path.home() / "Library/Application Support/Definitive SMR Launcher Apple Silicon"
+        self.activity = ActivityLog(self.update_library)
+        self.language_preferences = LanguagePreferences(self.update_library)
+        try:
+            self.language_preferences.load()
+        except Exception:
+            pass
+        set_language(self.language_preferences.language)
+        self.voices = ()
         self.community_index = read_cached_community_index(self.update_library / "community-index.json")
         self.community_notice = ""
         self.imported_names = set()
@@ -69,8 +96,8 @@ class LauncherWindow:
         self.pending_update_manual = False
         self.update_request_manual = False
         self.search = tk.StringVar()
-        self.sort_order = tk.StringVar(value="Name A–Z")
-        self.map_filter = tk.StringVar(value="All maps")
+        self.sort_order = TranslatedChoice(value="Name A–Z", choices=("Name A–Z", "Created newest", "Created oldest", "Updated newest", "Author"))
+        self.map_filter = TranslatedChoice(value="All maps", choices=("All maps", "Single player", "Multiplayer", "Verified", "Not verified", "Known issue"))
         self.metadata_cache = {}
         self.speech_process = None
         self.status = tk.StringVar(value="Checking the Steam Mac game…")
@@ -123,17 +150,17 @@ class LauncherWindow:
     def _menu(self) -> None:
         menu = tk.Menu(self.root)
         file_menu = tk.Menu(menu, tearoff=0)
-        file_menu.add_command(label="Import Map…", command=self.import_map, accelerator="⌘O")
-        file_menu.add_command(label="Choose Steam Library Folder…", command=self.choose_steam_library)
+        file_menu.add_command(label=tr("Import Map…"), command=self.import_map, accelerator="⌘O")
+        file_menu.add_command(label=tr("Choose Steam Library Folder…"), command=self.choose_steam_library)
         file_menu.add_separator()
-        file_menu.add_command(label="Quit", command=self._close, accelerator="⌘Q")
-        menu.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label=tr("Quit"), command=self._close, accelerator="⌘Q")
+        menu.add_cascade(label=tr("File"), menu=file_menu)
         help_menu = tk.Menu(menu, tearoff=0)
         help_menu.add_command(label="Installation & Help", command=lambda: webbrowser.open(
             "https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/blob/main/MACOS_README.md"))
         help_menu.add_command(label="Windows Feature Comparison", command=lambda: webbrowser.open(
             "https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/blob/main/docs/FEATURE_PARITY.md"))
-        menu.add_cascade(label="Help", menu=help_menu)
+        menu.add_cascade(label=tr("Help"), menu=help_menu)
         self.root.configure(menu=menu)
         self.root.bind("<Command-o>", lambda _: self.import_map())
         self.root.bind("<Command-f>", lambda _: self.search_entry.focus_set())
@@ -188,7 +215,8 @@ class LauncherWindow:
         self.sidebar.pack_propagate(False)
         self.nav_buttons: dict[str, ttk.Button] = {}
         for key, label in (("maps", "Map Library"), ("collection", "Collection"),
-                           ("original", "Original Game"), ("setup", "Setup")):
+                           ("original", "Original Game"), ("preferences", "Language & Voice"),
+                           ("activity", "Activity"), ("setup", "Setup")):
             button = ttk.Button(self.sidebar, text=label, command=lambda destination=key: self._show(destination))
             button.pack(fill="x", pady=(0, 7))
             self.nav_buttons[key] = button
@@ -217,6 +245,10 @@ class LauncherWindow:
         self.steam_label.configure(text="Installed" if self.app else "Game not found")
         if view == "collection":
             self._collection_view()
+        elif view == "activity":
+            self._activity_view()
+        elif view == "preferences":
+            self._preferences_view()
         elif view == "setup":
             self._setup_view()
         elif self.app is None:
@@ -227,6 +259,8 @@ class LauncherWindow:
             self._original_view()
         else:
             self._setup_view()
+
+        self._localize_widgets(self.root)
 
     def _missing_game(self) -> None:
         frame = ttk.Frame(self.content, padding=28)
@@ -254,12 +288,12 @@ class LauncherWindow:
         options.pack(fill="x")
         ttk.Label(options, text="Show").pack(side="left")
         filters = ttk.Combobox(options, textvariable=self.map_filter, state="readonly", width=18,
-                              values=("All maps", "Single player", "Multiplayer", "Verified", "Not verified", "Known issue"))
+                              values=tuple(tr(key) for key in self.map_filter.choices))
         filters.pack(side="left", padx=(6, 16))
         filters.bind("<<ComboboxSelected>>", lambda _: self._render_gallery())
         ttk.Label(options, text="Sort").pack(side="left")
         order = ttk.Combobox(options, textvariable=self.sort_order, state="readonly", width=19,
-                            values=("Name A–Z", "Created newest", "Created oldest", "Updated newest", "Author"))
+                            values=tuple(tr(key) for key in self.sort_order.choices))
         order.pack(side="left", padx=6)
         order.bind("<<ComboboxSelected>>", lambda _: self._render_gallery())
         self.details_button = ttk.Button(options, text="Map Details…", command=self._selected_details)
@@ -339,6 +373,7 @@ class LauncherWindow:
         self.bulk_button = ttk.Button(actions, text="Download & Import All…", command=self._download_all)
         self.bulk_button.pack(side="left", padx=8)
         ttk.Button(actions, text="Refresh", command=self._refresh_collection).pack(side="left")
+        ttk.Button(actions, text="Check Map Updates", command=self._check_map_updates).pack(side="left", padx=8)
         ttk.Button(actions, text="Collection Source", command=lambda: webbrowser.open(
             "https://archive.org/details/sid-meiers-railroads-custom-maps-collection")).pack(side="right")
         note = ("Download & Import All verifies archives in parallel, then prepares each map "
@@ -351,9 +386,9 @@ class LauncherWindow:
         frame = ttk.Frame(self.content, padding=(24, 0, 24, 20))
         frame.pack(fill="both", expand=True)
         self.collection_list = ttk.Treeview(frame, columns=("map", "progress", "size"), show="headings", selectmode="extended")
-        self.collection_list.heading("map", text="Map")
-        self.collection_list.heading("progress", text="Download progress")
-        self.collection_list.heading("size", text="Archive size")
+        self.collection_list.heading("map", text=tr("Map"))
+        self.collection_list.heading("progress", text=tr("Download progress"))
+        self.collection_list.heading("size", text=tr("Archive size"))
         self.collection_list.column("map", width=440, stretch=True)
         self.collection_list.column("progress", width=145, stretch=False, anchor="w")
         self.collection_list.column("size", width=110, stretch=False, anchor="e")
@@ -420,6 +455,9 @@ class LauncherWindow:
         try:
             while True:
                 record, state, count, total, detail = self.download_events.get_nowait()
+                previous = self.download_states.get(record.name)
+                if state in ("Imported", "Failed", "Canceled") and (not previous or previous[0] != state):
+                    self._log(record.name, state, detail)
                 self.download_states[record.name] = (state, count, total, detail)
                 if self.view == "collection" and hasattr(self, "collection_list") and self.collection_list.winfo_exists():
                     key = next((key for key, item in self.remote_rows.items() if item.name == record.name), None)
@@ -625,20 +663,20 @@ class LauncherWindow:
 
     def _read_briefing(self, text: str) -> None:
         self._stop_speech()
-        self.speech_process = subprocess.Popen(["/usr/bin/say"], stdin=subprocess.PIPE)
-        # A writer thread keeps even long briefings off Tk's event loop.
-        process = self.speech_process
-        Thread(target=lambda: process.communicate(input=text.encode("utf-8")), daemon=True).start()
+        try:
+            self.speech_process = speak(text, self.language_preferences.voice, available_voices=self.voices or None)
+        except Exception as exc:
+            messagebox.showerror(tr("Read Briefing Aloud"), str(exc), parent=self.root)
 
     def _map_details(self, record: MapRecord) -> None:
         metadata = self._metadata(record)
         popup = tk.Toplevel(self.root)
         popup.title("Map Details — " + _display_name(record.name))
-        popup.geometry("760x650")
-        popup.minsize(600, 620)
+        popup.geometry("860x770")
+        popup.minsize(760, 720)
         frame = ttk.Frame(popup, padding=22)
         frame.pack(fill="both", expand=True)
-        ttk.Label(frame, text=metadata.name or _display_name(record.name), font=("Helvetica Neue", 20, "bold"), wraplength=690).pack(anchor="w")
+        ttk.Label(frame, text=_display_name(record.name) if " — Experimental " in record.name else (metadata.name or _display_name(record.name)), font=("Helvetica Neue", 20, "bold"), wraplength=780).pack(anchor="w")
         rows = [("Author", metadata.author), ("Modified by", metadata.modified_by),
                 ("Version", metadata.version), ("Created", metadata.created), ("Updated", metadata.updated),
                 ("Map type", metadata.map_type), ("Archive source", record.source_label),
@@ -667,25 +705,66 @@ class LauncherWindow:
                           + "\n\nThese are community reports for the original map, not verification on the Mac edition. "
                           "Open Community Reviews & Rating to see current votes and discussion."
                           if community else "No community information cached for this archive. Refresh Collection to check the upstream index.")
+        text_widgets = {}
         for title, content in (("Briefing", metadata.description or "No briefing provided."),
                                ("Original mapInfo", metadata.raw_text or "No mapInfo.txt provided."),
                                ("Community", community_text),
                                ("Mac Test & Identity", identity)):
             tab = ttk.Frame(notebook)
-            notebook.add(tab, text=title)
+            notebook.add(tab, text=tr(title))
             text = tk.Text(tab, wrap="word", font=("Helvetica Neue", 12), padx=12, pady=12, borderwidth=0)
             bar = ttk.Scrollbar(tab, command=text.yview)
             text.configure(yscrollcommand=bar.set)
             bar.pack(side="right", fill="y"); text.pack(fill="both", expand=True)
             text.insert("1.0", content); text.configure(state="disabled")
+            text_widgets[title] = text
+        def replace_text(title, content):
+            widget = text_widgets[title]
+            if widget.winfo_exists():
+                widget.configure(state="normal"); widget.delete("1.0", "end")
+                widget.insert("1.0", content); widget.configure(state="disabled")
+        if community and community.discussion_url:
+            cache = self.update_library / "ratings" / (community.discussion_url.rsplit("/", 1)[-1] + ".json")
+            def display_rating(rating):
+                if not popup.winfo_exists(): return
+                text = community_text + "\n\n"
+                if rating is None:
+                    text += "No rating cached. Use Refresh Rating to fetch public votes."
+                else:
+                    text += "Checked: " + rating.fetched_at + "\n"
+                    if rating.approximate_stars is not None:
+                        text += f"Approximate star average: {rating.approximate_stars:.1f} / 5\n"
+                    if rating.total_votes is not None:
+                        text += f"Total community votes: {rating.total_votes}\n"
+                    text += "\n".join(f"{option.label}: {option.percentage:g}%" for option in rating.options)
+                    text += "\n\n" + rating.detail
+                replace_text("Community", text)
+            display_rating(read_cached_rating(community.discussion_url, cache))
+            ttk.Button(links, text="Refresh Rating", command=lambda: self._submit("Refreshing public community votes…", lambda: fetch_rating(community.discussion_url, cache), display_rating)).pack(side="left", padx=8)
+        translation = ttk.Frame(frame, padding=(0, 8))
+        translation.pack(side="bottom", fill="x", before=notebook)
+        source = tk.StringVar(value=LANGUAGES['en'])
+        target = tk.StringVar(value=LANGUAGES[self.language_preferences.language])
+        ttk.Label(translation, text="From").pack(side="left")
+        ttk.Combobox(translation, textvariable=source, values=tuple(LANGUAGES.values()), state="readonly", width=12).pack(side="left", padx=4)
+        ttk.Label(translation, text="To").pack(side="left")
+        ttk.Combobox(translation, textvariable=target, values=tuple(LANGUAGES.values()), state="readonly", width=12).pack(side="left", padx=4)
+        def translate():
+            source_code = next(k for k, v in LANGUAGES.items() if v == source.get())
+            target_code = next(k for k, v in LANGUAGES.items() if v == target.get())
+            self._submit("Translating briefing with Apple’s installed languages…", lambda: translate_briefing(metadata.description, target_code, source_code), lambda result: replace_text("Briefing", result))
+        ttk.Button(translation, text="Translate Briefing", command=translate).pack(side="left", padx=4)
+        ttk.Button(translation, text="Show Original", command=lambda: replace_text("Briefing", metadata.description or "No briefing provided.")).pack(side="left", padx=4)
         controls = ttk.Frame(frame, padding=(0, 12, 0, 0))
         controls.pack(side="bottom", fill="x", before=notebook)
-        ttk.Button(controls, text="Read Briefing Aloud", command=lambda: self._read_briefing(metadata.description or metadata.raw_text)).pack(side="left")
+        ttk.Button(controls, text="Read Briefing Aloud", command=lambda: self._read_briefing(text_widgets["Briefing"].get("1.0", "end-1c"))).pack(side="left")
         ttk.Button(controls, text="Stop Reading", command=self._stop_speech).pack(side="left", padx=8)
+        ttk.Button(controls, text="Experimental Editions…", command=lambda: self._edition_options(record)).pack(side="left", padx=4)
         def close():
             self._stop_speech(); popup.destroy()
         ttk.Button(controls, text="Close", command=close).pack(side="right")
         popup.protocol("WM_DELETE_WINDOW", close)
+        self._localize_widgets(popup)
 
     def _verification_text(self, record: MapRecord, *, detail: bool = False) -> str:
         if self.app is None:
@@ -750,6 +829,138 @@ class LauncherWindow:
                                                 command=self._download_update)
         self.install_update_button.pack(side="left", padx=(8, 0))
         self._controls()
+
+    def _localize_widgets(self, widget) -> None:
+        for child in widget.winfo_children():
+            try:
+                if "text" in child.keys() and ("textvariable" not in child.keys() or not child.cget("textvariable")):
+                    original = getattr(child, "_english_text", str(child.cget("text")))
+                    child._english_text = original
+                    child.configure(text=tr(original))
+            except tk.TclError:
+                pass
+            self._localize_widgets(child)
+
+    def _log(self, action, state, detail="") -> None:
+        try:
+            self.activity.append(action, state, detail)
+        except Exception:
+            pass  # Logging must never interrupt a completed game transaction.
+
+    def _activity_view(self) -> None:
+        frame = ttk.Frame(self.content, padding=24)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Activity", font=("Helvetica Neue", 21, "bold")).pack(anchor="w")
+        ttk.Label(frame, text="Recent launcher operations, retained locally between sessions.").pack(anchor="w", pady=8)
+        actions = ttk.Frame(frame); actions.pack(fill="x", pady=(0, 8))
+        query = tk.StringVar()
+        ttk.Entry(actions, textvariable=query).pack(side="left", fill="x", expand=True)
+        output = tk.Text(frame, wrap="word", padx=10, pady=10)
+        bar = ttk.Scrollbar(frame, command=output.yview)
+        output.configure(yscrollcommand=bar.set)
+        bar.pack(side="right", fill="y"); output.pack(fill="both", expand=True)
+        def refresh(*_):
+            try:
+                records = self.activity.records()
+                needle = query.get().casefold()
+                lines = [f"{r['time']}  ·  {r['state']}  ·  {r['action']}\n{r['detail']}" for r in reversed(records)]
+                content = "\n\n".join(line for line in lines if needle in line.casefold()) or "No matching activity yet."
+            except Exception as exc:
+                content = "Activity history needs inspection: " + str(exc)
+            output.configure(state="normal"); output.delete("1.0", "end")
+            output.insert("1.0", content); output.configure(state="disabled")
+        ttk.Button(actions, text="Refresh", command=refresh).pack(side="left", padx=8)
+        query.trace_add("write", refresh); refresh()
+
+    def _preferences_view(self) -> None:
+        frame = ttk.Frame(self.content, padding=28)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Language & Voice", font=("Helvetica Neue", 21, "bold")).pack(anchor="w")
+        ttk.Label(frame, text="Interface language").pack(anchor="w", pady=(20, 5))
+        language = tk.StringVar(value=LANGUAGES[self.language_preferences.language])
+        choice = ttk.Combobox(frame, textvariable=language, values=tuple(LANGUAGES.values()), state="readonly", width=32)
+        choice.pack(anchor="w")
+        def changed(_=None):
+            code = next(k for k, value in LANGUAGES.items() if value == language.get())
+            try:
+                self.language_preferences.save(code, self.language_preferences.voice)
+                selected_sort, selected_filter = self.sort_order.get(), self.map_filter.get()
+                set_language(code)
+                self.sort_order.set(selected_sort); self.map_filter.set(selected_filter)
+                self._menu(); self._show("preferences")
+            except Exception as exc:
+                messagebox.showerror("Language", str(exc), parent=self.root)
+        choice.bind("<<ComboboxSelected>>", changed)
+        ttk.Label(frame, text="Voice").pack(anchor="w", pady=(20, 5))
+        labels = {f"{voice.name} · {voice.language}": voice.identifier for voice in self.voices}
+        default = tr("System default")
+        selected = next((label for label, identifier in labels.items() if identifier == self.language_preferences.voice), default)
+        voice_choice = ttk.Combobox(frame, values=(default, *labels), state="readonly", width=48)
+        voice_choice.set(selected); voice_choice.pack(anchor="w")
+        def voice_changed(_=None):
+            try:
+                self.language_preferences.save(self.language_preferences.language, labels.get(voice_choice.get(), ""))
+            except Exception as exc:
+                messagebox.showerror("Voice", str(exc), parent=self.root)
+        voice_choice.bind("<<ComboboxSelected>>", voice_changed)
+        buttons = ttk.Frame(frame); buttons.pack(anchor="w", pady=12)
+        def loaded(result):
+            self.voices = result
+            self.status.set(f"{len(self.voices)} macOS voices available.")
+            if self.view == "preferences": self._show("preferences")
+        ttk.Button(buttons, text="Refresh Voices", command=lambda: self._submit("Loading macOS voices…", list_voices, loaded)).pack(side="left")
+        ttk.Button(buttons, text="Manage Voices…", command=lambda: self._submit("Opening macOS voice settings…", open_voice_settings)).pack(side="left", padx=8)
+        ttk.Separator(frame).pack(fill="x", pady=20)
+        ttk.Label(frame, text="Briefing translation uses Apple’s installed language models on macOS 26 or later. Original map text is preserved.", wraplength=610).pack(anchor="w")
+        ttk.Button(frame, text="Translation Languages…", command=lambda: self._submit("Opening translation settings…", open_translation_settings)).pack(anchor="w", pady=12)
+        if not self.voices and not self.busy:
+            self._submit("Loading macOS voices…", list_voices, loaded)
+
+    def _check_map_updates(self) -> None:
+        def operation():
+            remotes = fetch_catalogue()
+            if self.app: self.app.match_collection_sources(remotes)
+            return remotes, find_map_updates(self._records(), remotes)
+        def finished(result):
+            self.remote_records, candidates = result
+            self.collection_loaded = True
+            self._show_map_updates(candidates)
+        self._submit("Checking for map updates…", operation, finished)
+
+    def _show_map_updates(self, candidates) -> None:
+        popup = tk.Toplevel(self.root); popup.title(tr("Map Updates")); popup.geometry("790x440")
+        frame = ttk.Frame(popup, padding=18); frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Updates are imported as separate editions. Existing maps and saves remain available.", wraplength=730).pack(anchor="w", pady=(0, 12))
+        rows = ttk.Treeview(frame, columns=("old", "new", "kind"), show="headings", selectmode="extended")
+        for key, label in (("old", "Installed archive"), ("new", "Available archive"), ("kind", "Change")):
+            rows.heading(key, text=tr(label)); rows.column(key, width=300 if key != "kind" else 120)
+        rows.pack(fill="both", expand=True)
+        for i, item in enumerate(candidates):
+            rows.insert("", "end", iid=str(i), values=(item.installed_filename, item.remote.name, "New version" if item.kind == "new_version" else "Revised archive"))
+        note = "No newer matching versions found." if not candidates else "Select the updates to import."
+        ttk.Label(frame, text=note).pack(anchor="w", pady=8)
+        def import_selected():
+            chosen = tuple({candidates[int(i)].remote.name: candidates[int(i)].remote for i in rows.selection()}.values())
+            if chosen and not self.busy:
+                popup.destroy(); self._download_all(chosen)
+        ttk.Button(frame, text="Import Selected Updates", command=import_selected).pack(anchor="e")
+        self._localize_widgets(popup)
+
+    def _edition_options(self, record):
+        popup = tk.Toplevel(self.root); popup.title(tr("Experimental Editions"))
+        frame = ttk.Frame(popup, padding=24); frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Create a separate edition of " + _display_name(record.name), wraplength=560).pack(anchor="w")
+        editor = tk.BooleanVar(); difficulty = tk.BooleanVar()
+        ttk.Checkbutton(frame, text="Enable terrain editor — export workflow pending", variable=editor, state="disabled").pack(anchor="w", pady=(16, 5))
+        ttk.Checkbutton(frame, text="Use Windows launcher custom difficulty levels", variable=difficulty).pack(anchor="w")
+        ttk.Label(frame, text="Editor saving currently conflicts with protected map assets; that option stays unavailable until edited maps can be captured safely.\n\nCustom difficulty is experimental on the Mac edition. The new edition starts with empty saves and does not replace your original. Test a fresh scenario first. Custom difficulty is refused if the map supplies its own definitions.", wraplength=560).pack(anchor="w", pady=16)
+        def create():
+            if self.busy or not (editor.get() or difficulty.get()): return
+            options = dict(editor=editor.get(), difficulty=difficulty.get())
+            popup.destroy()
+            self._submit("Preparing a separate experimental edition…", lambda: self.app.create_edition(record, **options), self._imported)
+        ttk.Button(frame, text="Create Experimental Edition", command=create).pack(anchor="e")
+        self._localize_widgets(popup)
 
     def _install_application(self) -> None:
         if self.install_source is None or self.busy:
@@ -858,11 +1069,11 @@ class LauncherWindow:
             self.setup_button.configure(state="normal" if not self.busy else "disabled")
         if hasattr(self, "download_button") and self.download_button.winfo_exists():
             ready = enrolled and self.selected_remote is not None and not self.busy
-            self.download_button.configure(state="normal" if ready else "disabled", text="Download & Import Selected")
+            self.download_button.configure(state="normal" if ready else "disabled", text=tr("Download & Import Selected"))
         if hasattr(self, "bulk_button") and self.bulk_button.winfo_exists():
             ready = ((self.bulk_active and not self.bulk_cancel.is_set())
                      or (enrolled and self.collection_loaded and not self.busy))
-            self.bulk_button.configure(text="Cancel Imports" if self.bulk_active else "Download & Import All…",
+            self.bulk_button.configure(text=tr("Cancel Imports" if self.bulk_active else "Download & Import All…"),
                                        state="normal" if ready else "disabled")
         if hasattr(self, "check_update_button") and self.check_update_button.winfo_exists():
             self.check_update_button.configure(state="normal" if not self.busy else "disabled")
@@ -874,18 +1085,28 @@ class LauncherWindow:
         if self.busy:
             return
         self.busy = True
+        self._log(label, "Started")
         self.status.set(label)
         self._controls()
 
         def worker() -> None:
             try:
-                self.results.put((True, operation(), finished))
+                value = operation()
+                self._log(label, "Completed")
+                self.results.put((True, value, finished))
             except Exception as exc:
+                self._log(label, "Failed", str(exc))
                 self.results.put((False, exc, None))
 
         Thread(target=worker, daemon=True).start()
 
     def _poll(self) -> None:
+        speech = self.speech_process
+        if speech is not None and speech.done:
+            self.speech_process = None
+            if getattr(speech, "error", None):
+                self.status.set("Speech stopped: " + speech.error)
+                self._log("Read briefing", "Failed", speech.error)
         self._update_download_rows()
         try:
             while True:
@@ -893,7 +1114,11 @@ class LauncherWindow:
                 self.busy = False
                 if successful:
                     if finished:
-                        finished(value)
+                        try:
+                            finished(value)
+                        except Exception as exc:
+                            self._log("Display operation result", "Failed", str(exc))
+                            self.status.set("Operation completed; displaying its result failed: " + str(exc))
                 else:
                     self.bulk_active = False
                     self.status.set("Action stopped: " + str(value))

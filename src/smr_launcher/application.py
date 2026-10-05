@@ -45,6 +45,7 @@ class MapRecord:
     source_label: str = "Local archive · origin not recorded"
     archive_modified: str = ""
     imported_at: str = ""
+    archive_sha1: str = ""
 
     @classmethod
     def from_json(cls, value: dict) -> "MapRecord":
@@ -56,6 +57,7 @@ class MapRecord:
             value.get("archive_filename", ""), value.get("source_url", ""),
             value.get("source_label", "Local archive · origin not recorded"),
             value.get("archive_modified", ""), value.get("imported_at", ""),
+            value.get("archive_sha1", ""),
         )
 
     def as_json(self) -> dict:
@@ -66,7 +68,7 @@ class MapRecord:
                     imported_directory=self.imported_directory,
                     archive_filename=self.archive_filename, source_url=self.source_url,
                     source_label=self.source_label, archive_modified=self.archive_modified,
-                    imported_at=self.imported_at)
+                    imported_at=self.imported_at, archive_sha1=self.archive_sha1)
 
 
 
@@ -280,7 +282,7 @@ class LauncherApplication:
                                remote.source_url if remote else "",
                                "Internet Archive · verified archive" if remote else "Local archive",
                                remote.archive_modified if remote else "",
-                               datetime.now(timezone.utc).isoformat())
+                               datetime.now(timezone.utc).isoformat(), remote.sha1 if remote else "")
             records = list(self.catalogue())
             if any(item.variant_id == record.variant_id for item in records):
                 raise ApplicationError("Prepared variant identity already exists in the catalogue")
@@ -302,7 +304,7 @@ class LauncherApplication:
     def _record_source(self, record: MapRecord, remote: RemoteMap) -> MapRecord:
         updated = replace(record, archive_filename=remote.name, source_url=remote.source_url,
                           source_label="Internet Archive · verified archive",
-                          archive_modified=remote.archive_modified)
+                          archive_modified=remote.archive_modified, archive_sha1=remote.sha1)
         records = [updated if item.variant_id == record.variant_id else item for item in self.catalogue()]
         _atomic_json(self.catalogue_file, dict(schema=1, maps=[item.as_json() for item in records]))
         return updated
@@ -315,7 +317,7 @@ class LauncherApplication:
         matched = 0
         with self._locked():
             for record in self.catalogue():
-                if record.source_url:
+                if record.source_url and record.archive_sha1:
                     continue
                 archive = self.originals / (record.archive_sha256 + ".7z")
                 _assert_no_symlink_ancestor(archive)
@@ -334,6 +336,41 @@ class LauncherApplication:
         if not directory or Path(directory).name != directory or directory in (".", ".."):
             return MapMetadata()
         return read_map_metadata(self.imports / directory / "mapInfo.txt")
+
+    def create_edition(self, record: MapRecord, *, editor: bool, difficulty: bool) -> MapRecord:
+        """Prepare and register an opt-in edition without activating it or copying saves."""
+        from .editions import SUPPORTED_GAME
+        from .variants import _prepare_variant
+        if editor:
+            raise ApplicationError("Editor saving needs an isolated export workflow before it can be enabled safely")
+        with self._locked():
+            self._stopped()
+            records = list(self.catalogue())
+            if record not in records or record.game_executable_sha256 != SUPPORTED_GAME:
+                raise ApplicationError("Edition options require the inspected Steam Mac game build and a current library map")
+            if Path(record.prepared_directory).name != record.prepared_directory:
+                raise ApplicationError("Invalid prepared profile path")
+            source = self.prepared / record.prepared_directory
+            _assert_no_symlink_ancestor(source)
+            prepared_name = uuid.uuid4().hex
+            destination = self.prepared / prepared_name
+            options = dict(editor=editor, difficulty=difficulty, parent=record.variant_id)
+            variant = _prepare_variant(source, source, destination, record.archive_sha256,
+                                       record.game_executable_sha256, (), options)
+            existing = next((r for r in records if r.variant_id == variant.variant_id), None)
+            if existing:
+                # Only this newly created independent output is removed.
+                _unfreeze_directories(destination)
+                shutil.rmtree(destination)
+                return existing
+            profile_id = self.profiles.register_variant(variant.variant_id, destination)
+            label = " + ".join(name for name, enabled in (("Editor", editor), ("Custom difficulty", difficulty)) if enabled)
+            new = replace(record, name=record.name + " — Experimental " + label,
+                          variant_id=variant.variant_id, profile_id=profile_id,
+                          prepared_directory=prepared_name, imported_at=datetime.now(timezone.utc).isoformat())
+            records.append(new)
+            _atomic_json(self.catalogue_file, dict(schema=1, maps=[r.as_json() for r in records]))
+            return new
 
     def _prepare_icon(self, imported: Path, variant_id: str) -> None:
         source = imported / "mapIcon.jpg"

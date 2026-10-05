@@ -159,6 +159,34 @@ class ApplicationTests(unittest.TestCase):
         with self.assertRaises(ApplicationError):
             self.application.import_archive(self.archive, original_filename=wrong.name, remote=wrong)
 
+    def test_difficulty_edition_replay_and_separate_saves(self):
+        from smr_launcher import editions
+        (self.installation.profile_root / 'Settings.ini').write_text('[User Settings]\nPlayerName=Test\n')
+        self.application.setup()
+        original = self.application.import_archive(self.archive)
+        source = self.application.prepared / original.prepared_directory
+        original_bytes = (source / 'CustomAssets/Example.txt').read_bytes()
+        with patch.object(editions, 'SUPPORTED_GAME', self.installation.executable_sha256):
+            edition = self.application.create_edition(original, editor=False, difficulty=True)
+            self.assertEqual(self.application.create_edition(original, editor=False, difficulty=True), edition)
+            self.installation.running = True
+            with self.assertRaises(ApplicationError):
+                self.application.create_edition(original, editor=False, difficulty=True)
+            self.installation.running = False
+        self.assertEqual(len(self.application.catalogue()), 2)
+        self.assertEqual((source / 'CustomAssets/Example.txt').read_bytes(), original_bytes)
+        self.application.activate(original.profile_id)
+        (self.installation.profile_root / 'Saves/original.sav').write_text('original save')
+        self.application.activate(edition.profile_id)
+        self.assertEqual(list((self.installation.profile_root/'Saves').iterdir()), [])
+        self.assertTrue((self.installation.profile_root/'CustomAssets/XML/RRT_Difficulty.xml').is_file())
+        (self.installation.profile_root/'Saves/edition.sav').write_text('edition save')
+        self.application.activate(original.profile_id)
+        self.assertEqual((self.installation.profile_root/'Saves/original.sav').read_text(),'original save')
+        self.assertFalse((self.installation.profile_root/'CustomAssets/XML/RRT_Difficulty.xml').exists())
+        with self.assertRaises(ApplicationError):
+            self.application.create_edition(original, editor=True, difficulty=False)
+
 
 if __name__ == "__main__":
     unittest.main()

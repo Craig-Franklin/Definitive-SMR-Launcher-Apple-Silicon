@@ -136,6 +136,28 @@ the original community reviews and rating discussion. Community reports do
 not establish that a map works on the Mac. Maps with a recorded local issue
 show a warning before launch.
 
+### Updates, language and activity
+
+- **Collection → Check Map Updates** compares exact filename families and known
+  archive hashes. Select the offered updates to import separate editions. Old
+  editions and saves remain available; no automatic save migration is attempted.
+- **Map Details → Community → Refresh Rating** reads public GitHub poll results.
+  Approximate stars, total votes and “Not Working” votes remain separate from
+  local Mac verification. Voting opens the upstream discussion in your browser.
+- **Language & Voice** offers English, Dutch, French, German, Hindi, Italian,
+  Simplified Chinese and Spanish. Choose an installed voice or open macOS's voice
+  manager. Diagnostic/status prose and map-authored text may remain English.
+- **Map Details → Translate Briefing** uses Apple translation on macOS 26 or
+  later. Choose source and target languages; both models must already be
+  installed. The original remains available with **Show Original**. Reading aloud
+  uses the currently displayed briefing.
+- **Activity** provides a searchable, bounded history of local launcher actions,
+  import results and errors across sessions.
+- **Map Details → Experimental Editions…** can prepare the upstream custom
+  difficulty definitions in a separately labelled profile with empty saves.
+  Its Mac loading and gameplay behavior require testing. Editor saving needs an
+  isolated export/capture workflow, so that option remains unavailable.
+
 The Mac app uses the original Windows launcher's icon artwork; see
 [asset provenance](docs/UPSTREAM_ASSETS.md). The current
 [Windows/Mac feature comparison](docs/FEATURE_PARITY.md) lists implemented,
@@ -164,17 +186,25 @@ user can write, such as `~/Applications`. A source-built or ad hoc signed app
 does not automatically replace itself. If an update is staged while another
 launcher operation is active, it waits for a later idle quit.
 
-The personal fork's `.github/workflows/macos-app.yml` runs synthetic tests on
-main and pull requests. Pull requests also build an ad hoc development app.
-Each successful main push builds and publishes a signed release automatically;
-no manual version commit or tag push is needed. Release jobs queue rather than
-cancel one another (up to GitHub's 100 pending-job limit). The source version
-declares the release series with patch zero, such as `0.3.0`; CI stamps the
-workflow run number as the patch, such as `0.3.6`, in both the runtime and bundle.
-Gaps in patch numbers are normal. Keep this workflow's identity stable so its
-run counter stays monotonic, and raise the source major/minor for a new series.
-Tags point to the exact triggering, GitHub-Verified source commit. CI version
-stamping does not create bot commits. The release notes link its source and run.
+The personal fork's `.github/workflows/macos-app.yml` runs tests and builds a
+development app for every main push and pull request. A successful main push
+creates a signed release only when Conventional Commits since the last release
+require one:
+
+- `fix:` and `perf:` increment the patch version.
+- `feat:` increments the minor version.
+- `!` or a `BREAKING CHANGE:` footer increments the major version, including
+  while the project is below 1.0.
+- Documentation, tests, chores and other non-release commits still run CI, but
+  do not publish a release by themselves.
+
+The highest required bump wins when several commits land together. Release notes
+are generated from those commits. Existing published tags and reserved legacy
+versions are respected during migration from workflow-run numbering. Tags point
+to the exact GitHub-Verified source commit; CI stamps the release number into the
+app without creating a bot commit. Release jobs queue rather than cancel one
+another. The build uses a macOS 26 SDK for the optional Apple translation helper;
+the helper checks runtime availability before using translation.
 
 Uploads are checked in a draft before publication. Rerunning an already
 published build verifies and preserves its existing artifacts; a delayed older
@@ -210,12 +240,13 @@ signing keychain, and deletes it after packaging. The repository's built-in
 needed. Missing references or credentials stop the release. Signing,
 notarization, stapling, and macOS assessment must pass; there is no unsigned
 fallback. The release archive also receives a GitHub artifact attestation.
-The signed update and two-version replacement path still need a real release
-and clean-Mac test before being described as proven.
+The actual signed updater has replaced an isolated v0.3.0 app with v0.3.8,
+retaining the previous signed app and a private save sentinel. A fresh Mac and
+the full first-run installation-button/relaunch flow remain separate QA steps.
 
 ## Development checks
 
-On macOS with Python 3.9 or newer:
+On macOS with Python 3.12:
 
 ```sh
 python3 -m unittest discover -s tests -v

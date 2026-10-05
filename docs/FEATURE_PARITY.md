@@ -12,17 +12,17 @@ was run on this Mac. Full feature parity remains a project goal.
 | Sort and filter maps | Implemented | Creation/update date, author, name, declared player type and local Mac verification. |
 | Download one, several, or all maps | Implemented | Command/Shift selection, up to four downloads, progress, cancellation and checked serial imports. |
 | Read community compatibility reports | Implemented | Cached upstream stability/multiplayer reports appear separately from local Mac tests. Refresh Collection refreshes this information. |
-| Community reviews and voting | Browser link | Opens the original map's GitHub discussion. Inline star totals remain to be implemented; the upstream index contains no scores. |
-| Read a briefing aloud | Implemented | Uses the installed macOS speech voice. Voice selection/download UI remains to be implemented. |
+| Community reviews and voting | Implemented | Inline cached public poll results, total votes, approximate stars and separate Not Working share. Explicit refresh; voting opens the original discussion. Hidden results remain unavailable. |
+| Read a briefing aloud | Implemented | Select any installed macOS voice; manage additional voices in System Settings. Reads original or translated text. |
 | Return to the original game | Implemented | Complete Original Game profile with its own preserved saves. |
 | Launcher installation and updates | Implemented; release QA pending | First-run Install in Applications, verified copy and relaunch; signed updates. End-to-end release testing awaits notarization. |
 | Original launcher icon | Implemented | Same inherited Windows artwork, converted to macOS ICNS. Original is 64 × 64. |
-| Update a map without losing the earlier edition | Partial | New archive contents create a separate variant and retain earlier saves. Automatic map-version discovery remains to be implemented. |
-| Persistent activity log viewer | Pending | Current UI reports operation errors and progress; no dedicated historical log viewer yet. |
-| UI languages and translated briefings | Pending | Current Mac interface is English; original briefings are preserved. |
-| Custom difficulty | Pending Mac compatibility work | Must become a separately labelled profile edition with its own saves; Windows writes directly to game XML. |
-| Map editor toggle | Pending Mac compatibility work | Windows setting has not been validated against the Feral Mac edition. |
-| OpenSpy server/player browser | Pending Mac compatibility work | Online compatibility must be established for the Mac game. |
+| Update a map without losing the earlier edition | Implemented | Explicit Check Map Updates finds newer numeric versions within exact filename families and changed bytes of the same verified archive. Selected updates import separately; earlier editions and saves remain. |
+| Persistent activity log viewer | Implemented | Searchable local operation history, failures and per-map import results, retained between sessions with bounded storage. |
+| UI languages and translated briefings | Implemented with limits | Eight interface languages; diagnostic/status prose can remain English. Briefing translation uses installed Apple models on macOS 26+, explicit source/target selection and original-text restoration. No third-party translation service. |
+| Custom difficulty | Experimental edition available | Copies inherited eleven-level XML into a separate profile, refuses existing map difficulty definitions, uses empty independent saves. Mac menu/load/gameplay validation remains required. Commercial game files are unchanged. |
+| Map editor toggle | Unavailable: export workflow required | Mac binary contains the setting, but editor saves can modify protected assets and prevent normal profile switching. Must establish an isolated export path or integrated capture/reidentity transaction before enabling it. |
+| OpenSpy server/player browser | Excluded from this work | Mac online compatibility has not been established. |
 | Windows OpenSpy executable replacement / LAA patch | Windows-specific | A Windows EXE patch cannot be applied to the Feral x86_64 Mach-O game. |
 | Windows Steam/disk edition selector | Windows-specific | Mac currently supports the Steam Mac edition and alternate Steam library locations. |
 
@@ -31,9 +31,13 @@ exact variant, journals profile switches, and binds local gameplay results to
 the exact game and map assets. A community “Reported stable” label never grants
 a local Mac “Verified” result.
 
-## Next parity work
+## Remaining validation
 
-Prioritize a persistent activity viewer, map-update discovery, inline ratings,
-and language/voice controls. Validate editor, difficulty and online play against
-the Mac edition independently before exposing controls that alter the game.
-Retain originals and existing saves throughout that work.
+Validate the experimental difficulty override in a fresh Mac scenario. The
+inherited template has two differently cased time-field names compared with the
+stock Mac XML; those semantics and override precedence are not proven by static
+XML parsing. No map is marked Verified by creating an edition.
+
+The editor remains unavailable until edited outputs can be preserved without
+weakening asset integrity or save ownership. Ordinary updates and other portable
+features do not depend on the Windows LAA or OpenSpy patches.

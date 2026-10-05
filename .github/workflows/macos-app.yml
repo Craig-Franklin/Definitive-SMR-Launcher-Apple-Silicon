@@ -12,7 +12,7 @@ permissions:
 jobs:
   build:
     if: github.repository == 'Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon'
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v7
       - name: Install arm64 build dependencies
@@ -20,10 +20,8 @@ jobs:
       - name: Run synthetic tests
         run: /opt/homebrew/bin/python3.12 -m unittest discover -s tests -v
       - name: Build development app
-        if: github.event_name == 'pull_request'
         run: ./scripts/build_macos.sh
       - name: Verify development app
-        if: github.event_name == 'pull_request'
         run: |
           app="dist/Definitive SMR Launcher Apple Silicon.app"
           codesign --verify --deep --strict "$app"
@@ -32,7 +30,7 @@ jobs:
   release:
     if: github.repository == 'Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon' && github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: build
-    runs-on: macos-15
+    runs-on: macos-26
     concurrency:
       group: macos-stable-release
       cancel-in-progress: false
@@ -51,12 +49,13 @@ jobs:
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
+          SMR_RESERVED_VERSIONS: 0.3.7,0.3.8
         run: /opt/homebrew/bin/python3.12 scripts/release_macos.py prepare
       - name: Install 1Password CLI
-        if: steps.release.outputs.published != 'true'
+        if: steps.release.outputs.release_required == 'true' && steps.release.outputs.published != 'true'
         uses: 1password/install-cli-action@v4
       - name: Build, sign, notarize and package
-        if: steps.release.outputs.published != 'true'
+        if: steps.release.outputs.release_required == 'true' && steps.release.outputs.published != 'true'
         env:
           SMR_TAG: ${{ steps.release.outputs.tag }}
           SMR_VERSION: ${{ steps.release.outputs.version }}
@@ -132,12 +131,12 @@ jobs:
           /usr/bin/ditto -c -k --norsrc --keepParent "$app" "$asset"
           shasum -a 256 "$asset" > "$asset.sha256"
       - name: Attest exact release archive
-        if: steps.release.outputs.published != 'true'
+        if: steps.release.outputs.release_required == 'true' && steps.release.outputs.published != 'true'
         uses: actions/attest@v4
         with:
           subject-path: Definitive-SMR-Launcher-Apple-Silicon-*.zip
       - name: Publish personal-fork release
-        if: steps.release.outputs.published != 'true'
+        if: steps.release.outputs.release_required == 'true' && steps.release.outputs.published != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           SMR_TAG: ${{ steps.release.outputs.tag }}
