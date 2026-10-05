@@ -21,6 +21,8 @@ jobs:
         run: /opt/homebrew/bin/python3.12 -m unittest discover -s tests -v
       - name: Build development app
         run: ./scripts/build_macos.sh
+      - name: Build development disk image
+        run: ./scripts/build_dmg.sh "dist/Definitive SMR Launcher Apple Silicon.app" "dist/Definitive-SMR-development.dmg"
       - name: Verify development app
         run: |
           app="dist/Definitive SMR Launcher Apple Silicon.app"
@@ -130,11 +132,22 @@ jobs:
           asset="Definitive-SMR-Launcher-Apple-Silicon-${SMR_TAG}-arm64.zip"
           /usr/bin/ditto -c -k --norsrc --keepParent "$app" "$asset"
           shasum -a 256 "$asset" > "$asset.sha256"
+          dmg="Definitive-SMR-Launcher-Apple-Silicon-${SMR_TAG}-arm64.dmg"
+          ./scripts/build_dmg.sh "$app" "$dmg"
+          codesign --force --timestamp --sign "$SMR_RELEASE_IDENTITY" "$dmg"
+          xcrun notarytool submit "$dmg" --key "$temporary/notary.p8" --key-id "$SMR_NOTARY_KEY_ID" --issuer "$SMR_NOTARY_ISSUER_ID" --wait
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+          codesign --verify --strict "$dmg"
+          spctl --assess --type open --context context:primary-signature --verbose "$dmg"
+          shasum -a 256 "$dmg" > "$dmg.sha256"
       - name: Attest exact release archive
         if: steps.release.outputs.release_required == 'true' && steps.release.outputs.published != 'true'
         uses: actions/attest@v4
         with:
-          subject-path: Definitive-SMR-Launcher-Apple-Silicon-*.zip
+          subject-path: |
+            Definitive-SMR-Launcher-Apple-Silicon-*.zip
+            Definitive-SMR-Launcher-Apple-Silicon-*.dmg
       - name: Publish personal-fork release
         if: steps.release.outputs.release_required == 'true' && steps.release.outputs.published != 'true'
         env:

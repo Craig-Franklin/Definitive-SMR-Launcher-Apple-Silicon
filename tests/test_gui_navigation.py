@@ -1,7 +1,6 @@
 """A completed remote fetch must preserve the tab chosen while it ran."""
 from pathlib import Path
-from unittest.mock import Mock, patch
-import subprocess
+from unittest.mock import Mock
 import sys
 import unittest
 
@@ -49,17 +48,30 @@ class NavigationTests(unittest.TestCase):
         self.assertEqual(window.selected_remotes, ())
         self.assertIsNone(window.selected_remote)
 
-    def test_failed_open_after_install_keeps_source_window_alive(self):
+    def test_first_launch_routes_to_welcome_until_enrolled(self):
         window = LauncherWindow.__new__(LauncherWindow)
-        window.closed = False
-        window.needs_installation = True
-        window.status = Mock(); window.root = Mock(); window._controls = Mock()
-        with patch("smr_launcher.gui.subprocess.run", side_effect=subprocess.CalledProcessError(1, "open")), patch("smr_launcher.gui.messagebox.showinfo"):
-            window._application_installed(Path("/synthetic/Applications/Launcher.app"))
-        self.assertFalse(window.closed)
-        self.assertFalse(window.needs_installation)
-        window.root.destroy.assert_not_called()
-        self.assertIn("Installation completed", window.status.set.call_args.args[0])
+        window.app = None
+        self.assertEqual(window._initial_view(), "welcome")
+        window.app = Mock()
+        window.app.profiles.state_file.exists.return_value = False
+        self.assertEqual(window._initial_view(), "welcome")
+        window.app.profiles.state_file.exists.return_value = True
+        self.assertEqual(window._initial_view(), "maps")
+
+    def test_get_started_uses_guarded_setup_and_only_navigates_on_success(self):
+        window = LauncherWindow.__new__(LauncherWindow)
+        window.app = Mock(); window.busy = False
+        window._submit = Mock(); window._show = Mock(); window.status = Mock()
+        window.setup()
+        _, operation, finished = window._submit.call_args.args
+        self.assertEqual(operation, window.app.setup)
+        window._show.assert_not_called()
+        finished("original-game")
+        window._show.assert_called_once_with("collection")
+        window.busy = True
+        window._submit.reset_mock()
+        window.setup()
+        window._submit.assert_not_called()
 
     def test_collection_completion_does_not_override_later_navigation(self):
         window = LauncherWindow.__new__(LauncherWindow)

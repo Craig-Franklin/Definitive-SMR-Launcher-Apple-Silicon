@@ -21,6 +21,24 @@ def assets(version="0.3.6"):
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_dmg_release_requires_both_archives_and_matching_checksums(self):
+        value = assets()
+        dmg = release.asset_name("0.3.6").removesuffix(".zip") + ".dmg"
+        value["assets"].extend([
+            {"name": dmg, "state": "uploaded", "size": 120, "digest": "sha256:" + "b" * 64},
+            {"name": dmg + ".sha256", "state": "uploaded", "size": 120},
+        ])
+        digests = {release.asset_name("0.3.6"): "a" * 64, dmg: "b" * 64}
+        release.validate_assets(value, "0.3.6", digests, require_dmg=True)
+        with patch.object(release, "output", side_effect=[
+            "a" * 64 + "  " + release.asset_name("0.3.6"), "b" * 64 + "  " + dmg]):
+            release.validate_checksum("0.3.6", value)
+        with self.assertRaises(RuntimeError):
+            release.validate_assets(assets(), "0.3.6", require_dmg=True)
+        value["assets"].pop()
+        with self.assertRaises(RuntimeError):
+            release.validate_assets(value, "0.3.6", require_dmg=True)
+
     def test_checkout_origin_accepts_only_exact_personal_fork(self):
         for suffix in ("", ".git"):
             release.validate_origin("https://github.com/" + release.REPO + suffix)
@@ -159,13 +177,13 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(runtime.read_text(), 'APP_VERSION = "0.3.6"\n')
 
     def test_incomplete_or_different_upload_never_passes_gate(self):
-        release.validate_assets(assets(), "0.3.6", "a" * 64)
+        release.validate_assets(assets(), "0.3.6", {release.asset_name("0.3.6"): "a" * 64})
         incomplete = assets()
         incomplete["assets"].pop()
         with self.assertRaises(RuntimeError):
             release.validate_assets(incomplete, "0.3.6")
         with self.assertRaises(RuntimeError):
-            release.validate_assets(assets(), "0.3.6", "b" * 64)
+            release.validate_assets(assets(), "0.3.6", {release.asset_name("0.3.6"): "b" * 64})
         invalid = assets()
         invalid["assets"][0]["digest"] = None
         with self.assertRaises(RuntimeError):

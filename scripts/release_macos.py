@@ -88,28 +88,40 @@ def asset_name(version: str) -> str:
     return f"Definitive-SMR-Launcher-Apple-Silicon-v{version}-arm64.zip"
 
 
-def validate_assets(release: dict, version: str, digest: str | None = None) -> None:
-    name = asset_name(version)
+def release_asset_names(version: str, *, include_dmg: bool = True) -> list[str]:
+    zip_name = asset_name(version)
+    archives = [zip_name, zip_name.removesuffix(".zip") + ".dmg"] if include_dmg else [zip_name]
+    return [name for archive in archives for name in (archive, archive + ".sha256")]
+
+
+def validate_assets(release: dict, version: str, digests: dict[str, str] | None = None,
+                    *, require_dmg: bool = False) -> None:
     assets = release["assets"]
-    if sorted(a["name"] for a in assets) != sorted([name, name + ".sha256"]):
+    names = sorted(a["name"] for a in assets)
+    has_dmg = any(name.endswith(".dmg") for name in names)
+    if require_dmg and not has_dmg:
+        raise RuntimeError("Release disk image is missing")
+    if names != sorted(release_asset_names(version, include_dmg=has_dmg)):
         raise RuntimeError("Release assets are incomplete or unexpected")
     for item in assets:
         if item["state"] != "uploaded" or item["size"] <= 0:
             raise RuntimeError("Release upload is incomplete")
-    archive = next(a for a in assets if a["name"] == name)
-    if not re.fullmatch(r"sha256:[0-9a-f]{64}", archive.get("digest") or ""):
-        raise RuntimeError("Release archive has no GitHub SHA-256 identity")
-    if digest is not None and archive["digest"] != "sha256:" + digest:
-        raise RuntimeError("Uploaded archive differs from notarized local archive")
+        if item["name"].endswith((".zip", ".dmg")):
+            if not re.fullmatch(r"sha256:[0-9a-f]{64}", item.get("digest") or ""):
+                raise RuntimeError("Release archive has no GitHub SHA-256 identity")
+            if digests is not None and item["digest"] != "sha256:" + digests[item["name"]]:
+                raise RuntimeError("Uploaded archive differs from notarized local archive")
 
 
 def validate_checksum(version: str, release: dict) -> None:
-    name = asset_name(version)
-    checksum = output("gh", "release", "download", "v" + version, "--repo", REPO,
-                      "--pattern", name + ".sha256", "--output", "-")
-    digest = next(a["digest"][7:] for a in release["assets"] if a["name"] == name)
-    if checksum != f"{digest}  {name}":
-        raise RuntimeError("Published checksum differs from GitHub archive identity")
+    for asset in release["assets"]:
+        name = asset["name"]
+        if not name.endswith((".zip", ".dmg")):
+            continue
+        checksum = output("gh", "release", "download", "v" + version, "--repo", REPO,
+                          "--pattern", name + ".sha256", "--output", "-")
+        if checksum != f"{asset['digest'][7:]}  {name}":
+            raise RuntimeError("Published checksum differs from GitHub archive identity")
 
 
 def stamp_version(root: Path, version: str) -> None:
@@ -266,13 +278,18 @@ def publish() -> None:
     version = tag.removeprefix("v")
     if tag != "v" + version:
         raise RuntimeError("Invalid release tag")
-    name = asset_name(version)
+    names = release_asset_names(version)
     notes = _notes_path(sha)
     if not notes.is_file():
         raise RuntimeError("Prepared release notes are missing")
-    digest = hashlib.sha256(Path(name).read_bytes()).hexdigest()
-    if Path(name + ".sha256").read_text().strip() != f"{digest}  {name}":
-        raise RuntimeError("Release checksum differs from the local archive")
+    digests = {}
+    for name in names:
+        if name.endswith(".sha256"):
+            continue
+        digest = hashlib.sha256(Path(name).read_bytes()).hexdigest()
+        if Path(name + ".sha256").read_text().strip() != f"{digest}  {name}":
+            raise RuntimeError("Release checksum differs from the local archive")
+        digests[name] = digest
     target = tag_target(tag)
     if target is None:
         guard()
@@ -286,15 +303,15 @@ def publish() -> None:
         raise RuntimeError("Refusing to replace an already published release")
     guard()
     if release is None:
-        subprocess.run(["gh", "release", "create", tag, name, name + ".sha256",
+        subprocess.run(["gh", "release", "create", tag, *names,
                         "--repo", REPO, "--verify-tag", "--draft", "--title", tag,
                         "--notes-file", str(notes)], check=True)
     else:
         # Only retry this run's private draft; published artifacts are immutable.
-        subprocess.run(["gh", "release", "upload", tag, name, name + ".sha256",
+        subprocess.run(["gh", "release", "upload", tag, *names,
                         "--repo", REPO, "--clobber"], check=True)
     draft = release_for_tag(tag)
-    validate_assets(draft, version, digest)
+    validate_assets(draft, version, digests, require_dmg=True)
     validate_checksum(version, draft)
     latest = api("releases/latest", optional=True)
     make_latest = latest is None or version_tuple(version) > version_tuple(latest["tag_name"].removeprefix("v"))
@@ -304,7 +321,7 @@ def publish() -> None:
     published = release_for_tag(tag)
     if published["draft"] or published["prerelease"] or tag_target(tag) != sha:
         raise RuntimeError("Published release identity failed readback")
-    validate_assets(published, version, digest)
+    validate_assets(published, version, digests, require_dmg=True)
     print(f"Published {tag} from {sha}; latest={make_latest}")
 
 

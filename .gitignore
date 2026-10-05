@@ -11,6 +11,7 @@ diagnostics/
 *.hdd/
 *.7z
 *.zip
+*.dmg
 *.exe
 *.dll
 *.FPK

@@ -134,6 +134,11 @@ def release_notes(plan: ReleasePlan, repository: str, head: str, run_id: str) ->
                    {"feat": "Features", "fix": "Fixes", "perf": "Performance"}.get(commit.kind, "Other changes"))
         sections[section].append(commit)
     lines = [f"Signed and notarized Apple Silicon release **v{plan.version}**.", ""]
+    lines.extend([
+        f"[**Download the Mac installer (.dmg)**](https://github.com/{repository}/releases/download/v{plan.version}/Definitive-SMR-Launcher-Apple-Silicon-v{plan.version}-arm64.dmg)", "",
+        "Open the disk image, drag the launcher to Applications, then open it from Applications.",
+        "The ZIP asset is used by the built-in updater.", "",
+    ])
     for title, commits in sections.items():
         if not commits:
             continue

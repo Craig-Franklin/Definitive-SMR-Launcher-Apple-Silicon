@@ -21,7 +21,6 @@ from .activation import ORIGINAL
 from .application import LauncherApplication, MapRecord
 from .collection import RemoteMap, download_all_maps, download_map, fetch_catalogue
 from .map_metadata import safe_source_url
-from .installation import installation_needed, install_to_user_applications
 from .community import CommunityError, fetch_community_index, read_cached_community_index
 from . import APP_VERSION
 from .updates import (Release, UpdatePreferences, current_app_bundle, download_release,
@@ -103,13 +102,6 @@ class LauncherWindow:
         self.status = tk.StringVar(value="Checking the Steam Mac game…")
         self.images: dict[str, tk.PhotoImage] = {}
         self.columns = 0
-        self.install_source = None
-        self.needs_installation = False
-        try:
-            self.install_source = current_app_bundle()
-            self.needs_installation = installation_needed(self.install_source)
-        except Exception:
-            pass  # Source runs have no installable app bundle.
 
         self.background = self.root.cget("background")
         dark = sum(self.root.winfo_rgb(self.background)) < 3 * 32768
@@ -126,7 +118,7 @@ class LauncherWindow:
             if self.app.profiles.state_file.exists():
                 self.status.set("Your library is ready. Select a map, view its details, or play Original Game.")
             else:
-                self.status.set("Steam Mac game found. Play and reload a stock save before first setup.")
+                self.status.set("Steam Mac game found. Get started to prepare your map library.")
         except Exception as exc:
             self.status.set("Steam Mac game unavailable: " + str(exc))
         try:
@@ -140,7 +132,7 @@ class LauncherWindow:
                         self.update_status.set("A staged update is ready. Automatic installation is off.")
         except Exception as exc:
             self.update_status.set("Pending update needs inspection: " + str(exc))
-        self._show("maps")
+        self._show(self._initial_view())
         self.root.after(100, self._poll)
         self.root.protocol("WM_DELETE_WINDOW", self._close)
         self.root.createcommand("::tk::mac::Quit", self._close)
@@ -197,15 +189,9 @@ class LauncherWindow:
         ttk.Label(header, text="Apple Silicon", foreground=self.secondary).pack(side="left", padx=(10, 0))
         self.search_entry = ttk.Entry(header, textvariable=self.search, width=26)
         self.search_entry.pack(side="right")
-        ttk.Label(header, text="Search maps", foreground=self.secondary).pack(side="right", padx=(0, 8))
+        self.search_label = ttk.Label(header, text="Search maps", foreground=self.secondary)
+        self.search_label.pack(side="right", padx=(0, 8))
         self.search.trace_add("write", lambda *_: self._search_changed())
-
-        if self.needs_installation and trusted_team_from_bundle():
-            banner = ttk.Frame(self.root, padding=(22, 0, 22, 12))
-            banner.pack(fill="x")
-            ttk.Label(banner, text="Keep the launcher in Applications for easy access and updates.").pack(side="left")
-            self.first_install_button = ttk.Button(banner, text="Install in Applications", command=self._install_application)
-            self.first_install_button.pack(side="right")
 
         ttk.Separator(self.root).pack(fill="x")
         body = ttk.Frame(self.root)
@@ -225,7 +211,8 @@ class LauncherWindow:
         self.steam_label = ttk.Label(self.sidebar, text="Checking…", wraplength=185, foreground=self.secondary)
         self.steam_label.pack(anchor="w", pady=(5, 12))
 
-        ttk.Separator(body, orient="vertical").pack(side="left", fill="y")
+        self.sidebar_separator = ttk.Separator(body, orient="vertical")
+        self.sidebar_separator.pack(side="left", fill="y")
         self.content = ttk.Frame(body)
         self.content.pack(side="left", fill="both", expand=True)
         ttk.Separator(self.root).pack(fill="x")
@@ -237,13 +224,55 @@ class LauncherWindow:
             child.destroy()
         self.columns = 0
 
+    def _initial_view(self) -> str:
+        if self.app is None or not self.app.profiles.state_file.exists():
+            return "welcome"
+        return "maps"
+
+    def _welcome_view(self) -> None:
+        frame = ttk.Frame(self.content, padding=(48, 36))
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Welcome to Definitive SMR", font=("Helvetica Neue", 26, "bold")).pack(anchor="w")
+        ttk.Label(frame, text="Discover new maps for Sid Meier’s Railroads!", foreground=self.secondary,
+                  font=("Helvetica Neue", 14), wraplength=660).pack(anchor="w", pady=(10, 28))
+        if self.app is None:
+            ttk.Label(frame, text="Let’s find your game", font=("Helvetica Neue", 17, "bold")).pack(anchor="w")
+            ttk.Label(frame, text="Install Sid Meier’s Railroads! in Steam, open it once, then quit the game and check again.",
+                      wraplength=620).pack(anchor="w", pady=(10, 20))
+            self.welcome_retry_button = ttk.Button(frame, text="Check Again", command=self._retry_discovery)
+            self.welcome_retry_button.pack(anchor="w")
+            ttk.Button(frame, text="Choose Steam Library Folder…", command=self.choose_steam_library).pack(anchor="w", pady=(12, 0))
+        else:
+            ttk.Label(frame, text="Your Steam game is ready to connect", font=("Helvetica Neue", 17, "bold")).pack(anchor="w")
+            ttk.Label(frame, text="Get Started checks your game and preserves its original profile and existing saves. Each custom map will have its own saves.",
+                      wraplength=620).pack(anchor="w", pady=(10, 12))
+            ttk.Label(frame, text="Quit Railroads before continuing.", foreground=self.secondary).pack(anchor="w", pady=(0, 20))
+            self.setup_button = ttk.Button(frame, text="Get Started", command=self.setup)
+            self.setup_button.pack(anchor="w")
+        self._controls()
+
+    def _retry_discovery(self) -> None:
+        self._submit("Looking for the Steam Mac game…", LauncherApplication.discover, self._library_chosen)
+
     def _show(self, view: str) -> None:
         self.view = view
         self._clear_content()
+        if view == "welcome":
+            self.sidebar.pack_forget()
+            self.sidebar_separator.pack_forget()
+            self.search_entry.pack_forget()
+            self.search_label.pack_forget()
+        else:
+            self.sidebar.pack(side="left", fill="y", before=self.content)
+            self.sidebar_separator.pack(side="left", fill="y", before=self.content)
+            self.search_entry.pack(side="right")
+            self.search_label.pack(side="right", padx=(0, 8))
         for key, button in self.nav_buttons.items():
             button.state(["disabled"] if key == view else ["!disabled"])
         self.steam_label.configure(text="Installed" if self.app else "Game not found")
-        if view == "collection":
+        if view == "welcome":
+            self._welcome_view()
+        elif view == "collection":
             self._collection_view()
         elif view == "activity":
             self._activity_view()
@@ -792,24 +821,11 @@ class LauncherWindow:
         frame = ttk.Frame(self.content, padding=28)
         frame.pack(fill="both", expand=True)
         ttk.Label(frame, text="Setup", font=("Helvetica Neue", 21, "bold")).pack(anchor="w")
-        install = ttk.LabelFrame(frame, text="Launcher installation", padding=12)
-        install.pack(fill="x", pady=(12, 0))
-        installed = self.install_source is not None and not self.needs_installation
-        install_text = ("Installed in Applications." if installed else
-                        "Install a verified copy in your Applications folder. Your maps and saves stay in your library.")
-        if not trusted_team_from_bundle():
-            install_text = "Development build. The signed release provides the Install in Applications button."
-        ttk.Label(install, text=install_text, wraplength=630).pack(anchor="w")
-        self.setup_install_button = ttk.Button(install, text="Install in Applications", command=self._install_application)
-        self.setup_install_button.pack(anchor="w", pady=(8, 0))
-        instructions = ("1. Install the Steam Mac edition on the default branch.\n"
-                        "2. Play a stock scenario, save, quit, reopen, and load the save.\n"
-                        "3. Quit Railroads, then set up the clean profile below.")
-        ttk.Label(frame, text=instructions, wraplength=590, justify="left").pack(anchor="w", pady=(14, 20))
         if self.app is not None and self.app.profiles.state_file.exists():
-            ttk.Label(frame, text="Clean game profile enrolled.").pack(anchor="w")
+            ttk.Label(frame, text="Your game is connected. Original Game and its saves are preserved.", wraplength=590).pack(anchor="w", pady=(14, 0))
         else:
-            self.setup_button = ttk.Button(frame, text="Set Up Clean Game", command=self.setup)
+            ttk.Label(frame, text="Connect your Steam game to start adding maps. Your original game profile and existing saves will be preserved.", wraplength=590).pack(anchor="w", pady=(14, 14))
+            self.setup_button = ttk.Button(frame, text="Get Started", command=self.setup)
             self.setup_button.pack(anchor="w")
         ttk.Label(frame, text="The launcher preserves each source archive and keeps future saves with the selected map.",
                   wraplength=590, foreground=self.secondary).pack(anchor="w", pady=(20, 0))
@@ -962,25 +978,6 @@ class LauncherWindow:
         ttk.Button(frame, text="Create Experimental Edition", command=create).pack(anchor="e")
         self._localize_widgets(popup)
 
-    def _install_application(self) -> None:
-        if self.install_source is None or self.busy:
-            return
-        self._submit("Installing a verified copy in your Applications folder…",
-                     lambda: install_to_user_applications(self.install_source), self._application_installed)
-
-    def _application_installed(self, result: object) -> None:
-        try:
-            subprocess.run(["/usr/bin/open", "-n", str(result)], check=True)
-        except (OSError, subprocess.SubprocessError):
-            self.needs_installation = False
-            self.status.set("Installation completed. Open the launcher from your Applications folder; automatic opening failed.")
-            messagebox.showinfo("Launcher installed", f"Your verified copy is installed at:\n{result}\n\nOpen it in Finder. This window can now be closed.", parent=self.root)
-            self._controls()
-            return
-        self._stop_speech()
-        self.closed = True
-        self.root.destroy()
-
     def _save_update_setting(self) -> None:
         try:
             self.update_preferences.set_automatic(bool(self.auto_updates.get()))
@@ -1051,11 +1048,6 @@ class LauncherWindow:
 
     def _controls(self) -> None:
         enrolled = self.app is not None and self.app.profiles.state_file.exists()
-        for name in ("first_install_button", "setup_install_button"):
-            button = getattr(self, name, None)
-            if button is not None and button.winfo_exists():
-                ready = self.needs_installation and bool(trusted_team_from_bundle()) and not self.busy
-                button.configure(state="normal" if ready else "disabled")
         if hasattr(self, "import_button") and self.import_button.winfo_exists():
             self.import_button.configure(state="normal" if enrolled and not self.busy else "disabled")
         if hasattr(self, "play_button") and self.play_button.winfo_exists():
@@ -1066,7 +1058,9 @@ class LauncherWindow:
         if hasattr(self, "original_button") and self.original_button.winfo_exists():
             self.original_button.configure(state="normal" if enrolled and not self.busy else "disabled")
         if hasattr(self, "setup_button") and self.setup_button.winfo_exists():
-            self.setup_button.configure(state="normal" if not self.busy else "disabled")
+            self.setup_button.configure(state="normal" if self.app is not None and not self.busy else "disabled")
+        if hasattr(self, "welcome_retry_button") and self.welcome_retry_button.winfo_exists():
+            self.welcome_retry_button.configure(state="normal" if not self.busy else "disabled")
         if hasattr(self, "download_button") and self.download_button.winfo_exists():
             ready = enrolled and self.selected_remote is not None and not self.busy
             self.download_button.configure(state="normal" if ready else "disabled", text=tr("Download & Import Selected"))
@@ -1145,19 +1139,13 @@ class LauncherWindow:
         assert isinstance(result, LauncherApplication)
         self.app = result
         self.status.set("Steam Mac game found in the selected library.")
-        self._show(self.view)
+        self._show(self._initial_view() if self.view == "welcome" else self.view)
 
     def setup(self) -> None:
-        if self.app is None:
+        if self.app is None or self.busy:
             return
-        if not messagebox.askyesno(
-            "Set up clean game",
-            "Have you played the stock Steam Mac game, saved, quit, reopened, and loaded the save?\n\n"
-            "Set Up preserves and enrolls the clean profile. Quit Railroads first.", parent=self.root,
-        ):
-            return
-        self._submit("Preserving the clean game profile…", self.app.setup,
-                     lambda _: (self.status.set("Original Game is ready."), self._show(self.view)))
+        self._submit("Checking your game and preserving its existing saves…", self.app.setup,
+                     lambda _: (self.status.set("You’re ready. Choose a map to download, or play Original Game."), self._show("collection")))
 
     def import_map(self) -> None:
         if self.app is None or not self.app.profiles.state_file.exists():

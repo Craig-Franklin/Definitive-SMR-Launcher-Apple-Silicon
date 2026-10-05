@@ -39,7 +39,12 @@ unknown dates last. Archive modification dates are explicitly separate from
 map creation dates. Collection supports multiple selection and labels already
 imported archives. Known local failures produce a launch confirmation.
 
-Signed releases launched outside Applications offer an Install in Applications
-button. Installation copies into the user's Applications folder, validates the
-copy and then opens it, retaining the downloaded source. Development builds
-explain that installation is available with the signed release.
+The main download is a signed, notarized DMG with the original launcher icon,
+a drag arrow and an Applications shortcut. Installation uses Finder; the app
+has no self-install button or copy/relaunch service. A separate ZIP supports
+existing automatic updates.
+
+New libraries open a focused welcome screen with no sidebar or map search.
+Get Started uses the guarded setup transaction, preserves the original profile
+and saves, then opens Collection. Missing games offer discovery retry and a
+Steam folder picker. Existing libraries open Map Library directly.

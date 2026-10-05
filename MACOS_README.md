@@ -30,23 +30,24 @@ Mac app uses archives supplied by each user.
 1. Install **Sid Meier's Railroads!** from Steam on an Apple Silicon Mac, using
    Steam's default public branch. The game runs through Rosetta; accept macOS's
    Rosetta installation prompt if needed.
-2. Open this fork's [latest Mac release](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/releases/latest)
-   and download `Definitive-SMR-Launcher-Apple-Silicon-vX.Y.Z-arm64.zip` from
-   **Assets**. The source-code ZIP is for development.
-3. Unzip the download and open **Definitive SMR Launcher Apple Silicon.app**.
-   On first run, choose **Install in Applications**. The launcher copies itself
-   to your user Applications folder (`~/Applications`), verifies the copy, and
-   opens it. It creates the folder if needed and needs no administrator access.
-   The downloaded original is retained. If a launcher already exists there,
-   open that copy and use **Setup → App Updates**; installation never overwrites
-   an existing app. You can also move the app there in Finder yourself.
-4. Open the app and accept the normal macOS confirmation for a downloaded app.
-   Published apps must pass Developer ID signing and Apple notarization. If
-   macOS rejects the signature or reports damage, download again from the exact
-   fork and report the error; do not disable Gatekeeper.
-5. Follow the first-run steps below. The download includes the launcher's Python
-   and Tk runtime; Homebrew and a separate Python installation are only needed
-   when building from source.
+2. Open the [latest Mac release](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/releases/latest)
+   and choose **Download the Mac installer (.dmg)** in the release notes.
+3. Open the disk image and drag **Definitive SMR Launcher Apple Silicon** onto
+   the **Applications** shortcut. Eject the disk image.
+4. Open the launcher from **Applications**. Accept the normal macOS confirmation
+   for a downloaded app if shown. The app and disk image are Developer ID signed
+   and notarized. No Homebrew or separate Python installation is needed.
+5. The welcome screen finds the Steam game. Quit Railroads, then click
+   **Get Started** to preserve the original game profile and its existing saves.
+   The map collection opens when setup finishes.
+
+If the game is not found, the welcome screen offers **Check Again** and
+**Choose Steam Library Folder…**. Open Railroads once from Steam to create its
+profile, then quit and check again. Existing launcher libraries open normally;
+installing an app update does not require repeating setup.
+
+The ZIP asset is retained for the built-in updater. Use the DMG for a new
+installation; GitHub's source-code downloads are for development.
 
 Every push to `main` builds and runs tests. Conventional Commits determine
 whether to publish: `feat` adds a minor release, `fix`/`perf` add a patch, and
@@ -85,18 +86,16 @@ updates.
 
 ## First run and maps
 
-Before **Set Up Clean Game**, play a stock scenario in Steam, make a manual
-save, quit, reopen, and load it. Quit Railroads again before launcher setup.
-For an existing launcher library, use it as-is; do not repeat clean-game setup
-or remove maps or saves to install an app update.
+On first launch, **Get Started** checks the stopped Steam game and preserves
+its original profile. Custom content already in the game's asset folders stops
+setup with an explanation; it is never silently removed. Existing saves stay intact.
+A stock scenario and save/reload test is useful for diagnosing game problems,
+but is not an installation prerequisite or an automatic verification badge.
 
-If Steam stores the game on another drive and the launcher cannot find it, use
-**File → Choose Steam Library Folder…** and choose that drive's `steamapps`
-folder. This is a folder picker; you do not need to find `Steam.app`. The Mac
-edition must be the public
-branch and Steam must report it fully installed. Quit Railroads before setup,
-import, or profile changes. In the app, open **Setup** and choose **Set Up
-Clean Game**. The app copies the clean profile into its private library and
+If Steam stores the game on another drive, choose that drive's `steamapps`
+folder using the welcome screen or **File → Choose Steam Library Folder…**.
+The Mac edition must be on Steam's public branch and fully installed. Quit
+Railroads before setup, imports or profile changes. Setup
 keeps Original Game's existing saves. Use **Import Map…** to select a local
 `.7z`, `.zip`, or `.tar` archive, select its gallery tile, and choose **Play
 Selected**. To return to the stock profile, choose **Original Game → Play
@@ -248,7 +247,7 @@ notarization, stapling, and macOS assessment must pass; there is no unsigned
 fallback. The release archive also receives a GitHub artifact attestation.
 The actual signed updater has replaced an isolated v0.3.0 app with v0.3.8,
 retaining the previous signed app and a private save sentinel. A fresh Mac and
-the full first-run installation-button/relaunch flow remain separate QA steps.
+fresh-Mac installation and VoiceOver validation remain separate QA steps.
 
 ## Development checks
 

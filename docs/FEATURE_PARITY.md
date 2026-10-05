@@ -15,7 +15,7 @@ was run on this Mac. Full feature parity remains a project goal.
 | Community reviews and voting | Implemented | Inline cached public poll results, total votes, approximate stars and separate Not Working share. Explicit refresh; voting opens the original discussion. Hidden results remain unavailable. |
 | Read a briefing aloud | Implemented | Select any installed macOS voice; manage additional voices in System Settings. Reads original or translated text. |
 | Return to the original game | Implemented | Complete Original Game profile with its own preserved saves. |
-| Launcher installation and updates | Implemented; fresh-Mac UI QA pending | Signed/notarized downloads and actual isolated v0.3.0-to-v0.3.8 replacement verified. First-run install service checked; full button/relaunch flow and fresh-Mac validation remain. |
+| Launcher installation and updates | Implemented; fresh-Mac UI QA pending | Drag-to-Applications DMG, guided first launch and verified automatic updates. Actual isolated v0.3.0-to-v0.3.8 replacement verified; fresh-Mac validation remains. |
 | Original launcher icon | Implemented | Same inherited Windows artwork, converted to macOS ICNS. Original is 64 × 64. |
 | Update a map without losing the earlier edition | Implemented | Explicit Check Map Updates finds newer numeric versions within exact filename families and changed bytes of the same verified archive. Selected updates import separately; earlier editions and saves remain. |
 | Persistent activity log viewer | Implemented | Searchable local operation history, failures and per-map import results, retained between sessions with bounded storage. |
