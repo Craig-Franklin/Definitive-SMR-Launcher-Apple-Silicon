@@ -39,10 +39,25 @@ class DriverCleanupError(SafetyError):
         self.group = group
 
 
+def group_exists(group):
+    try:
+        os.killpg(group, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Some macOS hosts deny signal-0 probes even after our group is gone.
+        # Independently enumerate groups; permission denial itself proves nothing.
+        result = subprocess.run(["/bin/ps", "-A", "-o", "pgid="],
+                                capture_output=True, text=True, timeout=3, check=True)
+        lines = result.stdout.split()
+        if not lines or not all(value.isdigit() for value in lines):
+            raise SafetyError("Cannot establish process-group absence")
+        return group in {int(value) for value in lines}
+
+
 def require_driver_gone(group):
-    if group is None: return
-    try: os.killpg(group, 0)
-    except ProcessLookupError: return
+    if group is None or not group_exists(group): return
     raise SafetyError("Driver group still exists; restoration refused")
 
 
@@ -294,8 +309,7 @@ def stop_driver(driver):
         driver.wait(timeout=3)
     deadline = time.monotonic() + 3
     while time.monotonic() < deadline:
-        try: os.killpg(driver.pid, 0)
-        except ProcessLookupError: return
+        if not group_exists(driver.pid): return
         time.sleep(0.05)
     raise SafetyError("Driver group still exists after leader exit; restoration refused")
 

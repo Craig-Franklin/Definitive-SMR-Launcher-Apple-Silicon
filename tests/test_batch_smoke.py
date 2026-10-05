@@ -44,6 +44,16 @@ class SmokeTests(unittest.TestCase):
         return dict(self.request, status="loaded", loaded_scene=True, assertion="Loaded HUD and expected scenario",
                     screenshot=str(shot), screenshot_sha256=batch.digest(shot))
 
+    def test_denied_group_probe_requires_independent_absence_evidence(self):
+        with patch.object(batch.os, "killpg", side_effect=PermissionError), \
+             patch.object(batch.subprocess, "run") as run:
+            run.return_value = subprocess.CompletedProcess([], 0, "111\n222\n", "")
+            self.assertFalse(batch.group_exists(333))
+            self.assertTrue(batch.group_exists(222))
+            run.return_value = subprocess.CompletedProcess([], 0, "", "")
+            with self.assertRaises(batch.SafetyError):
+                batch.group_exists(333)
+
     def test_plan_uses_scenario_title_instead_of_package_or_nested_name(self):
         (self.root / "scenario.xml").write_text(
             '<RRTScenario><szMapName>Scenario Display Title</szMapName>'
