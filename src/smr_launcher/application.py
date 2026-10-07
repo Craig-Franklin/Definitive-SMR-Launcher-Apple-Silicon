@@ -22,7 +22,9 @@ from .extraction import _freeze_tree, _publish_exclusive, _unfreeze_directories,
 from .packages import _digest, inspect_package
 from .steam import SteamInstallation
 from .variants import _tree_manifest, prepare_original_variant, assets_manifest_hash
-from .verification import GameplayVerification, VerificationStore
+from .verification import GameplayVerification, VerificationStore, VerificationSummary, reduce_verification
+from .scenario_evidence import (EvidenceStore, EvidenceRecord, EvidenceError, bind_inventory,
+                               build_record, scenario_key, read_bytes, MAX_RECEIPT_BYTES, engine_context)
 from .collection import RemoteMap
 from .map_metadata import MapMetadata, read_map_metadata
 from . import removal
@@ -96,6 +98,7 @@ class LauncherApplication:
         self.icons = self.library / "icons"
         self.catalogue_file = self.library / "catalogue.json"
         self.verification_store = VerificationStore(self.library / "gameplay-verification.json")
+        self.scenario_evidence_store = EvidenceStore(self.library / "scenario-evidence.jsonl")
         self._resource_hash_cache = ContentHashCache()
         self.installation_binding = self.library / "installation-binding.json"
         self.profiles = FilesystemProfiles(
@@ -649,7 +652,7 @@ class LauncherApplication:
                                       "user_maps": profile / "UserMaps"},
                                      hash_cache=self._resource_hash_cache)
 
-    def verification_for(self, record: MapRecord) -> Optional[GameplayVerification]:
+    def _legacy_verification_for(self, record: MapRecord) -> Optional[GameplayVerification]:
         """Return gameplay evidence only for the current build and exact live assets."""
         candidates = [item for item in self.verification_store.records()
                       if (item.archive_sha256, item.game_executable_sha256, item.variant_id)
@@ -668,14 +671,100 @@ class LauncherApplication:
                 record.archive_sha256, self.installation.executable_sha256,
                 record.variant_id, marker["assets_sha256"])
             if latest is None or not latest.resources_sha256:
-                # Keep historical failures visible, but legacy successes never
-                # earn Verified without a metadata-bound retest.
+                # Preserve limited historical warnings without assigning scenarios.
+                # Resource metadata alone cannot establish named action coverage.
                 return latest
             current = self._resource_snapshot(root)
             return self.verification_store.latest(
                 record.archive_sha256, self.installation.executable_sha256,
                 record.variant_id, marker["assets_sha256"],
                 resources_sha256=current["identity"])
+
+    def bind_scenario_inventory(self, path: Path, expected_sha256: str) -> str:
+        """Bind a coordinator-accepted immutable inventory without importing old facts."""
+        return self.scenario_evidence_store.append(bind_inventory(path, expected_sha256))
+
+    def _scenario_context(self, record: MapRecord, options: Optional[dict] = None):
+        if record not in self.catalogue():
+            raise EvidenceError("Exact complete catalogue edition required")
+        self._verify_installation_binding()
+        self.installation.check_current()
+        if self.profiles.journal.exists():
+            raise EvidenceError("Profile recovery prevents current evidence claims")
+        state = self.profiles._state()
+        root = (self.profiles.live if state["active"] == record.profile_id
+                else self.profiles._profile_path(record.profile_id))
+        marker = self.profiles._marker(root, record.profile_id)
+        resources = self._resource_snapshot(root)
+        scenarios = []
+        for name in record.scenarios:
+            from .scenario_evidence import relative
+            relative(name)
+            content = read_bytes(root / name, MAX_RECEIPT_BYTES)
+            scenarios.append(scenario_key(record.archive_sha256, record.variant_id, name,
+                                         hashlib.sha256(content).hexdigest()))
+        context = engine_context(self.installation.executable_sha256, marker["assets_sha256"], resources, options)
+        return scenarios, context, resources, marker
+
+    def prepare_scenario_evidence_build(self, record: MapRecord, inventory_id: str,
+                                        *, options: dict) -> EvidenceRecord:
+        """Capture current exact inputs for a future explicit observation runner."""
+        with self._locked():
+            self._stopped()
+            if record not in self.catalogue():
+                raise EvidenceError("Map is absent from catalogue")
+            scenarios, context, resources, marker = self._scenario_context(record, options)
+            inventories = {r.id:r for r in self.scenario_evidence_store.records() if r.kind == "inventory"}
+            if inventory_id not in inventories:
+                raise EvidenceError("Accepted inventory record is absent")
+            inventory = inventories[inventory_id]
+            if any(s not in inventory.payload["scenarios"] for s in scenarios):
+                raise EvidenceError("Current scenario bytes differ from accepted inventory")
+            build = build_record(inventory, record.archive_sha256, record.variant_id,
+                                 marker["assets_sha256"], resources,
+                                 context["game_sha256"], options)
+            self.scenario_evidence_store.append(build)
+            return build
+
+    def record_scenario_action(self, observation: EvidenceRecord,
+                               interpretation: EvidenceRecord) -> str:
+        """Explicit offline runner entry point; observations cannot imply broad coverage."""
+        if observation.kind != "observation":
+            raise EvidenceError("An exact raw observation is required")
+        # Raw facts are a durability barrier before analysis/restoration. Keep
+        # them even if validation, analysis or the second append fails. Pending
+        # raw facts conservatively block earlier passes in the shared reducer.
+        self.scenario_evidence_store.append(observation)
+        if interpretation.kind != "interpretation" or interpretation.payload["observation"] != observation.id:
+            raise EvidenceError("Interpretation must reference the recorded observation")
+        self.scenario_evidence_store.append(interpretation)
+        return observation.id
+
+    def scenario_status_for(self, record: MapRecord, *, options: Optional[dict] = None) -> VerificationSummary:
+        records = self.scenario_evidence_store.records()
+        legacy = self._legacy_verification_for(record)
+        historical = tuple(r for r in self.verification_store.records()
+                           if legacy is not None and r.archive_sha256 == legacy.archive_sha256
+                           and r.variant_id == legacy.variant_id
+                           and r.game_executable_sha256 == legacy.game_executable_sha256
+                           and r.assets_sha256 == legacy.assets_sha256
+                           and (not r.resources_sha256 or r.resources_sha256 == legacy.resources_sha256))
+        if not records:
+            scenarios = [dict(archive_sha256=record.archive_sha256, edition_id=record.variant_id,
+                              scenario_path=name, scenario_sha256="") for name in record.scenarios]
+            return reduce_verification((), scenarios, {}, historical=historical)
+        with self._locked():
+            scenarios, context, _, _ = self._scenario_context(record, options)
+            return reduce_verification(records, scenarios, context, historical=historical)
+
+    def verification_for(self, record: MapRecord, *, options: Optional[dict] = None):
+        """All views share scenario reduction; legacy results remain limited facts."""
+        if self.scenario_evidence_store.path.exists() or self._legacy_verification_for(record) is not None:
+            return self.scenario_status_for(record, options=options)
+        return None
+
+    def catalogue_verification(self, *, options: Optional[dict] = None) -> dict:
+        return {r.variant_id: self.scenario_status_for(r, options=options) for r in self.catalogue()}
 
     def record_gameplay(self, record: MapRecord, observed_at: str, reporter: str,
                         checks: dict[str, bool], scope: str, issue: str = "") -> GameplayVerification:

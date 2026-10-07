@@ -63,11 +63,9 @@ class GameplayVerification:
 
     @property
     def status(self) -> str:
-        if self.issue:
-            return "Known issue"
-        # Legacy observations remain readable, but their missing timestamps
-        # cannot establish current resource selection on this game build.
-        return "Verified" if self.resources_sha256 and all(self.checks.values()) else "Not verified"
+        # Every six-check report is an unscoped limited fact, including reports
+        # that recorded resource metadata. None supplies named scenario actions.
+        return reduce_verification((), (), {}, historical=(self,)).status
 
     def as_json(self) -> dict:
         return dict(archive_sha256=self.archive_sha256,
@@ -126,3 +124,175 @@ class VerificationStore:
             raise VerificationError("Gameplay record entry limit reached")
         existing.append(record)
         _atomic_json(self.path, dict(schema=1, records=[item.as_json() for item in existing]))
+
+
+@dataclass(frozen=True)
+class ScenarioStatus:
+    scenario_path: str
+    scenario_sha256: str
+    actions: tuple[tuple[str, str], ...]
+    status: str
+    limitations: tuple[str, ...] = ()
+
+    def as_json(self):
+        return dict(scenario_path=self.scenario_path, scenario_sha256=self.scenario_sha256,
+                    actions=dict(self.actions), status=self.status, limitations=list(self.limitations))
+
+
+@dataclass(frozen=True)
+class LimitedScenarioObservation:
+    record: object
+    interpretation: object = None
+
+    @property
+    def issue(self):
+        outcome = (self.interpretation.payload["outcome"] if self.interpretation is not None
+                   else self.record.payload["outcome"])
+        if outcome != "failure":
+            return ""
+        return "Historical scenario issue (inputs not fully attested): " + self.record.payload["scenario"]["scenario_path"]
+
+    def as_json(self):
+        return {"record": self.record.value,
+                "interpretation": self.interpretation.value if self.interpretation is not None else None,
+                "limitation": "Original scenario observation retained; input completeness was not attested."}
+
+
+@dataclass(frozen=True)
+class VerificationSummary:
+    scenarios: tuple[ScenarioStatus, ...]
+    status: str
+    historical: tuple[GameplayVerification, ...] = ()
+    scope: str = "Scenario coverage; missing actions remain unknown."
+    limited: tuple[LimitedScenarioObservation, ...] = ()
+
+    @property
+    def issue(self):
+        failures = [s.scenario_path for s in self.scenarios if s.status == "Known issue"]
+        warnings = [r.issue for r in self.historical if r.issue]
+        return "\n".join([*("Observed issue: " + s for s in failures),
+                           *("Historical unscoped issue: " + x for x in warnings),
+                           *(item.issue for item in self.limited if item.issue)])
+
+    def as_json(self):
+        return dict(status=self.status, scenarios=[s.as_json() for s in self.scenarios],
+                    historical=[dict(record=r.as_json(), limitation="Unscoped limited observation")
+                                for r in self.historical], scope=self.scope, limited=[r.as_json() for r in self.limited])
+
+
+def reduce_verification(records, scenarios, context, *, historical=()):
+    """The sole scenario/action/edition status authority.
+
+    Current claims require exact scenario + build context + versioned contract.
+    Unknown applicability is not N/A. Static findings never enter action results.
+    Logging provenance is deliberately excluded from observed engine inputs.
+    """
+    from .scenario_evidence import REQUIRED_ACTIONS, FEATURES, SCHEMA, context_identity, canonical
+    records, scenarios = tuple(records), tuple(scenarios)
+    by_id = {r.id:r for r in records}
+    current_identity = context_identity(context)
+    raw_context_identity = context_identity(context, require_complete=False)
+    contracts = [r for r in records if r.kind == "contract"]
+    observations = [r for r in records if r.kind == "observation"]
+    interpretations = {}
+    interpretation_records = {}
+    for r in records:
+        if r.kind == "interpretation":
+            interpretations[r.payload["observation"]] = r.payload
+            interpretation_records[r.payload["observation"]] = r
+    results = []
+    for scenario in scenarios:
+        actions = dict.fromkeys(REQUIRED_ACTIONS, "unknown")
+        limitations = []
+        matched = []
+        for c in contracts:
+            p = c.payload
+            b = by_id[p["build"]].payload
+            if p["version"] == SCHEMA and c.value["schema"] == SCHEMA and canonical(p["scenario"]) == canonical(scenario) and current_identity is not None and by_id[p["build"]].value["schema"] == SCHEMA and context_identity(b["context"]) == current_identity:
+                matched.append(c)
+        contract = matched[-1] if matched else None
+        complete = bool(contract)
+        if contract is None:
+            limitations.append("Action applicability and feature expectations have not been reviewed.")
+        else:
+            cp = contract.payload
+            complete = cp["version"] == SCHEMA
+            for f in FEATURES:
+                if cp["features"][f]["state"] != "reviewed":
+                    complete = False
+                    limitations.append("Unresolved expectation: " + f)
+            for action in REQUIRED_ACTIONS:
+                a = cp["actions"][action]
+                if a["applicability"] == "unknown":
+                    complete = False
+                    continue
+                if a["applicability"] == "not_applicable":
+                    actions[action] = "not_applicable"
+                    continue
+                outcomes = []
+                for r in records:
+                    if r.kind != "observation":
+                        continue
+                    p = r.payload
+                    if canonical(p["scenario"]) != canonical(scenario) or p["contract"] != contract.id or p["action"] != action or context_identity(p["actual_context"]) != current_identity:
+                        continue
+                    i = interpretations.get(r.id)
+                    if i is None:
+                        continue
+                    # Historical facts and partial observations cannot gain passes by reanalysis.
+                    outcome = i["outcome"]
+                    if outcome == "pass" and (p["outcome"] != "pass" or
+                            p["actual_assertions"].get("expected") != p["protocol"]["expected"] or
+                            p["actual_assertions"].get("satisfied") is not True):
+                        outcome = "unknown"
+                    if outcome == "pass" and any(p["actual_assertions"].get(k) != expected
+                            for k, expected in p["protocol"].get("required_assertions", {}).items()):
+                        outcome = "unknown"
+                    if outcome == "pass" and any(p["actual_assertions"].get("features", {}).get(k) != expected
+                            for k, expected in p["protocol"].get("feature_assertions", {}).items()):
+                        outcome = "unknown"
+                    outcomes.append(outcome)
+                if "failure" in outcomes:
+                    actions[action] = "failure"
+                elif outcomes:
+                    actions[action] = outcomes[-1]
+        # A valid raw-first ledger can contain pending observations. They
+        # cannot be ignored because earlier complete passes happened to exist.
+        # Failure stays Known issue until explicitly interpreted/withdrawn;
+        # every other pending outcome conservatively blocks that action.
+        for raw in observations:
+            op = raw.payload
+            if canonical(op["scenario"]) != canonical(scenario) or raw_context_identity is None or context_identity(op["actual_context"], require_complete=False) != raw_context_identity:
+                continue
+            ip = interpretations.get(raw.id)
+            if ip is None:
+                if op["outcome"] == "failure":
+                    actions[op["action"]] = "failure"
+                elif actions[op["action"]] != "failure":
+                    actions[op["action"]] = "unknown"
+                complete = False
+                limitations.append("An observation is awaiting review: " + op["action"].replace("_", " "))
+            elif ip["outcome"] == "failure":
+                actions[op["action"]] = "failure"
+                complete = False
+        if contract is not None:
+            for feature in contract.payload["features"].values():
+                if any(actions[a] != "pass" for a in feature["actions"]):
+                    complete = False
+        if any(v not in ("pass", "not_applicable") for v in actions.values()):
+            complete = False
+        if current_identity is None:
+            limitations.append("Exact game options or resource coverage has not been confirmed.")
+        if any(r.value["schema"] != SCHEMA for r in records):
+            limitations.append("Older observations are retained with their original scope; incomplete inputs cannot establish current coverage.")
+        status = ("Known issue" if "failure" in actions.values() else
+                  "Verified" if complete else "Not verified")
+        results.append(ScenarioStatus(scenario["scenario_path"], scenario["scenario_sha256"],
+                                     tuple(actions.items()), status, tuple(limitations)))
+    limited = tuple(LimitedScenarioObservation(raw, interpretation_records.get(raw.id))
+                    for raw in observations if raw.value["schema"] != SCHEMA
+                    and any(canonical(raw.payload["scenario"]) == canonical(scenario) for scenario in scenarios))
+    edition_status = ("Known issue" if any(s.status == "Known issue" for s in results) else
+                      "Verified" if results and all(s.status == "Verified" for s in results) else
+                      "Known issue" if any(r.issue for r in historical) or any(r.issue for r in limited) else "Not verified")
+    return VerificationSummary(tuple(results), edition_status, tuple(historical), limited=limited)

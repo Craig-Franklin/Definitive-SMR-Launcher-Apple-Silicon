@@ -19,7 +19,7 @@ class VerificationTests(unittest.TestCase):
                 resources_sha256="f" * 64)
             store.append(played)
             self.assertEqual(store.latest("a" * 64, "b" * 64, "c" * 64, "d" * 64).status,
-                             "Verified")
+                             "Not verified")
             for changed in range(4):
                 identity = ["a" * 64, "b" * 64, "c" * 64, "d" * 64]
                 identity[changed] = "e" * 64

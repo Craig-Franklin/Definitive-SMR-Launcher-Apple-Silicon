@@ -104,13 +104,13 @@ class ApplicationTests(unittest.TestCase):
         self.application.activate(record.profile_id)
         evidence = self.application.record_gameplay(record, "2026-10-05T06:00:00+00:00",
             "Synthetic player", dict.fromkeys(CHECKS, True), "Synthetic full check")
-        self.assertEqual(evidence.status, "Verified")
+        self.assertEqual(evidence.status, "Not verified")
         receipt = self.application.library / "verification-resources" / (evidence.resources_sha256 + ".json")
         self.assertEqual(json.loads(receipt.read_text())["identity"], evidence.resources_sha256)
-        self.assertEqual(self.application.verification_for(record), evidence)
+        self.assertIn(evidence, self.application.verification_for(record).historical)
         (self.installation.profile_root / "Saves/future.sav").write_bytes(b"keep forever")
         self.application.activate(ORIGINAL)
-        self.assertEqual(self.application.verification_for(record), evidence)
+        self.assertIn(evidence, self.application.verification_for(record).historical)
         map_asset = self.application.profiles._profile_path(record.profile_id) / "CustomAssets/Example.txt"
         for file in (resource, map_asset):
             with self.subTest(file=file):
@@ -119,7 +119,7 @@ class ApplicationTests(unittest.TestCase):
                 self.assertEqual(file.read_bytes(), content)
                 self.assertIsNone(self.application.verification_for(record))
                 os.utime(file, ns=(before.st_atime_ns, before.st_mtime_ns))
-                self.assertEqual(self.application.verification_for(record), evidence)
+                self.assertIn(evidence, self.application.verification_for(record).historical)
         self.application.activate(record.profile_id)
         self.assertEqual((self.installation.profile_root / "Saves/future.sav").read_bytes(), b"keep forever")
 
@@ -137,7 +137,7 @@ class ApplicationTests(unittest.TestCase):
         with patch.object(self.application, "_resource_snapshot", side_effect=AssertionError("no retroactive binding")):
             observed = self.application.verification_for(record)
         self.assertEqual(observed.status, "Not verified")
-        self.assertEqual(observed.checks, evidence.checks)
+        self.assertEqual(observed.historical[0].checks, evidence.checks)
         self.assertEqual(self.application.verification_store.path.read_bytes(), before)
 
     def compatibility_rule(self, record, **changes):

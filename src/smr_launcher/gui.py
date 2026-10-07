@@ -19,7 +19,7 @@ from .map_updates import find_map_updates
 from .ratings import fetch_rating, read_cached_rating
 from .language import LANGUAGES, LanguagePreferences, set_language, tr, translate_briefing, open_translation_settings
 from .voices import list_voices, speak, open_voice_settings
-from .verification import CHECKS
+from .verification import CHECKS, VerificationSummary
 from .activation import ORIGINAL
 from .application import LauncherApplication, MapRecord
 from .collection import RemoteMap, download_all_maps, download_map, fetch_catalogue
@@ -786,11 +786,11 @@ class LauncherWindow:
             ttk.Button(links, text="Community Reviews & Rating", command=lambda: webbrowser.open(community.discussion_url)).pack(side="left")
         notebook = ttk.Notebook(frame)
         notebook.pack(fill="both", expand=True)
-        identity = f"Archive: {record.archive_filename or record.name}\nSHA-256: {record.archive_sha256}\nVariant: {record.variant_id}\n\n" + (f"{verification.status} · {verification.observed_at}\nReported by: {verification.reporter}\n{verification.scope}\n\n" + "\n".join(("✓ " if verification.checks[key] else "○ ") + label for key, label in MAC_TEST_LABELS.items()) + "\n\n" + verification.issue if verification else "No local gameplay result recorded.")
+        identity = f"Archive: {record.archive_filename or record.name}\nSHA-256: {record.archive_sha256}\nVariant: {record.variant_id}\n\n" + self._verification_details(verification)
         if verification_error:
             identity = f"Archive: {record.archive_filename or record.name}\nSHA-256: {record.archive_sha256}\nVariant: {record.variant_id}\n\n{verification_error}"
-        if verification and not verification.resources_sha256:
-            identity += "\n\nHistorical result: resource timestamps were not recorded. Repeat the play test before marking this map Verified. Any reported issue is retained as a historical warning."
+        if verification and not isinstance(verification, VerificationSummary) and not verification.resources_sha256:
+            identity += "\n\nHistorical limited report: resource timestamps were not recorded. Scenario and feature coverage remains unknown. Any reported issue is retained as a historical warning."
         community_text = (f"Upstream community report: {community.stability}\nMultiplayer: "
                           + ({True: "Reported supported", False: "Reported unsupported", None: "Not reported"}[community.multiplayer])
                           + "\n\nThese are community reports for the original map, not verification on the Mac edition. "
@@ -951,7 +951,7 @@ class LauncherWindow:
         ttk.Label(frame, text="Crash or other issue (leave blank if none observed)").pack(anchor="w", pady=(14, 4))
         issue = tk.Text(frame, height=3, wrap="word", borderwidth=1, relief="solid", highlightthickness=1, highlightbackground="#666666", padx=6, pady=6)
         issue.pack(fill="x")
-        ttk.Label(frame, text="All six checks and no reported issue earn Verified for these exact map files and game build. Partial tests stay Not verified; an issue becomes Known issue. Short tests do not prove a full campaign.", wraplength=570).pack(anchor="w", pady=14)
+        ttk.Label(frame, text="These checks save a limited report for this edition. They do not establish which scenarios or features were tested and cannot earn Verified. A reported issue remains visible as a historical warning.", wraplength=570).pack(anchor="w", pady=14)
         controls = ttk.Frame(frame)
         controls.pack(side="bottom", fill="x")
         def finished(result):
@@ -986,6 +986,39 @@ class LauncherWindow:
             self.status.set("Map and unshared archives removed. Saved games kept for exact-version re-import.")
             self._show("maps")
         self._submit("Removing map and keeping saved games…", lambda: self.app.remove_map(record), finished)
+
+    @staticmethod
+    def _verification_details(result) -> str:
+        if result is None:
+            return "No local gameplay result recorded. Scenario coverage remains unknown."
+        if isinstance(result, VerificationSummary):
+            lines = [result.status, result.scope]
+            for scenario in result.scenarios:
+                lines.extend(["", scenario.scenario_path + " · " + scenario.status])
+                lines.extend(action.replace("_", " ").title() + ": " + outcome.replace("_", " ")
+                             for action, outcome in scenario.actions)
+                lines.extend(scenario.limitations)
+            for old in result.historical:
+                lines.extend(["", "Historical limited report · " + old.observed_at,
+                              "Reported by: " + old.reporter, old.scope])
+                lines.extend(("✓ " if old.checks[key] else "○ ") + label
+                             for key, label in MAC_TEST_LABELS.items())
+                if old.issue:
+                    lines.append("Historical unscoped issue: " + old.issue)
+            for old in result.limited:
+                raw = old.record.payload
+                reviewed = old.interpretation.payload["outcome"] if old.interpretation is not None else "awaiting review"
+                lines.extend(["", "Earlier scenario observation · " + raw["scenario"]["scenario_path"],
+                              raw["action"].replace("_", " ").title() + ": recorded " + raw["outcome"].replace("_", " ") + "; review " + reviewed.replace("_", " "),
+                              "The original result is retained. Complete input coverage was not confirmed."])
+                if old.issue:
+                    lines.append(old.issue)
+            return "\n".join(lines)
+        return (f"{result.status} · {result.observed_at}\nReported by: {result.reporter}\n"
+                + "Historical limited report; scenario and feature coverage remains unknown.\n"
+                + result.scope + "\n\n"
+                + "\n".join(("✓ " if result.checks[key] else "○ ") + label
+                              for key, label in MAC_TEST_LABELS.items()) + "\n\n" + result.issue)
 
     def _verification_text(self, record: MapRecord, *, detail: bool = False) -> str:
         if self.app is None:
