@@ -120,9 +120,11 @@ _CHOICES = {
     "hill-valley-steaks-tannery-city-v1": RecipeChoice(
         "hill-valley-steaks-tannery-city-v1", "Hill Valley train-car compatibility v1",
         "Adds the reviewed Cowhide Car v1/v2 model, dummy, texture and icon family "
-        "from a preserved compatible import, and repairs the Tannery identity used "
-        "by this scenario. The exact prepared edition passed a bounded fresh-load "
-        "test and reached the Hill Valley Steaks HUD. Trains, cargo, bridges, "
+        "from the preserved Side to Side 2 import, which must also be in your library. "
+        "Tannery uses the Mac game's Doll Factory identifier; that name may appear "
+        "in menus. An earlier development edition passed a bounded fresh-load "
+        "test and reached the Hill Valley Steaks HUD. Check Mac Test & Identity "
+        "for results recorded against your exact prepared edition. Trains, cargo, bridges, "
         "objectives, save/reload and extended play remain unverified; this edition "
         "is experimental and should keep its own saves."),
 }

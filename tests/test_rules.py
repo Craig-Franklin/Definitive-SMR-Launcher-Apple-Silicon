@@ -173,6 +173,41 @@ class RuleTests(unittest.TestCase):
         with self.assertRaisesRegex(RuleError, "already exists"):
             apply_rules(self.root, self.archive, self.game, (rule,))
 
+    def test_asset_addition_rejects_mtime_drift_before_any_writes(self):
+        data = b"new model bytes"
+        expected_mtime = 1_234_567_890
+        addition = AssetAddition("UserMaps/Example/model.kfm", digest(data), data, expected_mtime)
+        output = self.root / "UserMaps/Example/model.kfm"
+        output.write_bytes(data)
+        os.utime(output, ns=(expected_mtime, expected_mtime))
+        drifted_mtime = expected_mtime + 1_000_000_000
+        os.utime(output, ns=(drifted_mtime, drifted_mtime))
+        rule = CompatibilityRule("add-model", 1, "synthetic fixture", "add one model",
+                                 self.archive, self.game, (self.patch,), (addition,))
+
+        with self.assertRaisesRegex(RuleError, "different mtime"):
+            apply_rules(self.root, self.archive, self.game, (rule,),
+                        metadata_policy=rule_module.PRESERVE_RESOURCE_MTIMES)
+
+        self.assertEqual(self.target.read_bytes(), self.before)
+        self.assertEqual(output.read_bytes(), data)
+        self.assertEqual(output.stat().st_mtime_ns, drifted_mtime)
+
+    def test_asset_addition_rejects_oversized_target_without_reading_it(self):
+        data = b"small"
+        output = self.root / "UserMaps/Example/model.kfm"
+        with output.open("wb") as stream:
+            stream.truncate(64 * 1024 * 1024)
+        addition = AssetAddition("UserMaps/Example/model.kfm", digest(data), data, 1)
+        rule = CompatibilityRule("add-model", 1, "synthetic fixture", "add one model",
+                                 self.archive, self.game, (), (addition,))
+
+        with patch.object(Path, "read_bytes", side_effect=AssertionError("must not read target")):
+            with self.assertRaisesRegex(RuleError, "already exists"):
+                apply_rules(self.root, self.archive, self.game, (rule,))
+
+        self.assertEqual(output.stat().st_size, 64 * 1024 * 1024)
+
 
 if __name__ == "__main__":
     unittest.main()

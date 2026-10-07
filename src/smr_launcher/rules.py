@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import tempfile
 import unicodedata
 
@@ -33,6 +34,32 @@ def _digest(data: bytes) -> str:
 
 def _hash(value: str) -> bool:
     return len(value) == 64 and all(char in "0123456789abcdef" for char in value)
+
+
+def _read_existing_addition(path: Path, expected_size: int) -> tuple[bytes, os.stat_result]:
+    """Read a pre-existing addition target without following or draining it."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_size != expected_size:
+            raise RuleError("Added asset target has a different type or size: " + str(path))
+        pieces = []
+        size = 0
+        while size <= expected_size:
+            chunk = os.read(fd, min(1024 * 1024, expected_size + 1 - size))
+            if not chunk:
+                break
+            pieces.append(chunk)
+            size += len(chunk)
+        after = os.fstat(fd)
+        same = lambda st: (st.st_dev, st.st_ino, st.st_mode, st.st_size,
+                           st.st_mtime_ns, st.st_ctime_ns)
+        if (size != expected_size or same(before) != same(after)
+                or same(before) != same(path.lstat())):
+            raise RuleError("Added asset target changed while reading: " + str(path))
+        return b"".join(pieces), before
+    finally:
+        os.close(fd)
 
 
 @dataclass(frozen=True)
@@ -199,7 +226,15 @@ def apply_rules(
         for addition in rule.additions:
             path = root.joinpath(*addition.path.split("/"))
             if path.exists() or path.is_symlink():
-                if path.is_file() and not path.is_symlink() and _digest(path.read_bytes()) == addition.after_sha256:
+                try:
+                    existing_data, existing_stat = _read_existing_addition(path, len(addition.data))
+                except (OSError, RuleError) as exc:
+                    raise RuleError("Added asset target already exists with different content or metadata: "
+                                    + addition.path) from exc
+                if _digest(existing_data) == addition.after_sha256:
+                    if (metadata_policy == PRESERVE_RESOURCE_MTIMES
+                            and existing_stat.st_mtime_ns != addition.mtime_ns):
+                        raise RuleError("Added asset target has a different mtime: " + addition.path)
                     outputs.append((addition.path, addition.after_sha256))
                     continue
                 raise RuleError("Added asset target already exists: " + addition.path)
