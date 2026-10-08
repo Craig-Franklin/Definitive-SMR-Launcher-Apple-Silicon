@@ -290,7 +290,7 @@ class ObservedRecoveryRaceTests(unittest.TestCase):
         import time
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as temp:
-            root=Path(temp);source=root/'live';source.mkdir()
+            root=Path(temp).resolve();source=root/'live';source.mkdir()
             for name in ('CustomAssets','UserMaps','Saves'):(source/name).mkdir()
             (source/'Saves/future.sav').write_bytes(b'original and future save')
             profiles=activation.FilesystemProfiles(source,root/'store',('CustomAssets','UserMaps'),game_running=lambda:False)
