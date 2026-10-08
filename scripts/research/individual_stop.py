@@ -9,8 +9,11 @@ not unconditional OS scheduling guarantees. Prebinding launch gaps, actual OS
 adapter identity races, arming/integration, root restoration and operational
 assurance require separate acceptance. This component never launches, uses GUI,
 saves, restores, retries or imports the rejected runner; it grants no runtime
-admission. A monitor must inspect exact identity and request_stop(expected)
-atomically refuse a replacement; a preceding inspection alone cannot prove that.
+admission. The monitor must validate exact identity immediately before each
+stop action and refuse observed replacements or inspection errors. Separate
+inspection and PID-directed signaling do not prove kernel-atomic protection;
+using that operational guard requires explicit acceptance of its residual
+check-to-signal race and the unbound launch interval in the job authority.
 """
 import hashlib
 import json
