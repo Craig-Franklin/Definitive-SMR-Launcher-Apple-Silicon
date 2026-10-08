@@ -7,11 +7,19 @@ The parent runner owns the process watchdog, profiles and termination.
 import argparse
 import hashlib
 import json
+import os
+import uuid
 import re
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
+
+# The isolated child reuses the runner's supported libproc provider. Importing
+# the module does not construct a provider or start a process.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from batch_smoke import MacProcesses, Process
 
 MAX_EVIDENCE_TOKENS = 80
 MAX_EVIDENCE_TEXT = 120
@@ -62,6 +70,8 @@ class Driver:
         self.ocr = ocr
         self.orca = orca
         self.pid = request["pid"]
+        self.process_identity = (self.pid, request.get("birth_us"), request.get("executable"))
+        self.processes = None
         # Finish with enough time to copy the last screenshot and write a
         # bounded failure result before the parent watchdog stops this driver.
         self.parent_deadline = request["deadline"]
@@ -76,6 +86,8 @@ class Driver:
         self.pregame_play_submitted = False
         self.pregame_play_stale_attempts = 0
         self.crash_report_cancel_attempts = 0
+        self.stock_selection_attempts = 0
+        self.observed_options = {}
 
     def event(self, **data):
         with self.events.open("a") as f:
@@ -85,9 +97,29 @@ class Driver:
         remaining = self.deadline - time.time()
         if remaining <= 0:
             raise TimeoutError("UI driver deadline reached")
+        pid, birth, executable = self.process_identity
+        if (type(pid) is not int or pid <= 0 or type(birth) is not int or birth <= 0
+                or type(executable) is not str or not Path(executable).is_absolute()):
+            raise OrcaCommandError(action, "process_identity_missing")
+        try:
+            if self.processes is None:
+                self.processes = MacProcesses(executable)
+            current = self.processes.inspect(pid)
+            matching = Process(pid, birth, executable, 0).same(current)
+        except Exception as exc:
+            raise OrcaCommandError(action, "process_identity_unverifiable") from exc
+        if not matching:
+            raise OrcaCommandError(action, "process_identity_mismatch_or_exited")
+        remaining = self.deadline - time.time()
+        if remaining <= 0:
+            raise TimeoutError("UI driver deadline reached")
+        # A fresh birth/executable observation gates EVERY submission. The
+        # provider and Orca's PID target are separate OS operations: exit/reuse
+        # between this check and dispatch remains a race, not atomic binding.
         proc = subprocess.run([self.orca, "computer", action, "--app", f"pid:{self.pid}",
                                *map(str, args), "--json"], capture_output=True, text=True,
                               timeout=min(12, remaining))
+        if proc.returncode != 0: raise OrcaCommandError(action, "terminal_return_failed")
         data = json.loads(proc.stdout)
         if not data.get("ok"):
             code = data.get("error", {}).get("code")
@@ -269,11 +301,59 @@ class Driver:
                             "--x", round(x*shot["width"]/shot["scale"]),
                             "--y", round(y*shot["height"]/shot["scale"]))
 
+    def _stock_controls(self, words):
+        # Multiple OCR passes of one box are deduplicated; two different title
+        # or Cancel boxes are ambiguous and cannot select a stock scenario.
+        def unique(matches):
+            return {tuple(w[k] for k in ('text', 'x', 'y', 'width', 'height')): w for w in matches}
+        titles = unique(w for w in words if normalized(w['text']) == self.expected_title
+            and .12 < w['y'] < .30 and w['x'] < .55)
+        cancels = unique(w for w in words if normalized(w['text']) == 'cancel' and w['y'] > .75)
+        if len(titles) > 1 or len(cancels) > 1:
+            raise RuntimeError('Ambiguous stock title/setup controls')
+        return (next(iter(titles.values())), next(iter(cancels.values()))) if titles and cancels else (None, None)
+
+    def _select_stock_menu(self, data):
+        tree = data['snapshot'].get('treeText', '')
+        title = re.escape(self.request['scenario_title'])
+        choices = re.findall(r'^\s*(\d+) menu item ' + title + r'\s*$', tree, re.M)
+        controls = re.findall(r'^\s*(\d+) pop up button Scenario\s*$', tree, re.M)
+        if len(choices) > 1 or len(controls) > 1:
+            raise RuntimeError('Ambiguous stock selector')
+        selected = choices or controls
+        if not selected: return False
+        if self.stock_selection_attempts >= 3:
+            raise RuntimeError('Stock selection bounded attempts exhausted')
+        self.stock_selection_attempts += 1
+        self.command('click', '--window-id', data['snapshot']['window']['id'], '--element-index', selected[0])
+        self.event(action='stock_select', attempt=self.stock_selection_attempts,
+                   requested_title=self.request['scenario_title'], control_kind='menu' if choices else 'selector')
+        return True
+
+    def _observe_options(self, data):
+        # Capture positive AX values separately from requested Settings.ini
+        # options. Missing controls stay unattested; no settings/request fallback.
+        tree = data['snapshot'].get('treeText', '')
+        observed = {}
+        for key, label in (('ai_players', 'AI Players'), ('difficulty', 'Difficulty'),
+                           ('landscape', 'Landscape'), ('cities', 'Cities'),
+                           ('fullscreen', 'Full Screen'), ('use_all_trains', 'Use All Trains')):
+            values = re.findall(r'^\s*\d+ (?:text|combo box|checkbox) ' + re.escape(label) + r': ([^\n]+)$', tree, re.M)
+            if len(values) == 1: observed[key] = values[0].strip()
+            elif len(values) > 1: raise RuntimeError('Ambiguous observed option: ' + label)
+        return {'state': 'partial_observation' if observed else 'unattested', 'values': observed}
+
     def run(self):
         expected = normalized(self.request.get("expected_title") or self.request["scenario_title"])
         if not expected or expected.startswith("tag"):
             raise ValueError("A resolved English scenario title is required")
         self.expected_title = expected
+        mode = self.request.get('mode', 'custom')
+        if mode not in {'stock', 'custom'}: raise ValueError('Unknown scenario selection mode')
+        if mode == 'stock' and (self.request.get('resource_namespace') != 'stock-selection-v1'
+                or self.request.get('original_scenario_identity') is not None
+                or self.request.get('scenario') != 'stock-selection:' + self.request['scenario_title']):
+            raise ValueError('Stock requires its separate resource namespace, never custom XML')
         stage = "startup"
         self.stage = stage
         stage_deadline = min(self.deadline-1, time.time()+30)
@@ -345,7 +425,11 @@ class Driver:
                               and .12 < w["y"] < .30 and w["x"] < .55), None)
                 cancel = next((w for w in words if normalized(w["text"]) == "cancel"
                                and w["y"] > .75), None)
+                if mode == 'stock':
+                    title, cancel = self._stock_controls(words)
+                    if not (title and cancel) and self._select_stock_menu(data): continue
                 if title and cancel:
+                    self.observed_options = self._observe_options(data)
                     shutil.copy2(data["screenshot"]["path"], self.out / "scenario-selected.png")
                     # English Feral scenario layout: OK is immediately right of Cancel.
                     # Derived from the currently observed Cancel box, not screen coordinates.
@@ -362,7 +446,11 @@ class Driver:
                     shutil.copy2(data["screenshot"]["path"], target)
                     return dict(status="loaded", loaded_scene=True,
                                 assertion="Exact scenario title observed before loading; currency and year in gameplay HUD on two observations",
-                                screenshot=str(target), screenshot_sha256=hashlib.sha256(target.read_bytes()).hexdigest())
+                                screenshot=str(target), screenshot_sha256=hashlib.sha256(target.read_bytes()).hexdigest(),
+                                 selection_mode=mode, resource_namespace=self.request.get('resource_namespace'),
+                                 requested_options=self.request.get('requested_options'),
+                                 observed_options=self.observed_options, hud_observations=consecutive,
+                                 original_scenario_identity=self.request.get('original_scenario_identity'))
             # The profile normally skips movies. Space also skips an unexpected intro;
             # never send it once the menu or scenario setup has been recognized.
             intro = any(normalized(w["text"]) in ("firaxis", "firaxisgames", "2k", "2kgames") for w in words)
@@ -371,6 +459,24 @@ class Driver:
                 last_action = time.time()
             time.sleep(.25)
         raise TimeoutError(f"No positive loaded scene; last UI stage: {stage}")
+
+
+def write_result(path, result):
+    path=Path(path)
+    for ancestor in (path,*path.parents):
+        if ancestor.is_symlink(): raise OSError('Linked driver result path')
+    temporary=path.with_name(path.name+'.tmp-'+uuid.uuid4().hex)
+    data=(json.dumps(result,indent=2)+'\n').encode()
+    fd=os.open(temporary,os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,'O_NOFOLLOW',0),0o600)
+    stream=os.fdopen(fd,'wb')
+    try:
+        if stream.write(data)!=len(data): raise OSError('Short driver result write')
+        stream.flush();os.fsync(stream.fileno())
+    finally:stream.close()
+    os.replace(temporary,path)
+    parent=os.open(path.parent,os.O_RDONLY|getattr(os,'O_NOFOLLOW',0))
+    try:os.fsync(parent)
+    finally:os.close(parent)
 
 
 def main():
@@ -382,7 +488,7 @@ def main():
     args = parser.parse_args()
     request = json.loads(args.request.read_text())
     result = run_request(request, args.ocr, args.orca)
-    args.result.write_text(json.dumps(result, indent=2) + "\n")
+    write_result(args.result,result)
 
 
 def run_request(request, ocr, orca):

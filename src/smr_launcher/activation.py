@@ -101,19 +101,23 @@ def _canonical_directory_path(value: Path) -> Path:
     return Path(os.fsdecode(raw)).joinpath(*reversed(missing))
 
 
-def _macos_exchange(first: Path, second: Path) -> None:
+def _macos_exchange(first: Path, second: Path, *, observed_io=None) -> None:
     """Atomically exchange two existing directory names on macOS/APFS."""
     if sys.platform != "darwin":
         raise ActivationError("Atomic directory exchange requires macOS")
     function = ctypes.CDLL(None, use_errno=True).renamex_np
     function.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
     function.restype = ctypes.c_int
-    if function(os.fsencode(first), os.fsencode(second), 0x00000002):
+    args = (os.fsencode(first), os.fsencode(second), 0x00000002)
+    result = (function(*args) if observed_io is None else
+              observed_io.call("activation.exchange_syscall", function, *args))
+    if result:
         error = ctypes.get_errno()
         raise OSError(error, os.strerror(error), str(first), str(second))
-    _fsync_dir(first.parent)
+    sync = _fsync_dir if observed_io is None else observed_io.fsync_dir
+    sync(first.parent)
     if first.parent != second.parent:
-        _fsync_dir(second.parent)
+        sync(second.parent)
 
 
 def _walk_error(error: OSError) -> None:
@@ -186,6 +190,7 @@ class FilesystemProfiles:
         game_running: Callable[[], Optional[bool]],
         fault_hook: Optional[Callable[[str], None]] = None,
         exchange: Callable[[Path, Path], None] = _macos_exchange,
+        observed_io=None,
     ) -> None:
         # macOS exposes /var as a system symlink to /private/var. Resolve that
         # alias once, then reject any later link substitution in managed paths.
@@ -211,6 +216,53 @@ class FilesystemProfiles:
         self.game_running = game_running
         self.fault_hook = fault_hook or (lambda event: None)
         self.exchange = exchange
+        self.observed_io = observed_io
+
+
+    def _call(self, name, function, *args, **kwargs):
+        if self.observed_io is None:
+            return function(*args, **kwargs)
+        return self.observed_io.call(name, function, *args, **kwargs)
+
+    def _atomic_json(self, path, value):
+        if self.observed_io is None:
+            return _atomic_json(path, value)
+        return self.observed_io.atomic_json(path, value)
+
+    def _fsync_dir(self, path):
+        if self.observed_io is None:
+            return _fsync_dir(path)
+        return self.observed_io.fsync_dir(path)
+
+    def _fsync_tree(self, path):
+        if self.observed_io is None:
+            return _fsync_tree(path)
+        return self.observed_io.fsync_tree(path)
+
+    def _copytree(self, source, destination):
+        if self.observed_io is None:
+            return shutil.copytree(source, destination, copy_function=shutil.copy2)
+        return self.observed_io.copytree(source, destination)
+
+    def _make_writable_tree(self, root):
+        if self.observed_io is None:
+            return _make_writable_tree(root)
+        for base, directories, files in os.walk(root, followlinks=False, onerror=_walk_error):
+            here = Path(base)
+            self._call("activation.directory_chmod", here.chmod,
+                       here.stat().st_mode | stat.S_IWUSR | stat.S_IXUSR)
+            for name in files:
+                path = here / name
+                self._call("activation.file_chmod", path.chmod, path.stat().st_mode | stat.S_IWUSR)
+
+    def _exchange(self, first, second):
+        if self.observed_io is None:
+            return self.exchange(first, second)
+        if self.exchange is _macos_exchange:
+            return _macos_exchange(first, second, observed_io=self.observed_io)
+        # An alternate exchange is an explicit trusted synthetic provider. Its
+        # successful return alone is never evidence of macOS kernel behavior.
+        return self._call("activation.synthetic_exchange", self.exchange, first, second)
 
     def _ensure_paths(self) -> None:
         _assert_no_symlink_ancestor(self.live)
@@ -229,7 +281,7 @@ class FilesystemProfiles:
         if not self.binding_file.exists():
             if not enrolling:
                 raise RecoveryError("Game profile binding is missing")
-            _atomic_json(self.binding_file, dict(schema=SCHEMA, live=str(self.live), store=str(self.store)))
+            self._atomic_json(self.binding_file, dict(schema=SCHEMA, live=str(self.live), store=str(self.store)))
         binding = _read_json(self.binding_file)
         if binding != dict(schema=SCHEMA, live=str(self.live), store=str(self.store)):
             raise RecoveryError("Game profile is bound to another launcher store")
@@ -240,9 +292,9 @@ class FilesystemProfiles:
         _assert_no_symlink_ancestor(self.store)
         self.store.mkdir(parents=True, mode=0o700, exist_ok=True)
         flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
-        fd = os.open(self.lock_file, flags, 0o600)
+        fd = self._call("activation.lock_open", os.open, self.lock_file, flags, 0o600)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            self._call("activation.lock_acquire", fcntl.flock, fd, fcntl.LOCK_EX)
             if enrolling:
                 self._ensure_paths()
                 self._require_stopped()
@@ -254,8 +306,11 @@ class FilesystemProfiles:
                 self._ensure_paths()
             yield
         finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-            os.close(fd)
+            try:
+                self._call("activation.lock_release", fcntl.flock, fd, fcntl.LOCK_UN)
+            finally:
+                self._call("activation.lock_close", os.close, fd)
+        self._call("activation.lock_exit", lambda: None)
 
     def _require_stopped(self) -> None:
         try:
@@ -287,14 +342,17 @@ class FilesystemProfiles:
                     key = p.relative_to(root).as_posix().encode("utf-8")
                     result.update(b"F\0" + key + b"\0")
                     result.update(str(p.stat().st_size).encode("ascii") + b"\0")
-                    with p.open("rb") as stream:
-                        for chunk in iter(lambda: stream.read(1 << 20), b""):
-                            result.update(chunk)
+                    if self.observed_io is None:
+                        with p.open("rb") as stream:
+                            for chunk in iter(lambda: stream.read(1 << 20), b""):
+                                result.update(chunk)
+                    else:
+                        result.update(self.observed_io.readbytes(p))
                     result.update(b"\0")
         return result.hexdigest()
 
     def _write_marker(self, root: Path, profile_id: str, variant_id: Optional[str]) -> None:
-        _atomic_json(root / MARKER, dict(schema=SCHEMA, profile_id=profile_id, variant_id=variant_id, assets_sha256=self._asset_hash(root)))
+        self._atomic_json(root / MARKER, dict(schema=SCHEMA, profile_id=profile_id, variant_id=variant_id, assets_sha256=self._asset_hash(root)))
 
     def _marker(self, root: Path, expected: Optional[str] = None) -> dict:
         _assert_no_symlink_ancestor(root)
@@ -328,7 +386,7 @@ class FilesystemProfiles:
             else:
                 _assert_regular_tree(self.live)
                 self._write_marker(self.live, ORIGINAL, None)
-            _atomic_json(self.state_file, dict(schema=SCHEMA, active=ORIGINAL))
+            self._atomic_json(self.state_file, dict(schema=SCHEMA, active=ORIGINAL))
 
     def register_variant(self, variant_id: str, prepared_root: Path, *, saved_games: Optional[Path] = None) -> str:
         """Make an independent writable generation from an immutable prepared tree."""
@@ -359,8 +417,8 @@ class FilesystemProfiles:
                 return profile_id
             temporary = self.staging / (profile_id + "-" + uuid.uuid4().hex)
             try:
-                shutil.copytree(source, temporary, copy_function=shutil.copy2)
-                _make_writable_tree(temporary)
+                self._copytree(source, temporary)
+                self._make_writable_tree(temporary)
                 if self._asset_hash(temporary) != expected_hash or self._asset_hash(source) != expected_hash:
                     raise ActivationError("Prepared source changed during registration")
                 if saved_games is not None:
@@ -369,18 +427,18 @@ class FilesystemProfiles:
                     _assert_regular_tree(saved_games)
                     saved_manifest = _tree_manifest(saved_games)
                     # Never merge retained saves into a generation with existing saves.
-                    (temporary / "Saves").rmdir()
-                    shutil.copytree(saved_games, temporary / "Saves", copy_function=shutil.copy2)
+                    self._call("activation.empty_saves_rmdir", (temporary / "Saves").rmdir)
+                    self._copytree(saved_games, temporary / "Saves")
                     if (_tree_manifest(temporary / "Saves") != saved_manifest
                             or _tree_manifest(saved_games) != saved_manifest):
                         raise ActivationError("Retained saves changed during restoration")
-                    _make_writable_tree(temporary / "Saves")
+                    self._make_writable_tree(temporary / "Saves")
                 self._write_marker(temporary, profile_id, variant_id)
-                _fsync_tree(temporary)
-                os.rename(temporary, destination)
-                _fsync_dir(self.profiles)
+                self._fsync_tree(temporary)
+                self._call("activation.publish_rename", os.rename, temporary, destination)
+                self._fsync_dir(self.profiles)
             finally:
-                if temporary.exists():
+                if temporary.exists() and self.observed_io is None:
                     shutil.rmtree(temporary)
             return profile_id
 
@@ -398,10 +456,14 @@ class FilesystemProfiles:
         return state
 
     def _clear_journal(self) -> None:
-        self.journal.unlink()
-        _fsync_dir(self.store)
+        self._call("activation.journal_unlink", self.journal.unlink)
+        self._fsync_dir(self.store)
 
     def _recover_locked(self) -> None:
+        if self.observed_io is not None and (self.journal.exists() or self.journal.is_symlink()):
+            def refuse_history():
+                raise RecoveryError("Observed runner refuses pending historical activation recovery")
+            self._call("activation.pending_recovery_denied", refuse_history)
         state = self._state()
         if not self.journal.exists():
             self._marker(self.live, state["active"])
@@ -424,12 +486,12 @@ class FilesystemProfiles:
             return
         if live_id == target_id and target_exists and not source_exists:
             self._marker(target_path, source_id)
-            os.rename(target_path, source_path)
-            _fsync_dir(self.profiles)
+            self._call("activation.outgoing_rename", os.rename, target_path, source_path)
+            self._fsync_dir(self.profiles)
             source_exists, target_exists = True, False
         if live_id == target_id and source_exists and not target_exists:
             self._marker(source_path, source_id)
-            _atomic_json(self.state_file, dict(schema=SCHEMA, active=target_id))
+            self._atomic_json(self.state_file, dict(schema=SCHEMA, active=target_id))
             self._clear_journal()
             return
         raise RecoveryError("Unexpected profile layout; all trees retained for inspection")
@@ -454,19 +516,19 @@ class FilesystemProfiles:
         self._marker(target_path, target_id)
         if self.live.stat().st_dev != target_path.stat().st_dev:
             raise ActivationError("Target generation is on another volume")
-        _fsync_tree(self.live)
-        _atomic_json(self.journal, dict(schema=SCHEMA, source=source_id, target=target_id))
+        self._fsync_tree(self.live)
+        self._atomic_json(self.journal, dict(schema=SCHEMA, source=source_id, target=target_id))
         self.fault_hook("after_journal")
         self._require_stopped()
-        self.exchange(self.live, target_path)
+        self._exchange(self.live, target_path)
         self.fault_hook("after_exchange")
         self._require_stopped()
         self._marker(self.live, target_id)
         self._marker(target_path, source_id)
-        os.rename(target_path, source_path)
-        _fsync_dir(self.profiles)
+        self._call("activation.outgoing_rename", os.rename, target_path, source_path)
+        self._fsync_dir(self.profiles)
         self.fault_hook("after_outgoing_saved")
-        _atomic_json(self.state_file, dict(schema=SCHEMA, active=target_id))
+        self._atomic_json(self.state_file, dict(schema=SCHEMA, active=target_id))
         self.fault_hook("after_state")
         self._clear_journal()
         return target_id

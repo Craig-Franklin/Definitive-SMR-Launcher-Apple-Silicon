@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from check_industry_registry import (AuditError, discover_installed_library,
                                      extract_registry, read_xml, xml_files)
 
-ANALYZER_VERSION = "1.0.0-research"
+ANALYZER_VERSION = "1.1.0-research"
 KINDS = {
     "goods": ("GoodsXMLFile", "RRT_Goods.xml", "./Good"),
     "industries": ("IndustriesXMLFile", "RRT_Industries.xml", "./Industries/RRTIndustry"),
@@ -35,6 +35,16 @@ KINDS = {
 
 def value(node, key):
     return node.findtext(key) or ""
+
+
+def root_reference_occurrences(tree):
+    """Ordered direct-child XML references, retaining empty and exact text.
+
+    Multiplicity is documentary evidence only: native duplicate selection is
+    unknown even when every occurrence has the same text.
+    """
+    return [{"field": node.tag, "root_child_index": index, "text": node.text}
+            for index, node in enumerate(tree) if node.tag.endswith("XMLFile")]
 
 
 def engine_bool(text):
@@ -125,7 +135,7 @@ class Scanner:
                 add("duplicate_xml_basename", name=name,
                     files=[str(p.relative_to(root)) for p in paths])
 
-        def resolve(name, scenario):
+        def resolve(name, scenario, **context):
             basename = name.replace("\\", "/").rsplit("/", 1)[-1].casefold()
             candidates = index.get(basename, [])
             # Deliberately do not guess engine priority among duplicate names.
@@ -138,13 +148,15 @@ class Scanner:
                 near = [str(p.relative_to(root)) for n, paths in index.items()
                         if "".join(n.split()) == compact for p in paths]
                 add("xml_reference_unresolved", scenario=scenario, reference=name,
-                    candidates=[str(p) for p in candidates], whitespace_candidates=near)
+                    candidates=[str(p) for p in candidates], whitespace_candidates=near,
+                    **context)
                 return None
             p = candidates[0]
             tree, digest, error = self.document(p)
             dependencies[str(p)] = digest
             if error:
-                add("xml_dependency_unreadable", scenario=scenario, reference=name, error=error)
+                add("xml_dependency_unreadable", scenario=scenario, reference=name,
+                    error=error, **context)
             return {"path": str(p), "sha256": digest, "resolution": source, "tree": tree}
 
         scenario_rows = []
@@ -161,16 +173,50 @@ class Scanner:
             if tree.tag != "RRTScenario":
                 add("unexpected_scenario_root", scenario=relative, root=tree.tag)
                 continue
+            occurrences = root_reference_occurrences(tree)
+            row["reference_fields"] = occurrences
+            grouped = defaultdict(list)
+            for occurrence in occurrences:
+                grouped[occurrence["field"]].append(occurrence)
             selected = {}
-            for node in tree:
-                if node.tag.endswith("XMLFile") and node.text and node.text.strip():
-                    if node.text != node.text.strip():
-                        add("xml_reference_whitespace_review", scenario=relative, field=node.tag, reference=node.text)
-                    selected[node.tag] = resolve(node.text.strip(), relative)
+            selections = row["reference_selection"] = {}
+            for tag, items in grouped.items():
+                ambiguous = len(items) > 1
+                status = "UNKNOWN" if ambiguous else "unique"
+                context = ({"field": tag, "selection": "UNKNOWN", "documentary_only": True,
+                            "meaning": "Loose candidate observation; native duplicate consumption is unknown"}
+                           if ambiguous else {})
+                if ambiguous:
+                    add("duplicate_root_xml_reference", scenario=relative, field=tag,
+                        count=len(items), occurrences=items, selection="UNKNOWN",
+                        meaning="Native duplicate consumption is unknown; dependent projections withheld")
+                bindings = []
+                for item in items:
+                    text = item["text"]
+                    doc = None
+                    if text and text.strip():
+                        if text != text.strip():
+                            add("xml_reference_whitespace_review", scenario=relative,
+                                field=tag, reference=text,
+                                **{k: v for k, v in context.items() if k != "field"})
+                        doc = resolve(text.strip(), relative, **context)
+                    bindings.append({**item, "binding": {k: v for k, v in doc.items()
+                                                          if k != "tree"} if doc else None})
+                    if not ambiguous:
+                        selected[tag] = doc
+                selections[tag] = {"status": status, "documentary_candidates": bindings,
+                                   "policy": "Unique loose candidate binding is not native provider/selection proof"}
             records = {}
             for kind, (tag, default, selector) in KINDS.items():
                 base_doc = resolve(default, relative)
-                ref = value(tree, tag).strip()
+                if len(grouped.get(tag, [])) > 1:
+                    row["resources"][kind] = {
+                        "base": {k: v for k, v in base_doc.items() if k != "tree"} if base_doc else None,
+                        "scenario": None, "unresolved": True, "selection": "UNKNOWN",
+                        "reason": "Duplicate root field; native consumption unknown; no override chosen"}
+                    records[kind] = None
+                    continue
+                ref = (grouped[tag][0]["text"] or "").strip() if tag in grouped else ""
                 override_doc = selected.get(tag) if ref and ref.casefold() != default.casefold() else None
                 expected_root = {"goods": "RRTGoods", "industries": "RRTIndustries",
                                  "cars": "RRTTrainCars", "tenders": "RRTTrainCars",
@@ -338,6 +384,7 @@ def main():
                   "Read-only static research; no runtime pass or repair is implied.",
                   "Loose map basename then stock is a candidate resolver; engine VFS priority is not established.",
                   "Duplicate filenames are unresolved; packed FPK contents are not indexed.",
+                  "Duplicate root XMLFile fields retain ordered occurrences; native selection is UNKNOWN and dependent projections are withheld.",
                   "Exact identity comparison except case-insensitive car goods lookup; engine normalization is incompletely mapped.",
                   "Scalar empty-value semantics and bridge overlay semantics are provisional; outliers are review leads.",
                   "Models, animation graphs, terrain, runtime-generated objects and saved-game references are not validated.",

@@ -130,17 +130,28 @@ class LauncherApplication:
         return app
 
     @contextmanager
-    def _locked(self) -> Iterator[None]:
+    def _locked(self, *, observed_io=None) -> Iterator[None]:
         _assert_no_symlink_ancestor(self.library)
         self.library.mkdir(parents=True, exist_ok=True)
-        fd = os.open(self.library / ".application.lock", os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        call = (lambda name, fn, *args: fn(*args)) if observed_io is None else observed_io.call
+        pending = self.library / "removal.json"
+        if observed_io is not None and (pending.exists() or pending.is_symlink()):
+            raise ApplicationError("Pending removal requires its owner; observed runner refuses recovery")
+        fd = call("application.lock_open", os.open, self.library / ".application.lock",
+                  os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
-            removal.resume(self)
+            call("application.lock_acquire", fcntl.flock, fd, fcntl.LOCK_EX)
+            if observed_io is None:
+                removal.resume(self)
+            elif pending.exists() or pending.is_symlink():
+                raise ApplicationError("Removal appeared after locking; all evidence retained")
             yield
         finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-            os.close(fd)
+            try:
+                call("application.lock_release", fcntl.flock, fd, fcntl.LOCK_UN)
+            finally:
+                call("application.lock_close", os.close, fd)
+        call("application.lock_exit", lambda: None)
 
     def _installation_identity(self) -> dict:
         game = self.installation

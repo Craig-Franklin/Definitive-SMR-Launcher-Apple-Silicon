@@ -245,6 +245,71 @@ class ActivationTests(unittest.TestCase):
             self.manager.switch(profile)
         self.assertFalse((self.store / "journal.json").exists())
 
+    def test_optional_observed_adapter_retains_full_save_round_trip(self):
+        from smr_launcher.live_run_authority import ObservedIO
+        events = []
+        class Adapter(ObservedIO):
+            def call(self, name, function, *args, **kwargs):
+                result = super().call(name, function, *args, **kwargs)
+                events.append(name)
+                return result
+        self.manager.observed_io = Adapter()
+        _, profile = self.prepared("observed")
+        self.manager.switch(profile)
+        (self.live / "Saves/future.sav").write_bytes(b"observed future save")
+        self.manager.switch(ORIGINAL)
+        self.assertEqual((self.live / "Saves/original.sav").read_bytes(), b"original save")
+        self.assertEqual((self.manager._profile_path(profile) / "Saves/future.sav").read_bytes(),
+                         b"observed future save")
+        self.assertIn("activation.lock_close", events)
+        self.assertIn("activation.lock_exit", events)
+        self.assertIn("activation.exchange_syscall", events)
+
+    def test_observed_close_error_is_not_a_successful_context_return(self):
+        from smr_launcher.live_run_authority import ObservedIO
+        class Adapter(ObservedIO):
+            def call(self, name, function, *args, **kwargs):
+                result = super().call(name, function, *args, **kwargs)
+                if name == "activation.lock_close":
+                    raise OSError("successful close effect but return lost")
+                return result
+        self.manager.observed_io = Adapter()
+        with self.assertRaisesRegex(OSError, "return lost"):
+            self.manager.active_profile()
+        self.assertEqual((self.live / "Saves/original.sav").read_bytes(), b"original save")
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ObservedRecoveryRaceTests(unittest.TestCase):
+    def test_pending_journal_after_preflight_denies_before_history_read_and_retains_all(self):
+        import smr_launcher.activation as activation
+        from smr_launcher import live_run_authority as live
+        import time
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);source=root/'live';source.mkdir()
+            for name in ('CustomAssets','UserMaps','Saves'):(source/name).mkdir()
+            (source/'Saves/future.sav').write_bytes(b'original and future save')
+            profiles=activation.FilesystemProfiles(source,root/'store',('CustomAssets','UserMaps'),game_running=lambda:False)
+            profiles.enroll_original()
+            pin=root/'pin';pin.write_bytes(b'fixture input')
+            supervisor=live.FiniteSupervisor(time.monotonic()+3)
+            owner=live._new_owner([pin],[{'input_identity':'fixture'}],supervisor,lambda:True)
+            before=live.SettingsPreimage.capture(source)
+            history=b'not even parseable historical activation bytes'
+            profiles.journal.write_bytes(history)
+            profiles.observed_io=live.ObservedIO()
+            cookie=live._observing.set(owner)
+            try:
+                with profiles._locked():
+                    with patch.object(activation,'_read_json',side_effect=AssertionError('zero history/state reads')) as reader:
+                        with self.assertRaises(activation.RecoveryError):profiles._recover_locked()
+                        self.assertEqual(reader.call_count,0)
+                self.assertTrue(owner._revoked)
+                self.assertEqual(profiles.journal.read_bytes(),history)
+                self.assertEqual(live.SettingsPreimage.capture(source),before)
+            finally:
+                live._observing.reset(cookie);supervisor.close();owner.close()

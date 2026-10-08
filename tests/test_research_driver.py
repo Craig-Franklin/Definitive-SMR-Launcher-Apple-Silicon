@@ -12,7 +12,7 @@ from unittest.mock import patch
 spec = importlib.util.spec_from_file_location(
     "orca_load_driver", Path(__file__).resolve().parents[1] / "scripts/research/orca_load_driver.py")
 driver = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(driver)
+exec(compile(Path(spec.origin).read_bytes(), spec.origin, "exec"), driver.__dict__)
 
 
 def word(text, x=.75, y=.04):
@@ -103,8 +103,8 @@ class SceneTests(unittest.TestCase):
                 enlarged = [word(recovered, .23, .18), word("Cancel", .77, .86)]
                 with patch.object(subject, "command", return_value=data), \
                      patch.object(driver.subprocess, "run", side_effect=[
-                         SimpleNamespace(stdout=json.dumps(original)),
-                         SimpleNamespace(stdout=json.dumps(enlarged))]) as recognize:
+                         SimpleNamespace(returncode=0, stdout=json.dumps(original)),
+                         SimpleNamespace(returncode=0, stdout=json.dumps(enlarged))]) as recognize:
                     _, words = subject.observe()
                 self.assertEqual(recognize.call_count, 2)
                 self.assertEqual(recognize.call_args_list[1].args[0],
@@ -177,8 +177,8 @@ class SceneTests(unittest.TestCase):
             data = dict(snapshot=dict(window=dict(id=12)), screenshot=dict(path=str(image)))
             with patch.object(subject, "command", return_value=data), \
                  patch.object(driver.subprocess, "run", side_effect=[
-                     SimpleNamespace(stdout=json.dumps(noisy_full_frame)),
-                     SimpleNamespace(stdout=json.dumps(hud_only)),
+                     SimpleNamespace(returncode=0, stdout=json.dumps(noisy_full_frame)),
+                     SimpleNamespace(returncode=0, stdout=json.dumps(hud_only)),
                  ]) as recognize:
                 _, words = subject.observe()
 
@@ -202,12 +202,12 @@ class SceneTests(unittest.TestCase):
                 subject.stage = stage
                 data = dict(snapshot=dict(window=dict(id=12)),
                             screenshot=dict(path=str(Path(temp) / "frame.png")))
-                output = [SimpleNamespace(stdout=json.dumps(full_words))]
+                output = [SimpleNamespace(returncode=0, stdout=json.dumps(full_words))]
                 if expected_calls == 2:
-                    output.append(SimpleNamespace(stdout=json.dumps(hud_words)))
+                    output.append(SimpleNamespace(returncode=0, stdout=json.dumps(hud_words)))
                 elif expected_calls == 3:
-                    output.extend((SimpleNamespace(stdout=json.dumps(hud_words)),
-                                   SimpleNamespace(stdout=json.dumps(hud_words))))
+                    output.extend((SimpleNamespace(returncode=0, stdout=json.dumps(hud_words)),
+                                   SimpleNamespace(returncode=0, stdout=json.dumps(hud_words))))
                 with patch.object(subject, "command", return_value=data), \
                      patch.object(driver.subprocess, "run", side_effect=output) as recognize:
                     _, words = subject.observe()
@@ -226,9 +226,9 @@ class SceneTests(unittest.TestCase):
             data = dict(snapshot=dict(window=dict(id=12)), screenshot=dict(path=str(image)))
             with patch.object(subject, "command", return_value=data), \
                  patch.object(driver.subprocess, "run", side_effect=[
-                     SimpleNamespace(stdout=json.dumps(full)),
-                     SimpleNamespace(stdout=json.dumps(regular_strip)),
-                     SimpleNamespace(stdout=json.dumps(scaled_strip)),
+                     SimpleNamespace(returncode=0, stdout=json.dumps(full)),
+                     SimpleNamespace(returncode=0, stdout=json.dumps(regular_strip)),
+                     SimpleNamespace(returncode=0, stdout=json.dumps(scaled_strip)),
                  ]) as recognize:
                 _, words = subject.observe()
 
@@ -281,7 +281,7 @@ class SceneTests(unittest.TestCase):
             with patch.object(subject, "command", side_effect=data), \
                  patch.object(driver, "loaded_hud", return_value=True), \
                  patch.object(driver.subprocess, "run", side_effect=[
-                     SimpleNamespace(stdout=json.dumps(items)) for items in texts]):
+                     SimpleNamespace(returncode=0, stdout=json.dumps(items)) for items in texts]):
                 subject.observe()
                 subject.observe()
 
@@ -353,9 +353,9 @@ class SceneTests(unittest.TestCase):
                 subject.expected_title = "targetmap"
                 data = dict(snapshot=dict(window=dict(id=12)),
                             screenshot=dict(path=str(Path(temp) / "frame.png")))
-                ocr_outputs = [SimpleNamespace(stdout=json.dumps(full_words))]
+                ocr_outputs = [SimpleNamespace(returncode=0, stdout=json.dumps(full_words))]
                 if expected_calls == 2:
-                    ocr_outputs.append(SimpleNamespace(stdout=json.dumps([word("Cancel", .77, .86)])))
+                    ocr_outputs.append(SimpleNamespace(returncode=0, stdout=json.dumps([word("Cancel", .77, .86)])))
                 with patch.object(subject, "command", return_value=data), \
                      patch.object(driver.subprocess, "run", side_effect=ocr_outputs) as recognize:
                     _, words = subject.observe()
@@ -513,3 +513,167 @@ class SceneTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StockSelectionTests(unittest.TestCase):
+    def request(self, temp):
+        return dict(pid=123, birth_us=456, input_identity='a'*64, scenario_name='Southwest U.S.',
+            scenario='stock-selection:Southwest U.S.', scenario_title='Southwest U.S.',
+            resource_namespace='stock-selection-v1', original_scenario_identity=None,
+            mode='stock', deadline=time.time()+60, output_directory=temp,
+            requested_options={'ai_players': 0})
+
+    def test_stock_exact_selection_two_observed_frames_and_separate_options(self):
+        with tempfile.TemporaryDirectory() as temp:
+            shot=Path(temp)/'frame.png';shot.write_bytes(b'fixture screenshot')
+            frame=dict(snapshot=dict(treeText='7 text AI Players: 0', window=dict(id=1)),
+                       screenshot=dict(path=str(shot)))
+            subject=driver.Driver(self.request(temp), 'fixture', 'fixture')
+            menu=[word('Single Player', .1, .4),word('Load Game', .1, .5),word('Tutorial', .1, .6)]
+            setup=[word('Southwest U.S.', .2, .18),word('Cancel', .7, .85)]
+            hud=[word('$500,000'),word('January, 1850', .85)]
+            with patch.object(subject,'observe',side_effect=[(frame,menu),(frame,setup),(frame,hud),(frame,hud)]), \
+                 patch.object(subject,'click'),patch.object(driver.time,'sleep'):
+                result=subject.run()
+            self.assertEqual(result['selection_mode'],'stock')
+            self.assertEqual(result['hud_observations'],2)
+            self.assertIsNone(result['original_scenario_identity'])
+            self.assertEqual(result['requested_options'],{'ai_players':0})
+            self.assertEqual(result['observed_options']['values'],{'ai_players':'0'})
+
+    def test_stock_unknown_namespace_and_duplicate_title_deny(self):
+        with tempfile.TemporaryDirectory() as temp:
+            request=self.request(temp);request['resource_namespace']='custom'
+            subject=driver.Driver(request,'fixture','fixture')
+            with self.assertRaisesRegex(ValueError,'separate resource namespace'):subject.run()
+            subject=driver.Driver(self.request(temp),'fixture','fixture')
+            subject.expected_title=driver.normalized('Southwest U.S.')
+            with self.assertRaisesRegex(RuntimeError,'Ambiguous'):
+                subject._stock_controls([word('Southwest U.S.',.2,.18),word('Southwest U.S.',.3,.18),word('Cancel',.7,.85)])
+            self.assertEqual(subject._stock_controls([word('Other Stock',.2,.18),word('Cancel',.7,.85)]),(None,None))
+
+    def test_stock_menu_is_explicit_unambiguous_and_bounded(self):
+        with tempfile.TemporaryDirectory() as temp:
+            subject=driver.Driver(self.request(temp),'fixture','fixture')
+            data=dict(snapshot=dict(treeText='4 menu item Southwest U.S.',window=dict(id=1)))
+            with patch.object(subject,'command') as command:
+                for _ in range(3):self.assertTrue(subject._select_stock_menu(data))
+                with self.assertRaisesRegex(RuntimeError,'bounded'):subject._select_stock_menu(data)
+                self.assertEqual(command.call_count,3)
+                data['snapshot']['treeText']='4 menu item Southwest U.S.\n5 menu item Southwest U.S.'
+                with self.assertRaisesRegex(RuntimeError,'Ambiguous'):subject._select_stock_menu(data)
+
+    def test_missing_options_never_derive_from_requested_dictionary(self):
+        with tempfile.TemporaryDirectory() as temp:
+            subject=driver.Driver(self.request(temp),'fixture','fixture')
+            self.assertEqual(subject._observe_options({'snapshot':{'treeText':''}}),
+                {'state':'unattested','values':{}})
+            with self.assertRaisesRegex(RuntimeError,'Ambiguous observed option'):
+                subject._observe_options({'snapshot':{'treeText':'1 text AI Players: 0\n2 text AI Players: 0'}})
+
+    def test_complete_looking_cli_stdout_with_lost_terminal_return_denies(self):
+        with tempfile.TemporaryDirectory() as temp:
+            # Keep the original terminal-return fault reachable after the new
+            # mandatory identity gate, using a matching synthetic provider.
+            request=dict(self.request(temp), executable='/synthetic/game')
+            subject=driver.Driver(request,'fixture','fixture')
+            process=driver.Process(123,456,'/synthetic/game',0)
+            with patch.object(driver,'MacProcesses',return_value=SimpleNamespace(inspect=lambda pid:process)), \
+                 patch.object(driver.subprocess,'run',return_value=SimpleNamespace(returncode=9,stdout='{"ok":true,"result":{}}')):
+                with self.assertRaisesRegex(driver.OrcaCommandError,'terminal_return_failed'):
+                    subject.command('get-app-state')
+
+    def test_actual_result_file_close_and_parent_sync_return_are_mandatory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            temp=str(Path(temp).resolve())
+            target=Path(temp)/'result.json';result={'status':'fixture'}
+            driver.write_result(target,result)
+            self.assertEqual(json.loads(target.read_text()),result)
+            real=driver.os.fdopen
+            class LostClose:
+                def __init__(self,value):self.value=value
+                def write(self,data):return self.value.write(data)
+                def flush(self):return self.value.flush()
+                def fileno(self):return self.value.fileno()
+                def close(self):self.value.close();raise OSError('close lost after effect')
+            target2=Path(temp)/'close.json'
+            with patch.object(driver.os,'fdopen',side_effect=lambda *a:LostClose(real(*a))):
+                with self.assertRaisesRegex(OSError,'close lost'):driver.write_result(target2,result)
+            self.assertFalse(target2.exists())
+            self.assertTrue(list(Path(temp).glob('close.json.tmp-*')))
+            fsync=driver.os.fsync
+            def parent_loss(fd):
+                import stat
+                if stat.S_ISDIR(driver.os.fstat(fd).st_mode):raise OSError('parent sync lost')
+                return fsync(fd)
+            target3=Path(temp)/'parent.json'
+            with patch.object(driver.os,'fsync',side_effect=parent_loss):
+                with self.assertRaisesRegex(OSError,'parent sync lost'):driver.write_result(target3,result)
+            self.assertEqual(json.loads(target3.read_text()),result)
+
+
+class CommandIdentityTests(unittest.TestCase):
+    def test_each_gui_submission_requires_current_birth_executable_and_pid(self):
+        expected=driver.Process(9001,111,'/synthetic/game',0)
+        for current in (None, driver.Process(9001,222,expected.executable,0),
+                        driver.Process(9001,111,'/synthetic/other',0),
+                        driver.Process(9002,111,expected.executable,0)):
+            with self.subTest(current=current), tempfile.TemporaryDirectory() as temp:
+                request=dict(pid=9001,birth_us=111,executable=expected.executable,
+                             deadline=time.time()+60,output_directory=temp)
+                subject=driver.Driver(request,'owned-ocr','owned-orca')
+                provider=SimpleNamespace(inspect=lambda pid:current)
+                with patch.object(driver,'MacProcesses',return_value=provider), \
+                     patch.object(driver.subprocess,'run') as submit:
+                    for action in ('get-app-state','click','press-key'):
+                        with self.assertRaisesRegex(driver.OrcaCommandError,'identity_mismatch_or_exited'):
+                            subject.command(action)
+                    self.assertEqual(submit.call_count,0)
+
+    def test_matching_identity_observes_then_reuse_refuses_next_action(self):
+        with tempfile.TemporaryDirectory() as temp:
+            request=dict(pid=9001,birth_us=111,executable='/synthetic/game',
+                         deadline=time.time()+60,output_directory=temp)
+            subject=driver.Driver(request,'owned-ocr','owned-orca')
+            sequence=[]
+            current=[driver.Process(9001,111,'/synthetic/game',0)]
+            def inspect(pid):
+                sequence.append(('inspect',pid));return current[0]
+            def submit(argv,**kwargs):
+                sequence.append(('submit',argv[2]))
+                return SimpleNamespace(returncode=0,stdout='{"ok":true,"result":{}}')
+            with patch.object(driver,'MacProcesses',return_value=SimpleNamespace(inspect=inspect)), \
+                 patch.object(driver.subprocess,'run',side_effect=submit) as gui:
+                self.assertEqual(subject.command('get-app-state'),{})
+                self.assertEqual(subject.command('click'),{})
+                current[0]=driver.Process(9001,222,'/synthetic/game',0)
+                with self.assertRaises(driver.OrcaCommandError):subject.command('press-key')
+                self.assertEqual(gui.call_count,2)
+            self.assertEqual(sequence,[('inspect',9001),('submit','get-app-state'),
+                                       ('inspect',9001),('submit','click'),('inspect',9001)])
+
+    def test_missing_or_unverifiable_identity_never_submits(self):
+        for fields in ({}, {'birth_us':True,'executable':'/synthetic/game'},
+                       {'birth_us':111,'executable':'relative-game'}):
+            with self.subTest(fields=fields), tempfile.TemporaryDirectory() as temp:
+                subject=driver.Driver(dict(pid=9001,deadline=time.time()+60,
+                    output_directory=temp,**fields),'owned-ocr','owned-orca')
+                with patch.object(driver,'MacProcesses') as provider, \
+                     patch.object(driver.subprocess,'run') as gui:
+                    with self.assertRaisesRegex(driver.OrcaCommandError,'identity_missing'):
+                        subject.command('click')
+                    self.assertEqual(provider.call_count,0);self.assertEqual(gui.call_count,0)
+        with tempfile.TemporaryDirectory() as temp:
+            subject=driver.Driver(dict(pid=9001,birth_us=111,executable='/synthetic/game',
+                deadline=time.time()+60,output_directory=temp),'owned-ocr','owned-orca')
+            with patch.object(driver,'MacProcesses',side_effect=PermissionError('unverifiable')), \
+                 patch.object(driver.subprocess,'run') as gui:
+                with self.assertRaisesRegex(driver.OrcaCommandError,'identity_unverifiable'):
+                    subject.command('click')
+                self.assertEqual(gui.call_count,0)
+            with patch.object(driver,'MacProcesses',return_value=SimpleNamespace(
+                    inspect=lambda pid:(_ for _ in ()).throw(PermissionError('lost identity')))), \
+                 patch.object(driver.subprocess,'run') as gui:
+                with self.assertRaisesRegex(driver.OrcaCommandError,'identity_unverifiable'):
+                    subject.command('click')
+                self.assertEqual(gui.call_count,0)
