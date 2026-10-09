@@ -14,6 +14,7 @@ import webbrowser
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from .crash_monitor import CrashMonitor
 from .activity import ActivityLog
 from .map_updates import find_map_updates
 from .ratings import fetch_rating, read_cached_rating
@@ -76,6 +77,8 @@ class LauncherWindow:
         self.root.geometry("1120x720")
         self.root.minsize(900, 590)
         self.app: Optional[LauncherApplication] = None
+        self.crash_monitor = None
+        self.crash_status = tk.StringVar(value="Crash monitoring is unavailable until the game is found.")
         self.busy = False
         self.closed = False
         self._search_refresh_after_id = None
@@ -145,6 +148,8 @@ class LauncherWindow:
                 self.status.set("Steam Mac game found. Get started to prepare your map library.")
         except Exception as exc:
             self.status.set("Steam Mac game unavailable: " + str(exc))
+        if self.app is not None:
+            self._start_crash_monitor()
         try:
             if trusted_team_from_bundle():
                 self.pending_update = pending_install(self.update_library, current_app_bundle(), APP_VERSION)
@@ -176,6 +181,7 @@ class LauncherWindow:
             "https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/blob/main/MACOS_README.md"))
         help_menu.add_command(label="Windows Feature Comparison", command=lambda: webbrowser.open(
             "https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/blob/main/docs/FEATURE_PARITY.md"))
+        help_menu.add_command(label="Crash Reports…", command=self.crash_reports)
         menu.add_cascade(label=tr("Help"), menu=help_menu)
         self.root.configure(menu=menu)
         self.root.bind("<Command-o>", lambda _: self.import_map())
@@ -203,6 +209,8 @@ class LauncherWindow:
                     parent=self.root,
                 ):
                     return
+        if getattr(self, "crash_monitor", None) is not None:
+            self.crash_monitor.close()
         self.root.destroy()
         self.closed = True
         self._stop_speech()
@@ -1320,6 +1328,8 @@ class LauncherWindow:
         Thread(target=worker, daemon=True).start()
 
     def _poll(self) -> None:
+        if getattr(self, "crash_monitor", None) is not None:
+            self.crash_status.set(self.crash_monitor.status)
         speech = self.speech_process
         if speech is not None and speech.done:
             self.speech_process = None
@@ -1410,8 +1420,80 @@ class LauncherWindow:
                     "Known map issue", verification.issue + "\n\nLaunch this map anyway?", parent=self.root):
                 return
         self._submit("Switching profile and starting Railroads…",
-                     lambda: self.app.play(profile_id),
+                     lambda: self._play_with_crash_monitor(profile_id),
                      lambda _: self.status.set("Railroads launched. Quit it before changing maps."))
+
+    def _start_crash_monitor(self) -> None:
+        try:
+            self.crash_monitor = CrashMonitor(self.app, APP_VERSION)
+            self.crash_monitor.start()
+        except Exception:
+            self.crash_monitor = None
+            self.crash_status.set("Crash monitoring needs inspection; you can still play.")
+
+    def _play_with_crash_monitor(self, profile_id: str):
+        def launch():
+            # Existing application/profile guards run before this callback.
+            if self.crash_monitor is not None:
+                try:
+                    self.crash_monitor.arm(profile_id)
+                except Exception:
+                    self.crash_monitor.status = "Crash monitoring needs inspection; you can still play."
+            child = subprocess.Popen(["/usr/bin/open", "-a", str(self.app.installation.executable.parents[2])])
+            if self.crash_monitor is not None:
+                try:
+                    self.crash_monitor.bind_after_launch(profile_id)
+                except Exception:
+                    self.crash_monitor.status = "Launch observation unavailable; unmatched reports stay private."
+            return child
+        return self.app.play(profile_id, launch=launch)
+
+    def crash_reports(self) -> None:
+        popup = tk.Toplevel(self.root)
+        popup.title("Crash Reports")
+        popup.transient(self.root)
+        panel = ttk.Frame(popup, padding=20)
+        panel.pack(fill="both", expand=True)
+        ttk.Label(panel, text="Play normally; keep this launcher open.",
+                  font=("Helvetica Neue", 14, "bold")).pack(anchor="w")
+        ttk.Label(panel, wraplength=540, justify="left", text=(
+            "Complete macOS crash reports stay in a private folder on this Mac. "
+            "Reports arriving after you close the launcher are checked when it next opens. "
+            "A normal game exit is never reported as a crash."
+        )).pack(anchor="w", pady=(10, 14))
+        monitor = self.crash_monitor
+        enabled = tk.BooleanVar(value=monitor.enabled if monitor else False)
+        automatic = tk.BooleanVar(value=monitor.automatic_reporting if monitor else False)
+        def configure():
+            try:
+                monitor.configure(enabled=enabled.get(), automatic_reporting=automatic.get())
+            except Exception:
+                self.crash_status.set("Crash reporting preferences could not be saved; you can still play.")
+        for label, variable in (("Monitor game crashes", enabled),
+                                ("Automatically report sanitized crashes to GitHub", automatic)):
+            ttk.Checkbutton(panel, text=label, variable=variable, command=configure,
+                            state="normal" if monitor else "disabled").pack(anchor="w", pady=4)
+        ttk.Label(panel, wraplength=540, justify="left", text=(
+            "Automatic reporting uses your existing GitHub CLI sign-in. Public issues contain only "
+            "validated versions, exception types, hashes and numeric image offsets. "
+            "Passwords, tokens, personal paths, save names, raw logs and attachments are excluded. "
+            "If GitHub is unavailable, confirmed reports wait locally."
+        )).pack(anchor="w", pady=14)
+        ttk.Label(panel, wraplength=540, textvariable=self.crash_status).pack(anchor="w", pady=8)
+        buttons = ttk.Frame(panel)
+        buttons.pack(fill="x", pady=(8, 0))
+        def reconcile():
+            def work():
+                try:
+                    monitor.poll_once(reconcile=True)
+                except Exception:
+                    monitor.status = "Crash report reconciliation needs inspection; reports remain local."
+            Thread(target=work, daemon=True, name="smr-crash-reconcile").start()
+        ttk.Button(buttons, text="Check pending reports", command=reconcile,
+                   state="normal" if monitor else "disabled").pack(side="left")
+        ttk.Button(buttons, text="Open private reports folder", state="normal" if monitor else "disabled",
+                   command=lambda: subprocess.Popen(["/usr/bin/open", str(monitor.root)])).pack(side="left", padx=8)
+        ttk.Button(buttons, text="Close", command=popup.destroy).pack(side="right")
 
     def run(self) -> None:
         self.root.mainloop()
