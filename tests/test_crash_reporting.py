@@ -76,7 +76,7 @@ class FakeRunner:
             data = self.search
         elif endpoint == API + "/issues" and method == "POST":
             assert argv[-2:] == ("--input", "-")
-            assert set(json.loads(stdin)) == {"title", "body"}
+            assert set(json.loads(stdin)) == {"title", "body", "labels"}
             data = self.receipt
         elif endpoint == API + "/issues/17" and method == "GET":
             data = self.readback
@@ -131,7 +131,7 @@ class CrashReportingTests(unittest.TestCase):
                 self.assertNotIn(CANARY, str(raised.exception))
 
     def test_no_unknown_keys_notes_symbols_or_attachments(self):
-        for key in ("note", "user_note", "path", "raw_report", "attachments", "symbols", "environment"):
+        for key in ("note", "user_note", "path", "raw_report", "attachments", "symbols", "environment", "labels"):
             p = payload(); p[key] = CANARY
             self.assertEqual(GitHubCrashPublisher(FakeRunner()).publish(p)["status"], "rejected")
         p = payload(); p["frames"][0]["symbol"] = CANARY
@@ -180,6 +180,7 @@ class CrashReportingTests(unittest.TestCase):
         post = fake.posts()[0]
         self.assertEqual(len(fake.posts()), 1)
         data = json.loads(post[1])
+        self.assertEqual(data["labels"], ["crash:reported", "crash:needs-triage"])
         self.assertEqual(data["title"], "Sid Meier's Railroads! crash: EXC_BAD_ACCESS [aaaaaaaaaaaa]")
         self.assertIn("\n\n## Crash summary\n", data["body"])
         self.assertNotIn(CANARY, post[1].decode())

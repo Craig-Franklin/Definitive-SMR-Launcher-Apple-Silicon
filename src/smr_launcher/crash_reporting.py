@@ -418,7 +418,10 @@ class GitHubCrashPublisher:
             # Fresh exact account/repo/remotes immediately before the only mutation.
             self._guard()
             mutation_started = True
-            receipt = self._api(_API + "/issues", body={"title": title, "body": body})
+            receipt = self._api(_API + "/issues", body={
+                "title": title, "body": body,
+                "labels": ["crash:reported", "crash:needs-triage"],
+            })
             if not isinstance(receipt, dict):
                 raise _Unavailable()
             url = receipt.get("html_url")
