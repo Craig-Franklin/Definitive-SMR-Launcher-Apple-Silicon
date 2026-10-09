@@ -289,7 +289,15 @@ def parse_crash_report(raw: bytes, *, expected_executable: str, expected_pid: in
                    scenario_key=_hash(context.get("scenario_key")), exception_type=exception, signal=signal,
                    termination_namespace=namespace, exception_codes=report["codes"], frames=frames)
     # Fault addresses/codes can vary with ASLR; module UUID + relative offset do not.
-    signature = {key: payload[key] for key in ("game_executable_sha256", "archive_sha256", "variant_id", "scenario_key", "exception_type", "signal", "termination_namespace", "frames")}
+    signature = {key: payload[key] for key in ("game_executable_sha256", "archive_sha256", "variant_id", "scenario_key", "exception_type", "signal", "termination_namespace")}
+    signature["signature_version"] = 2
+    # Rosetta may describe a translated PC as an address-like offset in a
+    # zero-UUID image. Retain it diagnostically, but never treat it as a stable
+    # module-relative identity. Prefer the ordered original game frames.
+    known = [frame for frame in frames if frame["image_uuid"] not in (None, "00000000-0000-0000-0000-000000000000")
+             and frame["offset"] is not None]
+    selected = [frame for frame in known if frame["image_role"] == "game"] or known
+    signature["frames"] = [{key: frame[key] for key in ("image_role", "image_uuid", "offset")} for frame in selected]
     payload["fingerprint"] = hashlib.sha256(json.dumps(signature, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     return payload
 
@@ -465,7 +473,15 @@ class CrashStore:
         for entry in self._entries():
             if entry["incident_id"] == digest:
                 if entry["payload"] != payload:
-                    raise CrashReportError("incident context collision")
+                    previous = dict(entry["payload"])
+                    current = dict(payload)
+                    previous.pop("fingerprint")
+                    current.pop("fingerprint")
+                    if previous != current:
+                        raise CrashReportError("incident context collision")
+                    # A grouping algorithm upgrade never rewrites immutable raw
+                    # incident metadata or forgets its existing publication.
+
                 return entry
         entry = dict(incident_id=digest, fingerprint=payload["fingerprint"], report_sha256=digest, raw_file=digest + ".raw", payload=payload)
         try:

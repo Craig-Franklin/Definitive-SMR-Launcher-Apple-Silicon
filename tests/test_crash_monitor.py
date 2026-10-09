@@ -259,3 +259,57 @@ class ReviewFindingControls(MonitorControls):
         self.assertEqual(monitor.store.pending(), [])
         self.assertEqual(len(list((monitor.root/'unconfirmed').glob('*.raw'))), 1)
         self.publisher.publish.assert_not_called()
+
+class RealUseControls(unittest.TestCase):
+    def test_rosetta_unknown_address_does_not_split_game_signature(self):
+        from smr_launcher.crash_reports import parse_crash_report
+        image_uuid = '12345678-1234-5678-1234-567812345678'
+        value = json.loads(report())
+        value.update(usedImages=[dict(path='unknown', uuid='00000000-0000-0000-0000-000000000000'), dict(path=EXE,uuid=image_uuid)],
+            threads=[dict(triggered=True,frames=[dict(imageIndex=0,imageOffset=0x12345000),dict(imageIndex=1,imageOffset=256)])])
+        def parse():
+            return parse_crash_report(json.dumps(value).encode(), expected_executable=EXE, expected_pid=123,
+                session_started_at=START,context=dict(game_executable_sha256='a'*64,launcher_version='1.2.3'))
+        first = parse()
+        value['threads'][0]['frames'][0]['imageOffset'] = 0x789ab000
+        second = parse()
+        self.assertEqual(first['fingerprint'], second['fingerprint'])
+        self.assertNotEqual(first['report_sha256'], second['report_sha256'])
+        value['threads'][0]['frames'][1]['imageOffset'] = 257
+        self.assertNotEqual(first['fingerprint'], parse()['fingerprint'])
+
+    def test_fingerprint_upgrade_keeps_immutable_incident_publication(self):
+        from smr_launcher.crash_reports import CrashStore, parse_crash_report
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()/'private'
+            payload = parse_crash_report(report(), expected_executable=EXE,expected_pid=123, session_started_at=START,
+                context=dict(game_executable_sha256='a'*64,launcher_version='1.2.3'))
+            with CrashStore(root) as store:
+                original = store.collect(report(),payload)
+                store.mark_publication(payload['fingerprint'],'published')
+                newer = dict(payload, fingerprint='f'*64)
+                retained = store.collect(report(),newer)
+                self.assertEqual(retained['fingerprint'], original['fingerprint'])
+                self.assertEqual(retained['publication']['status'],'published')
+                self.assertEqual(store.pending(),[])
+
+    def test_finder_path_uses_known_homebrew_cli_without_secret_reads(self):
+        from unittest.mock import patch
+        from smr_launcher.crash_reporting import bounded_command_runner
+        with patch('smr_launcher.crash_reporting.shutil.which',return_value=None), \
+             patch('smr_launcher.crash_reporting.Path.is_file',return_value=True), \
+             patch('smr_launcher.crash_reporting.os.access',return_value=True), \
+             patch('smr_launcher.crash_reporting.subprocess.run',return_value=SimpleNamespace(returncode=0)) as run:
+            result=bounded_command_runner(('gh','api','user'),stdin=None,timeout=1,max_output_bytes=1024)
+            self.assertEqual(run.call_args.args[0],('/opt/homebrew/bin/gh','api','user'))
+            self.assertEqual(result.returncode,0)
+
+    def test_missing_cli_stays_unavailable(self):
+        from unittest.mock import patch
+        from smr_launcher.crash_reporting import bounded_command_runner
+        with patch('smr_launcher.crash_reporting.shutil.which',return_value=None), \
+             patch('smr_launcher.crash_reporting.Path.is_file',return_value=False), \
+             patch('smr_launcher.crash_reporting.subprocess.run') as run:
+            with self.assertRaises(FileNotFoundError):
+                bounded_command_runner(('gh','api','user'),stdin=None,timeout=1,max_output_bytes=1024)
+            run.assert_not_called()

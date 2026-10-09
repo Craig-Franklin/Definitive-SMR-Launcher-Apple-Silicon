@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 import json
+import os
+import shutil
 from pathlib import Path
 import re
 import subprocess
@@ -143,6 +145,14 @@ def bounded_command_runner(argv: tuple[str, ...], *, stdin: bytes | None, timeou
     The timeout/output check is operational, not a strict child disk-write quota.
     Stderr is discarded and is never copied into public outcomes.
     """
+    if argv and argv[0] == "gh":
+        executable = shutil.which("gh")
+        if executable is None:
+            executable = next((path for path in ("/opt/homebrew/bin/gh", "/usr/local/bin/gh")
+                               if Path(path).is_file() and os.access(path, os.X_OK)), None)
+        if executable is None:
+            raise FileNotFoundError("GitHub CLI unavailable")
+        argv = (executable, *argv[1:])
     with tempfile.TemporaryFile() as output:
         result = subprocess.run(argv, input=stdin, stdout=output, stderr=subprocess.DEVNULL,
                                 timeout=timeout, check=False)
