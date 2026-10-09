@@ -70,6 +70,59 @@ class MonitorControls(unittest.TestCase):
         self.assertEqual(len(list((monitor.root/'unconfirmed').glob('*.raw'))), 1)
         self.publisher.publish.assert_not_called()
 
+    def test_collects_retired_report_after_exact_game_has_exited(self):
+        retired = self.reports / 'Retired'
+        retired.mkdir()
+        path = retired / 'Sid Meiers Railroads_delayed.ips'
+        original = report()
+        path.write_bytes(original)
+        self.probe.return_value = None
+        monitor = self.monitor()
+        monitor.arm('original', process=PROCESS)
+        monitor.configure(enabled=True, automatic_reporting=True)
+        monitor.poll_once()
+        entries = monitor.store._entries()
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]['publication']['status'], 'published')
+        self.assertEqual((monitor.root / entries[0]['raw_file']).read_bytes(), original)
+        self.assertEqual(path.read_bytes(), original)
+        self.publisher.publish.assert_called_once()
+
+    def test_retired_discovery_has_no_recursive_or_unrelated_report_scan(self):
+        retired = self.reports / 'Retired'
+        retired.mkdir()
+        nested = retired / 'nested'
+        nested.mkdir()
+        (nested / 'Sid Meiers Railroads_hidden.ips').write_bytes(report())
+        (retired / 'UnrelatedApp.ips').write_bytes(report())
+        allowed = retired / 'Sid Meiers Railroads_expected.ips'
+        allowed.write_bytes(report())
+        monitor = self.monitor()
+        self.assertEqual(monitor._reports(), [allowed])
+
+    def test_retired_discovery_shares_the_parent_scan_limit(self):
+        from unittest.mock import patch
+        retired = self.reports / 'Retired'
+        retired.mkdir()
+        (self.reports / 'unrelated.txt').write_bytes(b'x')
+        (retired / 'Sid Meiers Railroads_expected.ips').write_bytes(report())
+        monitor = self.monitor()
+        with patch('smr_launcher.crash_monitor.MAX_SCAN_ENTRIES', 2):
+            with self.assertRaises(ValueError):
+                monitor._reports()
+
+    def test_retired_discovery_rejects_a_symlink_to_other_logs(self):
+        from smr_launcher.activation import ActivationError
+        outside = self.library / 'other-logs'
+        outside.mkdir()
+        (outside / 'Sid Meiers Railroads_private.ips').write_bytes(report())
+        (self.reports / 'Retired').symlink_to(outside, target_is_directory=True)
+        monitor = self.monitor()
+        with self.assertRaises(ActivationError):
+            monitor._reports()
+        self.assertEqual(monitor.store.pending(), [])
+        self.publisher.publish.assert_not_called()
+
     def test_durable_old_session_delayed_report_after_new_game(self):
         first = self.monitor()
         first.poll_once()

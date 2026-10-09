@@ -264,14 +264,24 @@ class CrashMonitor:
             return []
         _assert_no_symlink_ancestor(self.reports_directory)
         found = []
-        with os.scandir(self.reports_directory) as entries:
-            for index, entry in enumerate(entries):
-                if index >= MAX_SCAN_ENTRIES:
-                    raise ValueError("Diagnostic report directory needs inspection")
-                name = entry.name.lower()
-                if (name.startswith(("sid meiers railroads", "sid meier's railroads", "smrailroads"))
-                        and name.endswith((".ips", ".crash")) and entry.is_file(follow_symlinks=False)):
-                    found.append(Path(entry.path))
+        directories = [self.reports_directory]
+        retired = self.reports_directory / "Retired"
+        _assert_no_symlink_ancestor(retired)
+        if retired.is_dir():
+            directories.append(retired)
+        scanned = 0
+        # macOS may retire a report before the next poll. Inspect only this fixed
+        # child, sharing the parent's scan budget; never recursively discover logs.
+        for directory in directories:
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    if scanned >= MAX_SCAN_ENTRIES:
+                        raise ValueError("Diagnostic report directory needs inspection")
+                    scanned += 1
+                    name = entry.name.lower()
+                    if (name.startswith(("sid meiers railroads", "sid meier's railroads", "smrailroads"))
+                            and name.endswith((".ips", ".crash")) and entry.is_file(follow_symlinks=False)):
+                        found.append(Path(entry.path))
         return sorted(found, key=lambda p: p.lstat().st_mtime_ns, reverse=True)
 
     def poll_once(self, *, reconcile=False) -> None:
