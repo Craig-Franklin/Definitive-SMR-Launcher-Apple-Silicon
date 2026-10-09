@@ -32,7 +32,7 @@ def payload():
 
 
 def issue(url=URL, body=MARKER):
-    return {"number": 17, "html_url": url, "body": body}
+    return {"number": 17, "html_url": url, "body": body, "state": "open"}
 
 
 class FakeRunner:
@@ -299,3 +299,41 @@ class CrashReportingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class ClosedRecurrenceControls(unittest.TestCase):
+    def test_closed_only_creates_fresh_open_match_groups(self):
+        for state,detail,posts in [('closed','created',1),('open','grouped',0)]:
+            fake=FakeRunner();candidate=issue();candidate['state']=state
+            fake.search.update(total_count=1,items=[candidate])
+            result=GitHubCrashPublisher(fake).publish(payload())
+            self.assertEqual(result['detail'],detail);self.assertEqual(len(fake.posts()),posts)
+
+    def test_closed_plus_open_groups_only_open(self):
+        fake=FakeRunner();closed=issue(URL.replace('/17','/18'));closed['state']='closed'
+        fake.search.update(total_count=2,items=[closed,issue()])
+        self.assertEqual(GitHubCrashPublisher(fake).publish(payload())['detail'],'grouped')
+        self.assertFalse(fake.posts())
+
+    def test_reconcile_closed_and_explicit_closed_readback(self):
+        fake=FakeRunner();closed=issue();closed['state']='closed'
+        fake.search.update(total_count=1,items=[closed]);fake.readback=closed
+        self.assertEqual(GitHubCrashPublisher(fake).publish(payload(),reconcile_only=True)['status'],'published')
+        self.assertFalse(fake.posts())
+        self.assertEqual(GitHubCrashPublisher(fake).publish(payload(),existing_issue_url=URL)['detail'],'reconciled')
+        self.assertFalse(fake.posts())
+
+    def test_missing_bad_state_and_race_close_fail_closed(self):
+        for state in (None,True,'UNKNOWN',{},[]):
+            fake=FakeRunner();candidate=issue();candidate['state']=state
+            fake.search.update(total_count=1,items=[candidate])
+            self.assertEqual(GitHubCrashPublisher(fake).publish(payload())['status'],'pending')
+            self.assertFalse(fake.posts())
+        fake=FakeRunner();fake.search.update(total_count=1,items=[issue()]);fake.readback['state']='closed'
+        self.assertEqual(GitHubCrashPublisher(fake).publish(payload())['status'],'pending')
+        self.assertFalse(fake.posts())
+
+    def test_reconcile_duplicate_closed_open_is_unknown(self):
+        fake=FakeRunner();closed=issue(URL.replace('/17','/18'));closed['state']='closed'
+        fake.search.update(total_count=2,items=[closed,issue()])
+        self.assertEqual(GitHubCrashPublisher(fake).publish(payload(),reconcile_only=True)['status'],'unknown')
+        self.assertFalse(fake.posts())

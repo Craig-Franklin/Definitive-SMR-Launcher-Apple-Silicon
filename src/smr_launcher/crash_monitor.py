@@ -369,10 +369,15 @@ class CrashMonitor:
 
     def _publish_pending(self, *, reconcile=False):
         handled = set()
-        for entry in self.store.pending():
+        pending = self.store.pending()
+        uncertain = {e["fingerprint"] for e in pending if e["publication"]["status"] in ("sending", "unknown")}
+        for entry in pending:
             payload = entry["payload"]
             fingerprint = payload["fingerprint"]
             if fingerprint in handled:
+                continue
+            if fingerprint in uncertain and entry["publication"]["status"] == "pending":
+                self.status = "A matching crash report awaits publication reconciliation."
                 continue
             if len(handled) >= 4:
                 break
@@ -386,20 +391,20 @@ class CrashMonitor:
                 result = self.publisher.publish(payload, existing_issue_url=publication.get("issue_url"),
                                                 reconcile_only=True)
             else:
-                self.store.mark_publication(fingerprint, "sending")
+                self.store.mark_publication(fingerprint, "sending", incident_id=entry["incident_id"])
                 try:
                     result = self.publisher.publish(payload, existing_issue_url=publication.get("issue_url"))
                 except Exception:
-                    self.store.mark_publication(fingerprint, "unknown")
+                    self.store.mark_publication(fingerprint, "unknown", incident_id=entry["incident_id"])
                     self.status = "Publication outcome unknown; report retained locally."
                     continue
             status = result.get("status", "unknown")
             if status == "pending" and state not in ("sending", "unknown"):
                 # Adapter guarantees pending means no POST began. Durable sending
                 # is deliberately resolved only on this explicit no-mutation result.
-                self.store.reconcile_publication(fingerprint, "pending")
+                self.store.reconcile_publication(fingerprint, "pending", detail=result.get("detail"), incident_id=entry["incident_id"])
             else:
-                self.store.mark_publication(fingerprint, status, issue_url=result.get("issue_url"))
+                self.store.mark_publication(fingerprint, status, issue_url=result.get("issue_url"), detail=result.get("detail"), incident_id=entry["incident_id"])
             self.status = ("Sanitized crash report published to GitHub." if status == "published"
                            else "Crash report retained locally; GitHub reporting is pending.")
 

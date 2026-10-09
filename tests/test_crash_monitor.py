@@ -313,3 +313,42 @@ class RealUseControls(unittest.TestCase):
             with self.assertRaises(FileNotFoundError):
                 bounded_command_runner(('gh','api','user'),stdin=None,timeout=1,max_output_bytes=1024)
             run.assert_not_called()
+
+class FreshOccurrenceControls(MonitorControls):
+    def test_new_raw_same_fingerprint_uses_fresh_state_and_no_old_url(self):
+        monitor=self.monitor();self.write_report()
+        monitor.configure(enabled=True,automatic_reporting=True);monitor.poll_once()
+        self.assertEqual(self.publisher.publish.call_count,1)
+        first=self.publisher.publish.call_args.args[0]
+        self.write_report(name='Sid Meiers Railroads_2.ips',private='DIFFERENT_RAW')
+        monitor.next_publish=0;monitor.poll_once()
+        self.assertEqual(self.publisher.publish.call_count,2)
+        latest=self.publisher.publish.call_args
+        self.assertEqual(latest.args[0]['fingerprint'],first['fingerprint'])
+        self.assertNotEqual(latest.args[0]['report_sha256'],first['report_sha256'])
+        self.assertIsNone(latest.kwargs['existing_issue_url'])
+        monitor.next_publish=0;monitor.poll_once()
+        self.assertEqual(self.publisher.publish.call_count,2)
+        self.assertEqual(len(list(monitor.store.root.glob('incident-*.publication'))),2)
+
+    def test_uncertain_matching_incident_holds_fresh_raw_until_reconciled(self):
+        monitor=self.monitor();self.write_report()
+        self.publisher.publish.return_value=dict(status='unknown',detail='publication_unconfirmed')
+        monitor.configure(enabled=True,automatic_reporting=True);monitor.poll_once()
+        self.write_report(name='Sid Meiers Railroads_2.ips',private='DIFFERENT_RAW')
+        monitor.next_publish=0;monitor.poll_once()
+        self.assertEqual(self.publisher.publish.call_count,1)
+        self.assertEqual({e['publication']['status'] for e in monitor.store.pending()},{'unknown','pending'})
+        self.publisher.publish.return_value=dict(status='published',issue_url='https://example.invalid/old')
+        monitor.poll_once(reconcile=True)
+        self.assertEqual(self.publisher.publish.call_count,2)
+        self.assertTrue(self.publisher.publish.call_args.kwargs['reconcile_only'])
+        monitor.next_publish=0;monitor.poll_once()
+        self.assertEqual(self.publisher.publish.call_count,3)
+        self.assertIsNone(self.publisher.publish.call_args.kwargs['existing_issue_url'])
+
+    def test_pending_reason_persisted(self):
+        monitor=self.monitor();self.write_report()
+        self.publisher.publish.return_value=dict(status='pending',detail='body_too_large')
+        monitor.configure(enabled=True,automatic_reporting=True);monitor.poll_once()
+        self.assertEqual(monitor.store.pending()[0]['publication']['detail'],'body_too_large')

@@ -14,8 +14,10 @@ import stat
 from datetime import datetime, timezone
 import uuid
 
+from .crash_details import extract_details, validate_details
+
 MAX_REPORT_BYTES = 4 * 1024 * 1024
-MAX_METADATA_BYTES = 256 * 1024
+MAX_METADATA_BYTES = 32 * 1024 * 1024
 _U64 = (1 << 64) - 1
 _HASH = re.compile(r"[0-9a-f]{64}\Z")
 _VERSION = re.compile(r"[0-9]+(?:\.[0-9]+){0,3}\Z")
@@ -152,7 +154,7 @@ def _modern(text):
                 if not isinstance(image, dict):
                     image = {}
                 frames.append((index, image.get("path"), _uuid(image.get("uuid")), _uint(frame.get("imageOffset"))))
-        return dict(image_uuids=[_uuid(i.get("uuid")) for i in images if isinstance(i, dict) and i.get("path") == report.get("procPath")], path=report.get("procPath"), bundle=bundle.get("CFBundleIdentifier"),
+        return dict(diagnostic_source=report, image_uuids=[_uuid(i.get("uuid")) for i in images if isinstance(i, dict) and i.get("path") == report.get("procPath")], path=report.get("procPath"), bundle=bundle.get("CFBundleIdentifier"),
                     pid=report.get("pid"), when=report.get("captureTime", header.get("timestamp")),
                     birth=report.get("procLaunch"), exception=exception.get("type"),
                     signal=exception.get("signal"), namespace=termination.get("namespace"),
@@ -280,7 +282,7 @@ def parse_crash_report(raw: bytes, *, expected_executable: str, expected_pid: in
     for index, path, image_uuid, offset in report["frames"]:
         role = "game" if path == expected_executable or (redacted_path and path == alias) else "system" if isinstance(path, str) and path.startswith(("/System/Library/", "/usr/lib/")) else "other"
         frames.append(dict(index=index, image_role=role, image_uuid=image_uuid, offset=offset))
-    payload = dict(schema=1, fingerprint="", report_sha256=hashlib.sha256(raw).hexdigest(),
+    payload = dict(schema=2, fingerprint="", report_sha256=hashlib.sha256(raw).hexdigest(),
                    occurred_at=when.isoformat(), game_executable_sha256=_hash(context.get("game_executable_sha256"), required=True),
                    launcher_version=launcher, game_version=_version(report["game_version"]),
                    macos_version=_version(report["macos_version"]), architecture=_enum(report["arch"], {"x86_64", "arm64"}),
@@ -299,11 +301,16 @@ def parse_crash_report(raw: bytes, *, expected_executable: str, expected_pid: in
     selected = [frame for frame in known if frame["image_role"] == "game"] or known
     signature["frames"] = [{key: frame[key] for key in ("image_role", "image_uuid", "offset")} for frame in selected]
     payload["fingerprint"] = hashlib.sha256(json.dumps(signature, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    try:
+        payload["diagnostics"] = validate_details(extract_details(report.get("diagnostic_source", {}),
+            alias if redacted_path else expected_executable, legacy="diagnostic_source" not in report))
+    except (ValueError, TypeError, RecursionError) as exc:
+        raise CrashReportError("invalid structured diagnostics") from exc
     return payload
 
 
 def _validate_payload(payload):
-    if not isinstance(payload, dict) or set(payload) != _KEYS or type(payload["schema"]) is not int or payload["schema"] != 1:
+    if type(payload) is not dict or type(payload.get("schema")) is not int or payload["schema"] not in (1, 2) or set(payload) != (_KEYS | {"diagnostics"} if payload["schema"] == 2 else _KEYS):
         raise CrashReportError("invalid payload keys")
     for name in ("fingerprint", "report_sha256", "game_executable_sha256"):
         _hash(payload[name], required=True)
@@ -336,6 +343,11 @@ def _validate_payload(payload):
             raise CrashReportError("invalid image UUID")
         if frame["offset"] is not None and _uint(frame["offset"]) is None:
             raise CrashReportError("invalid frame offset")
+    if payload["schema"] == 2:
+        try:
+            validate_details(payload["diagnostics"])
+        except (ValueError, TypeError, RecursionError) as exc:
+            raise CrashReportError("invalid structured diagnostics") from exc
     return json.loads(json.dumps(payload))
 
 
@@ -450,7 +462,7 @@ class CrashStore:
                 raise CrashReportError("incident raw unavailable") from exc
             if hashlib.sha256(raw).hexdigest() != digest:
                 raise CrashReportError("incident raw mismatch")
-            state_name = entry["fingerprint"] + ".publication"
+            state_name = self._state_name(entry)
             try:
                 state = self._document(state_name)
             except CrashReportError:
@@ -477,6 +489,9 @@ class CrashStore:
                     current = dict(payload)
                     previous.pop("fingerprint")
                     current.pop("fingerprint")
+                    if previous["schema"] == 1 and current["schema"] == 2:
+                        current.pop("diagnostics")
+                        current["schema"] = 1
                     if previous != current:
                         raise CrashReportError("incident context collision")
                     # A grouping algorithm upgrade never rewrites immutable raw
@@ -487,12 +502,15 @@ class CrashStore:
         try:
             # Existing orphan raw is never overwritten or silently adopted.
             self._write(digest + ".raw", raw)
-            state_name = payload["fingerprint"] + ".publication"
+            state_name = self._state_name(entry)
             try:
                 os.stat(state_name, dir_fd=self._fd, follow_symlinks=False)
             except FileNotFoundError:
                 self._write(state_name, json.dumps({"status": "pending", "issue_url": None, "detail": None}).encode())
-            self._write(digest + ".json", json.dumps(entry, sort_keys=True).encode())
+            encoded = json.dumps(entry, sort_keys=True).encode()
+            if len(encoded) > MAX_METADATA_BYTES:
+                raise CrashReportError("metadata too large; raw retained")
+            self._write(digest + ".json", encoded)
         except OSError as exc:
             raise CrashReportError("incident retention failed") from exc
         return next(item for item in self._entries() if item["incident_id"] == digest)
@@ -501,7 +519,20 @@ class CrashStore:
         """Pending and uncertain incidents; unknown entries require reconciliation."""
         return [entry for entry in self._entries() if entry["publication"]["status"] in {"pending", "unknown"}]
 
-    def mark_publication(self, fingerprint, status, issue_url=None, detail=None):
+    @staticmethod
+    def _state_name(entry):
+        return ("incident-" + entry["incident_id"] if entry["payload"]["schema"] == 2 else entry["fingerprint"]) + ".publication"
+
+    def _publication_entry(self, fingerprint, incident_id):
+        entries = [e for e in self._entries() if e["fingerprint"] == fingerprint and (incident_id is None or e["incident_id"] == incident_id)]
+        if not entries:
+            raise CrashReportError("unknown incident")
+        names = {self._state_name(e) for e in entries}
+        if len(names) != 1:
+            raise CrashReportError("incident_id required for distinct publication states")
+        return entries[0]
+
+    def mark_publication(self, fingerprint, status, issue_url=None, detail=None, *, incident_id=None):
         _hash(fingerprint, required=True)
         if not isinstance(status, str) or status not in {"pending", "sending", "published", "unknown", "rejected"}:
             raise CrashReportError("invalid publication status")
@@ -509,16 +540,14 @@ class CrashStore:
             raise CrashReportError("invalid private issue URL")
         if detail is not None and (not isinstance(detail, str) or len(detail) > 4096):
             raise CrashReportError("invalid private detail")
-        entries = [entry for entry in self._entries() if entry["fingerprint"] == fingerprint]
-        if not entries:
-            raise CrashReportError("unknown fingerprint")
-        old = entries[0]["publication"]["status"]
+        entry = self._publication_entry(fingerprint, incident_id)
+        old = entry["publication"]["status"]
         if old == "unknown" and status in {"pending", "sending"}:
             raise CrashReportError("uncertain mutation requires deliberate reconciliation")
         state = dict(status=status, issue_url=issue_url, detail=detail)
-        self._write(fingerprint + ".publication", json.dumps(state).encode(), replace=True)
+        self._write(self._state_name(entry), json.dumps(state).encode(), replace=True)
 
-    def reconcile_publication(self, fingerprint, status, issue_url=None, detail=None):
+    def reconcile_publication(self, fingerprint, status, issue_url=None, detail=None, *, incident_id=None):
         """Explicit caller reconciliation after fingerprint search or proven no mutation.
 
         No network operation is performed. Use only after deliberate resolution of
@@ -527,11 +556,9 @@ class CrashStore:
         if status not in ("pending", "published", "rejected"):
             raise CrashReportError("invalid reconciliation status")
         _hash(fingerprint, required=True)
-        entries = [entry for entry in self._entries() if entry["fingerprint"] == fingerprint]
-        if not entries:
-            raise CrashReportError("unknown fingerprint")
+        entry = self._publication_entry(fingerprint, incident_id)
         if issue_url is not None and (not isinstance(issue_url, str) or len(issue_url) > 2048):
             raise CrashReportError("invalid private issue URL")
         if detail is not None and (not isinstance(detail, str) or len(detail) > 4096):
             raise CrashReportError("invalid private detail")
-        self._write(fingerprint + ".publication", json.dumps(dict(status=status, issue_url=issue_url, detail=detail)).encode(), replace=True)
+        self._write(self._state_name(entry), json.dumps(dict(status=status, issue_url=issue_url, detail=detail)).encode(), replace=True)

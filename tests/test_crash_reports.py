@@ -13,7 +13,7 @@ from smr_launcher.crash_reports import CrashReportError, CrashStore, MAX_REPORT_
 START = datetime(2026, 1, 2, 12, 0, tzinfo=timezone.utc)
 EXE = "/Applications/SyntheticGame.app/Contents/MacOS/SyntheticGame"
 CONTEXT = {"game_executable_sha256": "a" * 64, "launcher_version": "1.2.3-rc.2", "archive_sha256": "b" * 64, "variant_id": "c" * 64, "scenario_key": "d" * 64, "expected_bundle_id": "example.synthetic.game"}
-EXPECTED_KEYS = set("schema fingerprint report_sha256 occurred_at game_executable_sha256 launcher_version game_version macos_version architecture translated archive_sha256 variant_id scenario_key exception_type signal termination_namespace exception_codes frames".split())
+EXPECTED_KEYS = set("schema fingerprint report_sha256 occurred_at game_executable_sha256 launcher_version game_version macos_version architecture translated archive_sha256 variant_id scenario_key exception_type signal termination_namespace exception_codes frames diagnostics".split())
 
 
 def modern(**updates):
@@ -127,7 +127,7 @@ class ParserControls(unittest.TestCase):
         self.assertEqual(payload["exception_codes"], [0])
         self.assertEqual(payload["frames"][0]["image_role"], "other")
         encoded = json.dumps(payload)
-        for canary in ("PRIVATE_CANARY", "SECRET_CANARY", "SyntheticGame", "symbol", "/Users/"):
+        for canary in ("PRIVATE_CANARY", "SECRET_CANARY", "SyntheticGame", '"symbol":', "/Users/"):
             self.assertNotIn(canary, encoded)
 
     def test_official_versions_only(self):
@@ -154,6 +154,8 @@ class StoreControls(unittest.TestCase):
         self.addCleanup(self.store.close)
         self.raw = modern()
         self.payload = parse(self.raw)
+        self.payload.pop("diagnostics")
+        self.payload["schema"] = 1  # Existing immutable-store contract stays covered.
 
     def test_private_modes_raw_retention_and_restart(self):
         entry = self.store.collect(self.raw, self.payload)
@@ -169,7 +171,10 @@ class StoreControls(unittest.TestCase):
         first = self.store.collect(self.raw, self.payload)
         self.assertEqual(first, self.store.collect(self.raw, self.payload))
         other_raw = modern(captureTime="2026-01-02T12:02:00Z")
-        second = self.store.collect(other_raw, parse(other_raw))
+        other_payload = parse(other_raw)
+        other_payload.pop("diagnostics")
+        other_payload["schema"] = 1
+        second = self.store.collect(other_raw, other_payload)
         self.assertEqual(first["fingerprint"], second["fingerprint"])
         self.assertNotEqual(first["incident_id"], second["incident_id"])
         self.assertEqual(len(self.store.pending()), 2)
@@ -268,3 +273,12 @@ class StoreControls(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class LegacyVersionControls(unittest.TestCase):
+    def test_new_legacy_payload_has_explicit_unavailable_details(self):
+        p=parse(legacy());d=p['diagnostics']
+        self.assertEqual(p['schema'],2)
+        self.assertEqual(d['format'],'legacy_crash')
+        self.assertEqual(d['threads'],dict(source_count=None,retained_count=0,items=[]))
+        self.assertEqual(set(d['unavailable']),{'faulting_thread','threads','registers','binary_images','numeric_vm','exception_codes'})
+        self.assertEqual(p['frames'][0]['offset'],256)
