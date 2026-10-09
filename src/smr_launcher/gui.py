@@ -1475,7 +1475,8 @@ class LauncherWindow:
                             state="normal" if monitor else "disabled").pack(anchor="w", pady=4)
         ttk.Label(panel, wraplength=540, justify="left", text=(
             "Automatic reporting uses your existing GitHub CLI sign-in. Public issues contain only "
-            "validated versions, exception types, hashes and numeric image offsets. "
+            "validated versions, exception details, bounded thread frames and register values, "
+            "and binary image identities. Each report states its coverage and omissions. "
             "Passwords, tokens, personal paths, save names, raw logs and attachments are excluded. "
             "If GitHub is unavailable, confirmed reports wait locally."
         )).pack(anchor="w", pady=14)
