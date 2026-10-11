@@ -1,6 +1,15 @@
-## Result
+## Change and reason
 
-Describe the concrete problem and resulting behavior.
+Describe the outcome. Link the issue when applicable.
+
+## Verification
+
+Commands/results and limits. Explain a skipped build when relevant.
+
+## Review
+
+Self-review completed. For sensitive changes or new dependencies, link the independent
+AI review and resolved findings for the final candidate. Remove irrelevant guidance.
 
 ## Knowledge and verification
 
@@ -10,4 +19,5 @@ List focused tests/observations and material limits. Distinguish static/syntheti
 
 ## Publication
 
-Confirm the candidate files contain only reviewed original tools/tests/docs/analysis; no raw game corpus, assets, snapshots or diagnostics. No merge/release follows from this template.
+Confirm no private game corpus, assets, snapshots, diagnostics or local inventories are included.
+For corpus-related work, confirm published tools, tests and explanations are reviewed original work.

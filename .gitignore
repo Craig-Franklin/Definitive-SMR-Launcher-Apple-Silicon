@@ -46,3 +46,5 @@ node_modules/
 *.hop64
 *.i64
 *.idb
+
+.ruff_cache/

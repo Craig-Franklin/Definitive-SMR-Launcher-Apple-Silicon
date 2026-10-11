@@ -1,8 +1,50 @@
-# Repository instructions
+# Working in this repository
 
-## Start and preserve scope
+This personal project prioritizes quick iteration, readable code and proportionate
+verification. These rules apply to every AI session. Read relevant sections of
+[CONTRIBUTING.md](CONTRIBUTING.md) as needed, rather than every historical document.
 
-Inspect the branch and dirty tree before substantive work. Preserve unrelated work. Personal fork only: `Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon`; pass `--repo` on supported GitHub commands and explicit owner/project IDs elsewhere. Craig authorized completing this corpus slice, merging its reviewed PR and replaying from main on 11 October 2026. No release or resumption of the paused compatibility workers/shared `.handoff` is authorized. Future merges require their own task authorization.
+## Code-change workflow
+
+1. Read the request, inspect `git status --short --branch`, and run
+   `python3 scripts/check_session.py`. Preserve other work. Read the relevant issue,
+   existing implementation and callers before editing.
+2. Define the intended result, risk and verification. Plan substantial work briefly.
+   Features, substantive bugs, sensitive work and work spanning sessions need an
+   issue; tiny edits can use their commit record.
+3. Make one coherent change. Reuse existing helpers and standard-library facilities.
+   Improve touched code when useful; create an issue for larger cleanup.
+4. Run focused checks first. Expand them for a concrete remaining risk. **Build only
+   when needed.** Follow the verification matrix in CONTRIBUTING.
+5. Review the final diff. Get independent AI review before publishing changes to
+   saves, activation/restoration, deletion, crash-report privacy, release/publication
+   safeguards, substantial architecture, or **any new dependency**, including tools.
+   Resolve findings; record the reviewed revision, scope and outcome.
+6. Complete authorized publication. Routine direct pushes are allowed after local
+   checks and self-review; PRs are optional. CI checks the pushed revision and gates
+   releases. Preserve signing and repository safeguards. Ask only for a missing
+   material decision or an action beyond the agreed authority.
+   Keep one commit per coherent change; squash PRs and working fixups. Keep new
+   `main` history linear. Never rewrite published `main` or bypass its history rule.
+7. Report changes, commands/results, published state and remaining work. Update the
+   existing issue and acceptance evidence. Leave a compact handoff for unfinished
+   work; avoid duplicate active checklists.
+
+## Code and evidence
+
+- Use descriptive names, cohesive functions and clear responsibility boundaries.
+  Add abstractions for a demonstrated need. Avoid duplicate implementations,
+  speculative extension points and wrappers without a useful responsibility.
+- Preserve validation and meaningful error handling. Fix root causes; do not swallow
+  failures or weaken a test to make a change pass.
+- Add useful regression coverage for outcomes and failure cases. Use the existing
+  unittest setup and Python compatibility contract.
+- Run `python scripts/check_quality.py`. Ruff is a pinned development tool;
+  formatting is adopted incrementally. Keep unrelated formatting out of a change.
+- Write saved issues, PRs, commits and docs in concise plain English. State outcomes
+  and observable acceptance criteria; link detailed evidence.
+- Distinguish source checks, packaged-app checks and actual game behavior. Unit tests
+  and successful loads do not prove gameplay, save/reload or full compatibility.
 
 ## Use the game knowledge base
 
@@ -18,8 +60,37 @@ Unrelated UI/docs/build-packaging tasks need no full corpus review; state knowle
 
 Craig has authorized local decompilation. Do not reopen that decision or add a license-resolution prerequisite. Raw binaries/assets, pseudocode/disassembly, extracted strings/tables, databases, snapshots and diagnostics stay outside Git and cloud tool results. Cloud sessions use reviewed original notes and closed operational projections. Publish reviewed original tools/tests/analysis only; consult [the boundary](docs/rea-research/RIGHTS_AND_PUBLICATION.md). No cloud raw-corpus MCP, paid service, additional worker, game execution/mutation or access-control bypass follows from this authorization.
 
-## Checks and code review
+## Sessions and tools
 
-Use focused synthetic tests for changed behavior; the general suite is `python3 -m unittest discover -s tests -v`. REA helper checks are `python3 -m unittest discover -s scripts/research/rea -p test_evidence.py -v`. Tests use original fixtures, never private game evidence in CI. Reuse accepted results unless changed inputs invalidate them.
+Use the installed `caveman` skill for chat by default, honoring requests for normal
+prose. If unavailable, keep chat brief and clear. Saved code, docs, issues, PRs and
+commit messages use plain prose; never sacrifice technical facts or necessary steps.
 
-Reviewers should flag engine-dependent claims with no matching-build knowledge/evidence record, hypotheses promoted to verified facts, unmapped scanner rules or static scans promoted to gameplay/save verification. Preserve useful original findings with their limits so the next session can reuse them.
+Use one capable agent by default. Delegate bounded independent work when it saves
+elapsed time or supplies required review. Use cheaper models for precise mechanical
+work and stronger reasoning for uncertainty or consequential review. Honor explicit
+model restrictions. Avoid reviewer swarms and retries without a changed hypothesis.
+Load optional skills only when useful; no plugin is required for these standards.
+
+**In Orca**, verify the caller/workspace with the startup check, load the version-matched
+`orca-cli` skill, and use Orca for managed worktrees, terminals, handoffs, workers and
+workspace status. Use its `orchestration` skill for supervised coordination. Ordinary
+file edits, tests and Git commands use shell tools. Hold an Orca-dependent operation
+when its identity or availability cannot be verified; do not create unmanaged
+replacement state. Outside Orca, use the host's normal supported tools.
+
+## Preservation and publication
+
+Keep original packages, game files and current/future saves intact. Work on prepared
+copies, keep activation transactional, and refuse switching during game use. Never
+publish `.handoff`, credentials, local inventories, raw private diagnostics, game/map
+assets or saves. Public tests use synthetic or licensed redistributable data.
+
+GitHub mutations target only `Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon`.
+Verify the exact repository/remotes before every mutation as described in CONTRIBUTING.
+Use configured commit signing and verify GitHub's Verified result after publication.
+
+Private operational context starts at `.handoff/START_HERE.md` when present. Read it
+before compatibility, runtime, profile, preservation or private-authority work.
+Missing private authority blocks those operations, not ordinary source/docs work.
+A new session does not resume a paused programme or reset a closed circuit.

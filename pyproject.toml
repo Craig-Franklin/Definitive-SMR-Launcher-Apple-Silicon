@@ -18,5 +18,17 @@ smr-launcher-mac = "smr_launcher.gui:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+force-exclude = true
+extend-exclude = ["Definitive-SMR-Launcher", ".handoff", ".local", "private", "local-data"]
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]
+
+[tool.ruff.lint.per-file-ignores]
+# dmgbuild injects `defines` when loading its settings file.
+"scripts/dmg_settings.py" = ["F821"]
+# Preserved research fixture injects its two modules through globals().
+"scripts/research/native_window_capture/tests/test_consumer_fake.py" = ["F821"]

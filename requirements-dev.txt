@@ -1,0 +1,2 @@
+# Development only. Independently review additions and version changes.
+ruff==0.17.0

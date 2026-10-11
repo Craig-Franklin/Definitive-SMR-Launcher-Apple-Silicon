@@ -36,3 +36,30 @@ gh api repos/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/collaborators
 gh api repos/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/invitations
 gh api repos/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/keys
 ```
+
+## Merge strategy and history
+
+As verified on 11 October 2026, PRs permit only **Squash and merge**. The squash
+message defaults to the PR title without copying intermediate commit messages.
+Use one commit per coherent change and concise conventional titles.
+
+The separate active ruleset
+[`Linear history on main`](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/rules/24885866)
+targets `refs/heads/main`, requires linear history, and has **no bypass actors**.
+It applies alongside the owner-only rule, including to Craig's account. Ordinary
+signed direct pushes remain possible; new merge commits cannot be pushed to main.
+This does not require PRs, human approvals, or extra builds.
+
+GitHub enforces merge methods and graph shape. Agents must still keep changes
+coherent and preserve published history. The history rule does not itself block
+a force push of a rewritten linear history; the owner bypass in the access rule
+still exists. Rewriting published main or bypassing its history rule is prohibited
+by the working instructions and requires a separate explicit owner decision.
+An administrator can change repository settings, so these controls are not immutable.
+
+Inspect both rulesets and the repository merge settings when verifying this policy:
+
+```sh
+gh api repos/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/rulesets/24885866
+gh api repos/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon --jq '{allow_squash_merge,allow_merge_commit,allow_rebase_merge}'
+```
