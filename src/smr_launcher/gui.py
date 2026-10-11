@@ -18,6 +18,9 @@ from tkinter import filedialog, messagebox, ttk
 from .gallery import gallery_snapshot, filter_snapshot
 from .ui_work import Activities, LatestValue, Mailbox, DownloadEvents
 from .crash_monitor import CrashMonitor
+from .play_history import PlayHistoryStore, context as history_context, summarize, digest, IDENTITIES
+from .history_ui import history_card, gallery_columns, HistoryPanel
+from .text_links import render_linked_text
 from .activity import ActivityLog
 from .map_updates import find_map_updates
 from .ratings import fetch_rating, read_cached_rating
@@ -1030,7 +1033,7 @@ class LauncherWindow:
 
     def _resize_gallery(self, event: tk.Event) -> None:
         self.canvas.itemconfigure(self.canvas_window, width=event.width)
-        columns = max(1, (event.width - 34) // 206)
+        columns = gallery_columns(event.width)
         if columns != self.columns:
             self.columns = columns
             self._render_gallery()
@@ -1056,7 +1059,7 @@ class LauncherWindow:
             return self.images[item.art_key]
         try:
             original = tk.PhotoImage(data=item.art, format="png")
-            factor = max(1, math.ceil(max(original.width(), original.height()) / 184))
+            factor = max(1, math.ceil(max(original.width(), original.height()) / 144))
             photo = original.subsample(factor)
             self.images[item.art_key] = photo
             return photo
@@ -1140,7 +1143,8 @@ class LauncherWindow:
                         self.gallery_progress.stop(); self.gallery_progress.pack_forget()
                     self.status.set("Local map catalogue needs inspection: " + str(snapshot))
             self._start_gallery_snapshot()
-        self._background(lambda: gallery_snapshot(app, cancel, advanced), loaded, label=None)
+        self._background(lambda: gallery_snapshot(app, cancel, advanced,
+            history_error=getattr(getattr(self, "crash_monitor", None), "history_error", "")), loaded, label=None)
 
     def _begin_gallery_batches(self, generation):
         if generation != self._gallery_generation or self.closed or self.view != "maps":
@@ -1150,6 +1154,7 @@ class LauncherWindow:
         self._gallery_restore_scroll = None
         self._gallery_old_cards = list(self.grid_frame.winfo_children())
         self.cards = {}
+        self._gallery_row_cards = {}
         self._gallery_items = filter_snapshot(self._gallery_snapshot, self.search.get(), self.map_filter.get(), self.sort_order.get())
         self._gallery_index = 0
         self._activity_update(getattr(self, "_gallery_activity", None), "Displaying maps…", 0, len(self._gallery_items))
@@ -1183,6 +1188,7 @@ class LauncherWindow:
             self._gallery_panel = None
             self._gallery_index += 1
             count += 1
+
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
         self._activity_update(getattr(self, "_gallery_activity", None), "Displaying maps…",
                               self._gallery_index, len(self._gallery_items))
@@ -1215,35 +1221,27 @@ class LauncherWindow:
     def _create_gallery_card(self, index, item):
         record = item.record
         selected = record.profile_id == self.selected_profile
-        border = self.accent if selected else self.border
-        card = tk.Frame(self.grid_frame, width=190, height=305, background=self.surface,
-                        highlightbackground=border, highlightthickness=2 if selected else 1,
-                        takefocus=True)
-        card.grid(row=index // max(1, self.columns), column=index % max(1, self.columns),
-                  padx=8, pady=8, sticky="n")
-        card.pack_propagate(False)
+        error = item.history_error or ("History snapshot unavailable" if item.history is None else "")
+        card = history_card(self.grid_frame, title=_display_name(record.name),
+            summary=item.history or summarize((), {}), verification=item.verification,
+            metadata=item.metadata, palette=(self.surface, self.text, self.secondary, self.border, self.accent),
+            photo=self._art(item), selected=selected, error=error)
+        columns = max(1, self.columns)
+        row_index = index // columns
+        card.grid(row=row_index, column=index % columns, padx=8, pady=8, sticky="n")
         self.cards[record.profile_id] = card
-        artwork = tk.Canvas(card, width=184, height=183, background=self.surface, highlightthickness=0)
-        artwork.pack(fill="x")
-        photo = self._art(item)
-        if photo is None:
-            artwork.create_text(92, 91, text="▦", fill=self.secondary, font=("Helvetica Neue", 34))
-        else:
-            artwork.create_image(92, 91, image=photo)
-        label = tk.Label(card, text=_display_name(record.name), background=self.surface,
-                         foreground=self.text, font=("Helvetica Neue", 12, "bold"),
-                         anchor="nw", justify="left", height=2, wraplength=174)
-        label.pack(fill="x", padx=10)
-        state = item.verification
-        badge = tk.Label(card, text=state, background=self.surface, foreground=self.secondary,
-                         font=("Helvetica Neue", 10), anchor="w")
-        badge.pack(fill="x", padx=10, pady=(2, 0))
-        metadata = item.metadata
-        byline = tk.Label(card, text=f"{metadata.author or 'Author not provided'}\nCreated {metadata.created or 'date not provided'}",
-                          background=self.surface, foreground=self.secondary, anchor="w", justify="left",
-                          font=("Helvetica Neue", 10), wraplength=174)
-        byline.pack(fill="x", padx=10, pady=(3, 0))
-        for widget in (card, artwork, label, badge, byline):
+        if not hasattr(self, "_gallery_row_cards"):
+            self._gallery_row_cards = {}
+        row = self._gallery_row_cards.setdefault(row_index, [])
+        row.append(card)
+        height = max(c.winfo_reqheight() for c in row)
+        for member in row:
+            member.configure(height=height)
+        def descendants(widget):
+            yield widget
+            for child in widget.winfo_children():
+                yield from descendants(child)
+        for widget in descendants(card):
             widget.bind("<Button-1>", lambda _, item=record: self._select(item))
             widget.bind("<Double-Button-1>", lambda _, item=record: self._map_details(item))
             widget.bind("<MouseWheel>", self._scroll_gallery)
@@ -1256,7 +1254,7 @@ class LauncherWindow:
         for profile_id, card in self.cards.items():
             selected = profile_id == self.selected_profile
             card.configure(highlightbackground=self.accent if selected else self.border,
-                           highlightthickness=2 if selected else 1)
+                           highlightthickness=2)
         self._selection_details()
 
     def _selection_details(self) -> None:
@@ -1368,6 +1366,9 @@ class LauncherWindow:
             ttk.Button(links, text="Community Reviews & Rating", command=lambda: webbrowser.open(community.discussion_url)).pack(side="left")
         notebook = ttk.Notebook(frame)
         notebook.pack(fill="both", expand=True)
+        HistoryPanel(notebook, record, PlayHistoryStore(self.app.library),
+                     self.app.installation.executable_sha256, changed=self._render_gallery,
+                     submit=self._submit)
         identity = f"Archive: {record.archive_filename or record.name}\nSHA-256: {record.archive_sha256}\nVariant: {record.variant_id}\n\n" + self._verification_details(verification)
         if verification_error:
             identity = f"Archive: {record.archive_filename or record.name}\nSHA-256: {record.archive_sha256}\nVariant: {record.variant_id}\n\n{verification_error}"
@@ -1390,13 +1391,12 @@ class LauncherWindow:
             bar = ttk.Scrollbar(tab, command=text.yview)
             text.configure(yscrollcommand=bar.set)
             bar.pack(side="right", fill="y"); text.pack(fill="both", expand=True)
-            text.insert("1.0", content); text.configure(state="disabled")
+            render_linked_text(text, content)
             text_widgets[title] = text
         def replace_text(title, content):
             widget = text_widgets[title]
             if widget.winfo_exists():
-                widget.configure(state="normal"); widget.delete("1.0", "end")
-                widget.insert("1.0", content); widget.configure(state="disabled")
+                render_linked_text(widget, content)
         self._compatibility_tab(notebook, record, popup, choices)
         if community and community.discussion_url:
             def display_rating(rating):
@@ -1969,6 +1969,8 @@ class LauncherWindow:
                 self.status.set(event)
                 self._log("Game resource protection", "Stopped", event)
                 messagebox.showwarning("Railroads memory protection", event, parent=self.root)
+            for event in self.crash_monitor.take_history_exits():
+                self.root.after_idle(lambda item=event: self._history_exit_prompt(item))
         speech = self.speech_process
         if speech is not None and speech.done:
             self._activity_end(getattr(self, "_speech_activity", None))
@@ -2030,6 +2032,40 @@ class LauncherWindow:
         if location:
             self._submit("Checking the selected Steam library…",
                          lambda: LauncherApplication.choose_steam_library(Path(location)), self._library_chosen)
+
+    def _history_exit_prompt(self, event):
+        if self.closed or not self.app:
+            return
+        record = next((r for r in self._records() if history_context(r, self.app.installation.executable_sha256)["variant_id"] == event["variant_id"]
+                       and r.archive_sha256 == event["archive_sha256"]
+                       and self.app.installation.executable_sha256 == event["game_executable_sha256"]), None)
+        if record is None:
+            return
+        store = PlayHistoryStore(self.app.library)
+        prompt_id = digest(event["attempt_id"], "prompt")
+        try:
+            if any(e["event_id"] == prompt_id for e in store.records()):
+                return
+            store.once({k: event[k] for k in (*IDENTITIES, "scenario")}, "prompt_offered",
+                       event_id=prompt_id, attempt_id=event["attempt_id"], source="observed")
+        except (OSError, ValueError) as exc:
+            self.status.set("History prompt needs inspection: " + str(exc)); return
+        popup = tk.Toplevel(self.root)
+        popup.title("Record this game's checkpoints?")
+        popup.transient(self.root)
+        body = ttk.Frame(popup, padding=20); body.pack(fill="both", expand=True)
+        ttk.Label(body, text=_display_name(record.name), font=("Helvetica Neue", 14, "bold"), wraplength=440).pack(anchor="w")
+        ttk.Label(body, text="The game process exited. Which checkpoints did you reach? Its outcome stays unknown until confirmed. You can also record this later in Map Details → Play History.", wraplength=440).pack(anchor="w", pady=12)
+        def record_now():
+            popup.destroy()
+            details = tk.Toplevel(self.root); details.title("Play History — " + _display_name(record.name)); details.geometry("800x600")
+            tabs = ttk.Notebook(details); tabs.pack(fill="both", expand=True)
+            panel = HistoryPanel(tabs, record, store, self.app.installation.executable_sha256,
+                                 changed=self._render_gallery, submit=self._submit)
+            panel.checkpoint_dialog(event["attempt_id"])
+        buttons = ttk.Frame(body); buttons.pack(fill="x")
+        ttk.Button(buttons, text="Later", command=popup.destroy).pack(side="right")
+        ttk.Button(buttons, text="Record checkpoints…", command=record_now).pack(side="right", padx=8)
 
     def _library_chosen(self, result: object) -> None:
         assert isinstance(result, LauncherApplication)

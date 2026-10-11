@@ -7,6 +7,7 @@ import stat
 import struct
 
 from .map_metadata import MapMetadata
+from .play_history import PlayHistoryStore, context, summarize
 
 # Prepared icons are at most 360px. Oversized/invalid art and icons beyond
 # the operation's aggregate budget use the existing placeholder card artwork.
@@ -23,6 +24,8 @@ class GalleryItem:
     notice: str = ""
     art: bytes = b""
     art_key: str = ""
+    history: object = None
+    history_error: str = ""
 
 
 def _read_art(path, maximum=MAX_ART_BYTES):
@@ -60,9 +63,13 @@ def _read_art(path, maximum=MAX_ART_BYTES):
             os.close(parent)
 
 
-def gallery_snapshot(app, cancelled, progress=None):
+def gallery_snapshot(app, cancelled, progress=None, *, history_error=""):
     """Re-read secure metadata and contextual verification for this presentation."""
     result = []
+    try:
+        history = PlayHistoryStore(app.library).records()
+    except (OSError, ValueError, AttributeError, TypeError) as exc:
+        history, history_error = (), str(exc)
     remaining_art = MAX_SNAPSHOT_ART_BYTES
     records = app.catalogue()
     if progress:
@@ -80,8 +87,13 @@ def gallery_snapshot(app, cancelled, progress=None):
             notice = "Gameplay record needs inspection: " + str(exc)
         art = _read_art(app.map_icon(record), min(MAX_ART_BYTES, remaining_art)) if remaining_art else b""
         remaining_art -= len(art)
+        error = history_error
+        try:
+            summary = summarize(history, context(record, app.installation.executable_sha256))
+        except (ValueError, AttributeError, TypeError) as exc:
+            summary, error = None, str(exc)
         result.append(GalleryItem(record, metadata, label, notice, art,
-                                  hashlib.sha256(art).hexdigest() if art else ""))
+                                  hashlib.sha256(art).hexdigest() if art else "", summary, error))
         if progress:
             progress(len(result), len(records))
     return tuple(result) if not cancelled.is_set() else ()
