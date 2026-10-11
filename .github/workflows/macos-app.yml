@@ -97,7 +97,12 @@ jobs:
         run: python3 scripts/change_policy.py gate
 
   release:
-    if: needs.plan.outputs.release == 'true' && github.repository == 'Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # A skipped development build must not propagate through the checks gate.
+    if: >-
+      ${{ !cancelled() && needs.plan.result == 'success' && needs.checks.result == 'success'
+          && needs.plan.outputs.release == 'true'
+          && github.repository == 'Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon'
+          && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     needs: [plan, checks]
     runs-on: macos-26
     concurrency:
