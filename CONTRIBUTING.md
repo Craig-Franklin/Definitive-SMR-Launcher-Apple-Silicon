@@ -18,11 +18,13 @@ python3.12 -m venv .venv
 ```
 
 Choose the relevant test file. Use discovery: some legacy files define tests below
-their direct-execution entry point. The complete suite is:
+their direct-execution entry point.
 
 On macOS, `python3` may still be 3.9. Use the Python 3.12 environment above for
 tests and CI/release helpers, which use `tomllib`. Install Homebrew `python@3.12`
 and `python-tk@3.12` if the development interpreter or Tk is missing.
+
+The complete suite is:
 
 ```sh
 .venv/bin/python -m unittest discover -s tests -v
@@ -200,6 +202,12 @@ Preserve configured 1Password SSH signing. Verify GitHub's Verified status after
 Inspect the exact staged/public diff for private data and licensed content. Use synthetic
 or licensed test fixtures. [Repository access](docs/REPOSITORY_ACCESS.md) describes the
 server-side ownership controls.
+
+## Verification record
+
+[The rollout verification record](docs/WORKFLOW_VERIFICATION.md) links the exact
+implementation run, tested cases and enforcement limits. Current task status lives
+in the linked GitHub issues.
 
 ## Sources
 
