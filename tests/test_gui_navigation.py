@@ -134,7 +134,10 @@ class NavigationTests(unittest.TestCase):
         record = SimpleNamespace(name="Example", source_label="Local", archive_modified="",
             archive_filename="Example.7z", source_url="", archive_sha256="a" * 64,
             variant_id="b" * 64)
+        window.app.library = Path("/synthetic/library")
         with patch("smr_launcher.gui.tk") as tk, patch("smr_launcher.gui.ttk") as ttk, \
+             patch("smr_launcher.gui.HistoryPanel"), \
+             patch("smr_launcher.gui.render_linked_text", side_effect=lambda w, text: w.insert("1.0", text)), \
              patch("smr_launcher.gui._checks_text", return_value="Static checks"):
             window._map_details(record)
             window.app.verification_for.assert_called_once_with(record)

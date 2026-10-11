@@ -21,6 +21,7 @@ from typing import Callable
 from .activation import _assert_no_symlink_ancestor
 from .game_health import ResourceGuard
 from .map_issues import MapIssueStore
+from .play_history import PlayHistoryStore, digest, IDENTITIES
 
 MAX_REPORT_BYTES = 4 * 1024 * 1024
 MAX_SCAN_ENTRIES = 4096
@@ -179,6 +180,11 @@ class CrashMonitor:
         self.health_lock = Lock()
         self.health_thread = None
         self.events = []
+        self.play_history = PlayHistoryStore(app.library)
+        self.history_error = ""
+        self.history_exits = []
+        self._history_pending = []
+        self._history_live = None
         self.issue_revision = 0
         self.parser = parser if parser is not None else parse_crash_report
         source_root = Path(__file__).resolve().parents[2]
@@ -225,13 +231,27 @@ class CrashMonitor:
                 self.sessions[path.stem] = value
         if self.sessions:
             self.session = max(self.sessions.values(), key=lambda item: item["started_at"])
+        for session in self.sessions.values():
+            fact = self._history_call(self.play_history.session_event, session)
+            if fact:
+                self._history_pending.append(fact)
+        # Import only existing bounded, structured facts; never copy saves or raw logs.
+        try:
+            for issue in self.map_issues.records():
+                self._queue_history_issue(issue)
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            self.history_error = str(exc)
         # Upgrade existing local crash history into map warnings, including
         # already published incidents; network availability is irrelevant.
         try:
             for entry in self.store._entries():
                 self._record_crash_issue(entry["payload"])
+                url = entry.get("publication", {}).get("issue_url")
+                if url:
+                    self._history_link(entry["payload"], url)
         except (OSError, ValueError):
             self.status = "Local crash history needs inspection; memory protection remains available."
+        self._flush_history()
 
     def configure(self, *, enabled: bool, automatic_reporting: bool, protect_resources=None) -> None:
         if type(enabled) is not bool or type(automatic_reporting) is not bool:
@@ -254,7 +274,59 @@ class CrashMonitor:
             detail="Confirmed game crash: " + payload["exception_type"] + " / " + payload["signal"]
                    + ". The active map edition is known; the selected scenario and crash cause may be unknown.")
         if issue:
+            self._queue_history_issue(issue)
             self.issue_revision += 1
+
+    def _history_call(self, operation, *args, **kwargs):
+        """History failures cannot disable existing crash/resource protection."""
+        try:
+            return operation(*args, **kwargs)
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            self.history_error = str(exc)
+            return None
+
+    def _queue_history_issue(self, issue):
+        fact = self._history_call(self.play_history.issue_event, issue)
+        if fact:
+            self._history_pending.append(fact)
+
+    def _flush_history(self):
+        with self.lock:
+            pending, self._history_pending = self._history_pending, []
+            if pending:
+                self._history_call(self.play_history.append, *pending)
+                self.issue_revision += 1
+
+    def _history_link(self, payload, url):
+        if all(payload.get(k) for k in IDENTITIES):
+            ctx = {**{k: payload[k] for k in IDENTITIES}, "scenario": ""}
+            # The crash collector does not know the selected scenario.
+            self._history_call(self.play_history.link, ctx, url, scope="related", source="observed")
+
+    def _history_observed(self):
+        fact = self._history_call(self.play_history.observe_session, self.session)
+        if fact and fact["kind"] == "process_confirmed":
+            if self._history_live and self._history_live["attempt_id"] != fact["attempt_id"]:
+                self._history_exited()
+            self._history_live = fact
+        self.issue_revision += 1
+
+    def _history_exited(self):
+        fact, self._history_live = self._history_live, None
+        if fact is None:
+            return
+        ctx = {k: fact[k] for k in (*IDENTITIES, "scenario")}
+        exit_fact = self._history_call(self.play_history.once, ctx, "unknown_exit",
+            event_id=digest(fact["attempt_id"], "exit"), attempt_id=fact["attempt_id"],
+            source="observed", at=self.now().isoformat())
+        if exit_fact:
+            self.history_exits.append(exit_fact)
+            self.issue_revision += 1
+
+    def take_history_exits(self):
+        with self.lock:
+            events, self.history_exits = self.history_exits, []
+            return events
 
     def take_events(self):
         with self.lock:
@@ -275,11 +347,15 @@ class CrashMonitor:
                                 occurred_at=self.now().isoformat(), load_state="unknown",
                                 reason="physical_footprint_limit")
                 _private_json(path, evidence)
-            self.map_issues.record(evidence["session"]["context"], incident_id=incident,
+            issue = self.map_issues.record(evidence["session"]["context"], incident_id=incident,
                 occurred_at=evidence["occurred_at"], kind="resource_limit",
                 detail="Game exceeded the memory protection limit (physical footprint "
                        + f"{evidence['footprint_bytes'] / 1024**3:.1f} GiB). "
                        + "Map loading or gameplay failed; completion of map loading was not confirmed.")
+            if issue:
+                # Stop protection does not wait on another history-file write.
+                # The existing durable map issue is sufficient for restart recovery.
+                self._queue_history_issue(issue)
             self.issue_revision += 1
 
     def poll_health_once(self):
@@ -359,6 +435,7 @@ class CrashMonitor:
             identity = hashlib.sha256(json.dumps(self.session, sort_keys=True).encode()).hexdigest()
             _private_json(self.sessions_directory / (identity + ".json"), self.session)
             self.sessions[identity] = self.session
+            self._history_observed()
             # A new session can confirm a previously unbound diagnostic.
             self.seen.clear()
             self.fast_observation_until = time.monotonic() + 20
@@ -401,6 +478,12 @@ class CrashMonitor:
             if process and (not self.session or self.session.get("process") != process):
                 active = self.app.profiles.active_profile()
                 self.arm(active, process=process)
+            elif process:
+                # A restored session becomes live only after fresh observation.
+                if self._history_live is None:
+                    self._history_observed()
+            elif not probe_failed:
+                self._history_exited()
             if self.sessions:
                 count = 0
                 earliest = min(datetime.fromisoformat(item["started_at"]).timestamp()
@@ -439,6 +522,7 @@ class CrashMonitor:
                         continue
                 if len(self.seen) > MAX_SCAN_ENTRIES:
                     self.seen.clear()
+            self._flush_history()
             self.status = "Monitoring Railroads; full crash reports stay on this Mac."
             if probe_failed:
                 self.status = "Process observation unavailable; retained-session crash collection continues."
@@ -522,6 +606,8 @@ class CrashMonitor:
                 self.store.mark_publication(fingerprint, status, issue_url=result.get("issue_url"), detail=result.get("detail"), incident_id=entry["incident_id"])
             self.status = ("Sanitized crash report published to GitHub." if status == "published"
                            else "Crash report retained locally; GitHub reporting is pending.")
+            if status == "published" and result.get("issue_url"):
+                self._history_link(payload, result["issue_url"])
 
     def start(self) -> None:
         if self.thread is not None:

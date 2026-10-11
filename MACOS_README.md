@@ -141,6 +141,29 @@ the original community reviews and rating discussion. Community reports do
 not establish that a map works on the Mac. Maps with a recorded local issue
 show a warning before launch.
 
+### Play history and troubleshooting
+
+Map cards show **Opens**, **Started**, **Completed**, and **Crashes** separately.
+An open is a confirmed game process. Returning to a save adds an open and
+continues the same game; retirement or all scenario goals count that game's
+completion once. Green means a recorded completion with no unresolved failures
+on this edition/build. A later successful play leaves a past crash amber until
+its failed checkpoint has an explicitly recorded successful fix test. Resource
+stops are amber; unknown exits remain unknown. This light is separate from Mac
+verification.
+
+After an observed game exit, choose **Record checkpoints…** or **Later**.
+You can always use **Map Details → Play History → Record checkpoints…** to
+confirm the open, scenario, new/resumed game and checkpoints. Choose the exact
+save for a local identity hash when recording save/reopen/continued play;
+the launcher does not copy its contents into history. **Issues & Fixes** keeps
+linked issue state, fix implementation and checkpoint test results separate.
+Use **Refresh issue states** to check GitHub; cached results work offline and
+show stale/unavailable status. URL text in Map Details opens in your browser
+by click, or by Tab/Shift-Tab and Return. **History Scope** retains exact
+identities and older edition/build records without carrying their results
+onto the current card. See the [agreed history rules](docs/MAP_CARD_HISTORY_DESIGN.md).
+
 ### Record a Mac test and inspect an import
 
 After playing a map, quit Railroads and open **Map Details → Record Mac Test…**
