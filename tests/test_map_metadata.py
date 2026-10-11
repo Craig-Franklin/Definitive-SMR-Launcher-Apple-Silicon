@@ -1,4 +1,5 @@
 """Synthetic package metadata and bounded, read-only filesystem checks."""
+
 from pathlib import Path
 import os
 import sys
@@ -7,22 +8,29 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from smr_launcher.map_metadata import (
-    MAX_MAP_INFO_BYTES, MapMetadata, parse_map_metadata, read_map_metadata,
+    MAX_MAP_INFO_BYTES,
+    MapMetadata,
+    parse_map_metadata,
+    read_map_metadata,
 )
 
 
 class MapMetadataTests(unittest.TestCase):
     def test_explicit_headers_and_description_preserve_original_text(self):
-        raw = ("Map Name: Sample Map\r\nMap Version: V1.02\r\n"
-               "Date Created: 2020/02/29\r\nDate Updated: 2024-05-06\r\n"
-               "Author: Original Author\r\nModified by: Editor\r\nType: Single Player\r\n"
-               "Unknown Detail: retained\r\n\r\nDescription with a colon: here.\r\n"
-               "Date Created: 2000/01/01\r\n")
+        raw = (
+            "Map Name: Sample Map\r\nMap Version: V1.02\r\n"
+            "Date Created: 2020/02/29\r\nDate Updated: 2024-05-06\r\n"
+            "Author: Original Author\r\nModified by: Editor\r\nType: Single Player\r\n"
+            "Unknown Detail: retained\r\n\r\nDescription with a colon: here.\r\n"
+            "Date Created: 2000/01/01\r\n"
+        )
         result = parse_map_metadata(raw.encode())
         self.assertEqual((result.name, result.version), ("Sample Map", "V1.02"))
         self.assertEqual((result.created, result.updated), ("2020-02-29", "2024-05-06"))
-        self.assertEqual((result.author, result.modified_by, result.map_type),
-                         ("Original Author", "Editor", "Single Player"))
+        self.assertEqual(
+            (result.author, result.modified_by, result.map_type),
+            ("Original Author", "Editor", "Single Player"),
+        )
         self.assertEqual(result.raw_text, raw)
         self.assertIn("Unknown Detail: retained", result.description)
         self.assertIn("Date Created: 2000/01/01", result.description)
@@ -43,19 +51,22 @@ class MapMetadataTests(unittest.TestCase):
         self.assertIsNone(result.created)
 
     def test_only_explicit_safe_web_sources_become_links(self):
-        raw = ("Source: https://example.org/map?id=3\n"
-               "Source URL: https://example.org/map?id=3\n"
-               "Website: http://example.org/author\n"
-               "Map URL: https://user:secret@example.org/private\n"
-               "Source: file:///etc/passwd\nSource: javascript:alert(1)\n"
-               "Source: https://example.org:99999/map\n"
-               "Source: https://example.org/with space\n"
-               "Source: https://example.org\\@evil.invalid/\n"
-               "\nSee https://example.org/not-a-declared-source\n"
-               "Source: https://example.org/prose\n")
+        raw = (
+            "Source: https://example.org/map?id=3\n"
+            "Source URL: https://example.org/map?id=3\n"
+            "Website: http://example.org/author\n"
+            "Map URL: https://user:secret@example.org/private\n"
+            "Source: file:///etc/passwd\nSource: javascript:alert(1)\n"
+            "Source: https://example.org:99999/map\n"
+            "Source: https://example.org/with space\n"
+            "Source: https://example.org\\@evil.invalid/\n"
+            "\nSee https://example.org/not-a-declared-source\n"
+            "Source: https://example.org/prose\n"
+        )
         result = parse_map_metadata(raw.encode())
-        self.assertEqual(result.source_urls,
-                         ("https://example.org/map?id=3", "http://example.org/author"))
+        self.assertEqual(
+            result.source_urls, ("https://example.org/map?id=3", "http://example.org/author")
+        )
         self.assertEqual(result.raw_text, raw)
 
     def test_encoding_boms_and_invalid_text(self):
@@ -75,8 +86,10 @@ class MapMetadataTests(unittest.TestCase):
             self.assertEqual(read_map_metadata(file).created, "2024-01-02")
             self.assertEqual(file.read_bytes(), payload)
             after = file.stat()
-            self.assertEqual((before.st_mtime_ns, before.st_mode, before.st_ino),
-                             (after.st_mtime_ns, after.st_mode, after.st_ino))
+            self.assertEqual(
+                (before.st_mtime_ns, before.st_mode, before.st_ino),
+                (after.st_mtime_ns, after.st_mode, after.st_ino),
+            )
             self.assertEqual(read_map_metadata(root / "missing"), MapMetadata())
             self.assertEqual(read_map_metadata(root), MapMetadata())
             huge = root / "huge"

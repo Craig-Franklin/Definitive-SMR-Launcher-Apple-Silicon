@@ -1,4 +1,5 @@
 """Thread-safe delivery and bounded download presentation; contains no Tk calls."""
+
 from collections import deque
 from queue import Empty
 from threading import Condition, Lock
@@ -6,6 +7,7 @@ from threading import Condition, Lock
 
 class Activities:
     """UI-owned activity tokens: overlapping operations settle independently."""
+
     def __init__(self):
         self._next = 0
         self._jobs = {}
@@ -33,6 +35,7 @@ class Activities:
 
 class LatestValue:
     """A bounded, coalescing worker-to-UI progress slot; never calls Tk."""
+
     def __init__(self):
         self._lock = Lock()
         self._value = None
@@ -49,6 +52,7 @@ class LatestValue:
 
 class Mailbox:
     """Close atomically with publication, disposing queued or late owned results."""
+
     def __init__(self):
         self._lock = Lock()
         self._items = deque()
@@ -85,6 +89,7 @@ class DownloadEvents:
     a fixed capacity too: producers wait for the UI rather than dropping logs.
     A terminal map needs an explicit begin() before retry progress is accepted.
     """
+
     def __init__(self, capacity=4096):
         self.capacity = capacity
         self._condition = Condition()

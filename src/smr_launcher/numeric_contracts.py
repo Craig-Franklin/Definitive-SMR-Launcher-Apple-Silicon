@@ -21,8 +21,14 @@ from typing import Optional, Union
 MAX_TEXT_BYTES = 4096
 SCHEMA = "conditional-scalar-projection-v1"
 UNKNOWNS = (
-    "U_XML", "U_STRINGS", "U_NUMERIC", "U_DEFAULT_LISTS", "U_LOCALE",
-    "U_CONTAINERS", "U_PROVIDER", "U_RUNTIME",
+    "U_XML",
+    "U_STRINGS",
+    "U_NUMERIC",
+    "U_DEFAULT_LISTS",
+    "U_LOCALE",
+    "U_CONTAINERS",
+    "U_PROVIDER",
+    "U_RUNTIME",
 )
 
 
@@ -106,6 +112,7 @@ Value = Union[KnownBits, UnknownValue]
 @dataclass(frozen=True)
 class EvidenceIdentity:
     """Caller assertions of historical identities, with no authenticity claim."""
+
     build: Sha256
     contract: Sha256
     review: Sha256
@@ -130,6 +137,7 @@ class ConditionalContext:
 @dataclass(frozen=True)
 class HistoricalDouble:
     """Supplied historical atof result; Python float is the double carrier."""
+
     value: float
     evidence: Sha256
 
@@ -137,6 +145,7 @@ class HistoricalDouble:
 @dataclass(frozen=True)
 class HistoricalInteger:
     """Supplied defined signed32 atoi result; no lexical rule is inferred."""
+
     value: int
     evidence: Sha256
 
@@ -185,6 +194,7 @@ class ComparisonResult:
 
 class InputRejected(ValueError):
     """A binding error with a fixed disposition and reason vocabulary."""
+
     def __init__(self, disposition: Disposition, reason: Reason):
         super().__init__(reason.value)
         self.disposition = disposition
@@ -200,9 +210,12 @@ def _unsupported(reason):
 
 
 def _sha(value):
-    if (type(value) is not Sha256 or type(value.value) is not str
-            or len(value.value) != 64
-            or re.fullmatch(r"[0-9a-f]{64}", value.value) is None):
+    if (
+        type(value) is not Sha256
+        or type(value.value) is not str
+        or len(value.value) != 64
+        or re.fullmatch(r"[0-9a-f]{64}", value.value) is None
+    ):
         _reject(Reason.SHA256)
 
 
@@ -218,8 +231,11 @@ def digest_text(data: bytes) -> Sha256:
 def _value(value, scalar_type):
     if type(value) is UnknownValue:
         return
-    if (type(value) is not KnownBits or type(value.value) is not int
-            or not 0 <= value.value <= 0xffffffff):
+    if (
+        type(value) is not KnownBits
+        or type(value.value) is not int
+        or not 0 <= value.value <= 0xFFFFFFFF
+    ):
         _reject(Reason.BITS)
     if scalar_type is ScalarType.BOOL and value.value not in (0, 1):
         _reject(Reason.BITS)
@@ -239,8 +255,12 @@ def _validate(context, scalar):
         v = getattr(context.assumptions, f.name)
         if v is not None and type(v) is not bool:
             _reject(Reason.PREMISE)
-    for name, enum in (("overload", Overload), ("scalar_type", ScalarType),
-                       ("presence", Presence), ("extraction", Extraction)):
+    for name, enum in (
+        ("overload", Overload),
+        ("scalar_type", ScalarType),
+        ("presence", Presence),
+        ("extraction", Extraction),
+    ):
         if type(getattr(scalar, name)) is not enum:
             _reject(Reason.TYPE)
     _value(scalar.prior, scalar.scalar_type)
@@ -285,11 +305,15 @@ def bind_input(context: ConditionalContext, scalar: ScalarInput) -> InputIdentit
     atof = scalar.atof_result
     atoi = scalar.atoi_result
     encoded = [
-        SCHEMA, context.identity.value,
+        SCHEMA,
+        context.identity.value,
         [getattr(context.evidence, f.name).value for f in fields(EvidenceIdentity)],
         [getattr(context.assumptions, f.name) for f in fields(Assumptions)],
-        scalar.overload.value, scalar.scalar_type.value, scalar.presence.value,
-        scalar.extraction.value, None if scalar.text is None else scalar.text.hex(),
+        scalar.overload.value,
+        scalar.scalar_type.value,
+        scalar.presence.value,
+        scalar.extraction.value,
+        None if scalar.text is None else scalar.text.hex(),
         _value_encoding(scalar.prior),
         None if atof is None else [struct.pack(">d", atof.value).hex(), atof.evidence.value],
         None if atoi is None else [atoi.value, atoi.evidence.value],
@@ -324,7 +348,7 @@ def _integer(text):
             _unsupported(Reason.INTEGER_RANGE)
         magnitude = magnitude * 10 + digit
         i += 1
-    return (-magnitude if negative else magnitude) & 0xffffffff
+    return (-magnitude if negative else magnitude) & 0xFFFFFFFF
 
 
 def _float_bits(value):
@@ -368,8 +392,9 @@ def _project(context, scalar):
         _require(a.ieee_binary32_assignment)
         if scalar.atof_result is None:
             _unsupported(Reason.MISSING_PREMISE)
-        return ScalarOutcome(Branch.FLOAT_SUPPLIED, True, 1,
-                             KnownBits(_float_bits(scalar.atof_result.value)))
+        return ScalarOutcome(
+            Branch.FLOAT_SUPPLIED, True, 1, KnownBits(_float_bits(scalar.atof_result.value))
+        )
     _require(a.ascii_whole_string_comparison)
     word = text.lower()  # bytes.lower is ASCII whole-string, without stripping.
     if word == b"true":
@@ -378,8 +403,9 @@ def _project(context, scalar):
         return ScalarOutcome(Branch.BOOL_FALSE_WORD, True, 1, KnownBits(0))
     if scalar.atoi_result is None:
         _unsupported(Reason.MISSING_PREMISE)
-    return ScalarOutcome(Branch.BOOL_SUPPLIED_INTEGER, True, 1,
-                         KnownBits(int(scalar.atoi_result.value != 0)))
+    return ScalarOutcome(
+        Branch.BOOL_SUPPLIED_INTEGER, True, 1, KnownBits(int(scalar.atoi_result.value != 0))
+    )
 
 
 def _assertion(expected):
@@ -390,15 +416,20 @@ def _assertion(expected):
     if bind_input(identity.context, identity.scalar) != identity:
         _reject(Reason.IDENTITY)
     v = expected.outcome
-    if (type(v) is not ScalarOutcome or type(v.branch) is not Branch
-            or type(v.wrote) is not bool or type(v.return_value) is not int
-            or v.return_value not in (0, 1)):
+    if (
+        type(v) is not ScalarOutcome
+        or type(v.branch) is not Branch
+        or type(v.wrote) is not bool
+        or type(v.return_value) is not int
+        or v.return_value not in (0, 1)
+    ):
         _reject(Reason.ASSERTION)
     _value(v.value, identity.scalar.scalar_type)
 
 
-def check_scalar(context: ConditionalContext, scalar: ScalarInput,
-                 expected: ExpectedAssertion) -> ComparisonResult:
+def check_scalar(
+    context: ConditionalContext, scalar: ScalarInput, expected: ExpectedAssertion
+) -> ComparisonResult:
     """Compare one assertion bound to identical typed context/input/content.
 
     Unsupported conversion has no concrete outcome. Even a self-consistent
@@ -412,8 +443,11 @@ def check_scalar(context: ConditionalContext, scalar: ScalarInput,
         if expected.identity != identity:
             _reject(Reason.IDENTITY)
         outcome = _project(context, scalar)
-        disposition = (Disposition.CONDITIONAL_MATCH if outcome == expected.outcome
-                       else Disposition.CONDITIONAL_MISMATCH)
+        disposition = (
+            Disposition.CONDITIONAL_MATCH
+            if outcome == expected.outcome
+            else Disposition.CONDITIONAL_MISMATCH
+        )
         return ComparisonResult(disposition, Reason.COMPARISON, identity, outcome)
     except InputRejected as rejected:
         return ComparisonResult(rejected.disposition, rejected.reason, identity)

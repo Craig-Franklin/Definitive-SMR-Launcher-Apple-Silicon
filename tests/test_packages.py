@@ -1,4 +1,5 @@
 """Synthetic archives only; no commercial files or downloaded maps are fixtures."""
+
 from io import BytesIO
 from pathlib import Path
 import stat
@@ -31,10 +32,12 @@ class PackageInspectionTests(unittest.TestCase):
                 out.addfile(item)
 
     def test_one_wrapper_is_removed_and_scenario_is_found(self):
-        self.archive([
-            ("package/UserMaps/Example/RRT_Scenario_User_Example.xml", b"<Scenario/>"),
-            ("package/CustomAssets/shared.xml", b"<Assets/>"),
-        ])
+        self.archive(
+            [
+                ("package/UserMaps/Example/RRT_Scenario_User_Example.xml", b"<Scenario/>"),
+                ("package/CustomAssets/shared.xml", b"<Assets/>"),
+            ]
+        )
         result = inspect_package(self.path)
         self.assertEqual(result.wrapper, "package")
         self.assertEqual(result.scenarios, ("UserMaps/Example/RRT_Scenario_User_Example.xml",))
@@ -43,10 +46,12 @@ class PackageInspectionTests(unittest.TestCase):
     def test_traversal_or_unsafe_windows_path_is_rejected(self):
         for bad in ("../escape", "UserMaps/../../escape", "C:/escape", "UserMaps\\escape"):
             with self.subTest(bad=bad):
-                self.archive([
-                    ("UserMaps/Example/RRT_Scenario_User_Example.xml", b"<Scenario/>"),
-                    (bad, b"unsafe"),
-                ])
+                self.archive(
+                    [
+                        ("UserMaps/Example/RRT_Scenario_User_Example.xml", b"<Scenario/>"),
+                        (bad, b"unsafe"),
+                    ]
+                )
                 with self.assertRaises(PackageError):
                     inspect_package(self.path)
 
@@ -66,18 +71,24 @@ class PackageInspectionTests(unittest.TestCase):
 
     def test_checked_package_extracts_to_an_independent_new_directory(self):
         scenario = b"<Scenario/>"
-        self.archive([
-            ("package/UserMaps/Example/RRT_Scenario_User_Example.xml", scenario),
-            ("package/CustomAssets/shared.xml", b"<Assets/>"),
-        ])
+        self.archive(
+            [
+                ("package/UserMaps/Example/RRT_Scenario_User_Example.xml", scenario),
+                ("package/CustomAssets/shared.xml", b"<Assets/>"),
+            ]
+        )
         inspection = inspect_package(self.path)
         destination = Path(self.temp.name) / "prepared-import"
         result = extract_package(self.path, destination, inspection.source_sha256)
         self.assertEqual(result.inspection.source_sha256, inspection.source_sha256)
-        self.assertEqual((destination / "UserMaps/Example/RRT_Scenario_User_Example.xml").read_bytes(), scenario)
+        self.assertEqual(
+            (destination / "UserMaps/Example/RRT_Scenario_User_Example.xml").read_bytes(), scenario
+        )
         self.assertEqual((destination / "CustomAssets/shared.xml").read_bytes(), b"<Assets/>")
         self.assertEqual(stat.S_IMODE(destination.stat().st_mode), 0o500)
-        self.assertEqual(stat.S_IMODE((destination / "CustomAssets/shared.xml").stat().st_mode), 0o400)
+        self.assertEqual(
+            stat.S_IMODE((destination / "CustomAssets/shared.xml").stat().st_mode), 0o400
+        )
         with self.assertRaises(PackageError):
             extract_package(self.path, destination)
         self.path.write_bytes(b"")

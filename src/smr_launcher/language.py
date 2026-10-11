@@ -2,6 +2,7 @@
 
 Unknown source strings remain readable English. Map packages are never rewritten.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -12,8 +13,16 @@ import sys
 
 from .activation import _assert_no_symlink_ancestor, _atomic_json
 
-LANGUAGES = {"en": "English", "nl": "Nederlands", "fr": "Français", "de": "Deutsch",
-             "hi": "हिन्दी", "it": "Italiano", "zh-Hans": "简体中文", "es": "Español"}
+LANGUAGES = {
+    "en": "English",
+    "nl": "Nederlands",
+    "fr": "Français",
+    "de": "Deutsch",
+    "hi": "हिन्दी",
+    "it": "Italiano",
+    "zh-Hans": "简体中文",
+    "es": "Español",
+}
 _LANGUAGE = "en"
 # Columns are English, Dutch, French, German, Hindi, Italian, Mandarin, Spanish.
 _ROWS = """
@@ -167,10 +176,18 @@ for _row in _ROWS.strip().splitlines():
     for _code, _value in zip(LANGUAGES, _values):
         TRANSLATIONS[_code][_values[0]] = _value
 
-_EDITOR_NOTICE = ['Editor saving currently conflicts with protected map assets; that option stays unavailable until edited maps can be captured safely.\n\nCustom difficulty is experimental on the Mac edition. The new edition starts with empty saves and does not replace your original. Test a fresh scenario first. Custom difficulty is refused if the map supplies its own definitions.', 'Opslaan in de editor botst met beveiligde kaartbestanden; deze optie blijft uitgeschakeld totdat bewerkte kaarten veilig kunnen worden vastgelegd.\n\nAangepaste moeilijkheid is experimenteel op Mac. De nieuwe editie begint zonder opgeslagen spellen en vervangt het origineel niet. Test eerst een nieuw scenario. Aangepaste moeilijkheid is geblokkeerd als de kaart eigen definities bevat.', 'L’enregistrement dans l’éditeur est incompatible avec la protection des fichiers de carte ; cette option reste indisponible tant que les cartes modifiées ne peuvent pas être conservées en sécurité.\n\nLa difficulté personnalisée est expérimentale sur Mac. La nouvelle édition démarre sans sauvegardes et conserve l’original. Testez d’abord un nouveau scénario. Elle est refusée si la carte fournit ses propres définitions.', 'Das Speichern im Editor widerspricht dem Schutz der Kartendateien; diese Option bleibt gesperrt, bis bearbeitete Karten sicher übernommen werden können.\n\nEigene Schwierigkeitsstufen sind auf dem Mac experimentell. Die neue Ausgabe beginnt ohne Spielstände und ersetzt das Original nicht. Testen Sie zuerst ein neues Szenario. Eigene Stufen werden abgelehnt, wenn die Karte eigene Definitionen enthält.', 'संपादक में सहेजना सुरक्षित मानचित्र फ़ाइलों से टकराता है; संपादित मानचित्र सुरक्षित रूप से सहेजे जा सकने तक यह विकल्प उपलब्ध नहीं है।\n\nMac पर कस्टम कठिनाई प्रायोगिक है। नया संस्करण बिना सेव शुरू होता है और मूल को नहीं बदलता। पहले नया परिदृश्य जाँचें। मानचित्र की अपनी परिभाषाएँ होने पर कस्टम कठिनाई अस्वीकार होती है।', 'Il salvataggio nell’editor è incompatibile con la protezione dei file della mappa; l’opzione resta indisponibile finché le mappe modificate non possono essere conservate in sicurezza.\n\nLa difficoltà personalizzata è sperimentale su Mac. La nuova edizione inizia senza salvataggi e conserva l’originale. Prova prima un nuovo scenario. È rifiutata se la mappa fornisce le proprie definizioni.', '编辑器保存功能目前与受保护的地图文件冲突；在能够安全保存编辑后的地图之前，此选项暂不可用。\n\n自定义难度在 Mac 版中属实验性质。新版本从空存档开始，不会替换原版。请先测试全新场景。如果地图提供了自己的难度定义，则不允许使用自定义难度。', 'Guardar en el editor entra en conflicto con la protección de los archivos del mapa; la opción sigue desactivada hasta poder conservar los mapas editados de forma segura.\n\nLa dificultad personalizada es experimental en Mac. La nueva edición empieza sin partidas y conserva el original. Pruebe primero un escenario nuevo. Se rechaza si el mapa incluye sus propias definiciones.']
+_EDITOR_NOTICE = [
+    "Editor saving currently conflicts with protected map assets; that option stays unavailable until edited maps can be captured safely.\n\nCustom difficulty is experimental on the Mac edition. The new edition starts with empty saves and does not replace your original. Test a fresh scenario first. Custom difficulty is refused if the map supplies its own definitions.",
+    "Opslaan in de editor botst met beveiligde kaartbestanden; deze optie blijft uitgeschakeld totdat bewerkte kaarten veilig kunnen worden vastgelegd.\n\nAangepaste moeilijkheid is experimenteel op Mac. De nieuwe editie begint zonder opgeslagen spellen en vervangt het origineel niet. Test eerst een nieuw scenario. Aangepaste moeilijkheid is geblokkeerd als de kaart eigen definities bevat.",
+    "L’enregistrement dans l’éditeur est incompatible avec la protection des fichiers de carte ; cette option reste indisponible tant que les cartes modifiées ne peuvent pas être conservées en sécurité.\n\nLa difficulté personnalisée est expérimentale sur Mac. La nouvelle édition démarre sans sauvegardes et conserve l’original. Testez d’abord un nouveau scénario. Elle est refusée si la carte fournit ses propres définitions.",
+    "Das Speichern im Editor widerspricht dem Schutz der Kartendateien; diese Option bleibt gesperrt, bis bearbeitete Karten sicher übernommen werden können.\n\nEigene Schwierigkeitsstufen sind auf dem Mac experimentell. Die neue Ausgabe beginnt ohne Spielstände und ersetzt das Original nicht. Testen Sie zuerst ein neues Szenario. Eigene Stufen werden abgelehnt, wenn die Karte eigene Definitionen enthält.",
+    "संपादक में सहेजना सुरक्षित मानचित्र फ़ाइलों से टकराता है; संपादित मानचित्र सुरक्षित रूप से सहेजे जा सकने तक यह विकल्प उपलब्ध नहीं है।\n\nMac पर कस्टम कठिनाई प्रायोगिक है। नया संस्करण बिना सेव शुरू होता है और मूल को नहीं बदलता। पहले नया परिदृश्य जाँचें। मानचित्र की अपनी परिभाषाएँ होने पर कस्टम कठिनाई अस्वीकार होती है।",
+    "Il salvataggio nell’editor è incompatibile con la protezione dei file della mappa; l’opzione resta indisponibile finché le mappe modificate non possono essere conservate in sicurezza.\n\nLa difficoltà personalizzata è sperimentale su Mac. La nuova edizione inizia senza salvataggi e conserva l’originale. Prova prima un nuovo scenario. È rifiutata se la mappa fornisce le proprie definizioni.",
+    "编辑器保存功能目前与受保护的地图文件冲突；在能够安全保存编辑后的地图之前，此选项暂不可用。\n\n自定义难度在 Mac 版中属实验性质。新版本从空存档开始，不会替换原版。请先测试全新场景。如果地图提供了自己的难度定义，则不允许使用自定义难度。",
+    "Guardar en el editor entra en conflicto con la protección de los archivos del mapa; la opción sigue desactivada hasta poder conservar los mapas editados de forma segura.\n\nLa dificultad personalizada es experimental en Mac. La nueva edición empieza sin partidas y conserva el original. Pruebe primero un escenario nuevo. Se rechaza si el mapa incluye sus propias definiciones.",
+]
 for _code, _value in zip(LANGUAGES, _EDITOR_NOTICE):
     TRANSLATIONS[_code][_EDITOR_NOTICE[0]] = _value
-
 
 
 # Loading-state text is shared by the content panels and persistent activity bar.
@@ -204,6 +221,7 @@ for _row in _LOADING_ROWS.strip().splitlines():
     for _code, _value in zip(LANGUAGES, _values):
         TRANSLATIONS[_code][_values[0]] = _value
 
+
 def set_language(code: str) -> None:
     global _LANGUAGE
     if code not in LANGUAGES:
@@ -233,13 +251,23 @@ class LanguagePreferences:
             if not isinstance(value, dict) or value.get("schema") != 1:
                 raise ValueError("Invalid language preferences")
             language, voice = value.get("language", "en"), value.get("voice", "")
-            if not isinstance(language, str) or language not in LANGUAGES or not isinstance(voice, str) or len(voice) > 256:
+            if (
+                not isinstance(language, str)
+                or language not in LANGUAGES
+                or not isinstance(voice, str)
+                or len(voice) > 256
+            ):
                 raise ValueError("Invalid language or voice preference")
             self.language, self.voice = language, voice
         return self
 
     def save(self, language: str, voice: str = "") -> None:
-        if not isinstance(language, str) or language not in LANGUAGES or not isinstance(voice, str) or len(voice) > 256:
+        if (
+            not isinstance(language, str)
+            or language not in LANGUAGES
+            or not isinstance(voice, str)
+            or len(voice) > 256
+        ):
             raise ValueError("Invalid language or voice preference")
         _assert_no_symlink_ancestor(self.path)
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -269,13 +297,22 @@ def translate_briefing(text: str, target: str, source: str = "en") -> str:
         raise TranslationError("This briefing is too large to translate.")
     helper = translation_helper()
     if not helper.is_file():
-        raise TranslationError("Apple translation is unavailable in this build. Use a release with the Apple translation helper on macOS 26 or later.")
+        raise TranslationError(
+            "Apple translation is unavailable in this build. Use a release with the Apple translation helper on macOS 26 or later."
+        )
     try:
-        result = subprocess.run([str(helper)], input=json.dumps({"text": text, "source": source, "target": target}),
-                                capture_output=True, text=True, timeout=180)
+        result = subprocess.run(
+            [str(helper)],
+            input=json.dumps({"text": text, "source": source, "target": target}),
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
         response = json.loads(result.stdout)
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
-        raise TranslationError("Apple translation could not complete. Check installed Translation Languages in System Settings.") from exc
+        raise TranslationError(
+            "Apple translation could not complete. Check installed Translation Languages in System Settings."
+        ) from exc
     if not isinstance(response, dict):
         raise TranslationError("Invalid response from Apple translation.")
     if result.returncode or response.get("error"):
@@ -288,10 +325,22 @@ def translate_briefing(text: str, target: str, source: str = "en") -> str:
 
 def open_translation_settings() -> None:
     try:
-        result = subprocess.run(["/usr/bin/open", "x-apple.systempreferences:com.apple.Localization-Settings.extension"],
-                                capture_output=True, timeout=15)
+        result = subprocess.run(
+            [
+                "/usr/bin/open",
+                "x-apple.systempreferences:com.apple.Localization-Settings.extension",
+            ],
+            capture_output=True,
+            timeout=15,
+        )
         if result.returncode:
-            subprocess.run(["/usr/bin/open", "-a", "System Settings"], check=True,
-                           capture_output=True, timeout=15)
+            subprocess.run(
+                ["/usr/bin/open", "-a", "System Settings"],
+                check=True,
+                capture_output=True,
+                timeout=15,
+            )
     except (OSError, subprocess.SubprocessError) as exc:
-        raise TranslationError("Open System Settings → General → Language & Region → Translation Languages.") from exc
+        raise TranslationError(
+            "Open System Settings → General → Language & Region → Translation Languages."
+        ) from exc

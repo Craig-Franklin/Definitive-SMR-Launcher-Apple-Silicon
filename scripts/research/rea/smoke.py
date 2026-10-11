@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Validate REA on original synthetic code. Never accepts a game target."""
+
 import argparse
 import hashlib
 import json
@@ -21,7 +22,9 @@ def main():
     ancestor = root
     while not ancestor.exists():
         ancestor = ancestor.parent
-    check = subprocess.run(["git", "-C", str(ancestor), "rev-parse", "--show-toplevel"], capture_output=True)
+    check = subprocess.run(
+        ["git", "-C", str(ancestor), "rev-parse", "--show-toplevel"], capture_output=True
+    )
     if check.returncode == 0:
         parser.error("Private output must be outside every Git worktree")
     os.umask(0o077)
@@ -45,12 +48,20 @@ def main():
 
     def command(label, argv):
         started = time.monotonic()
-        with (run / (label + ".stdout")).open("wb") as out, (run / (label + ".stderr")).open("wb") as err:
+        with (
+            (run / (label + ".stdout")).open("wb") as out,
+            (run / (label + ".stderr")).open("wb") as err,
+        ):
             # REA owns provider timeouts/cleanup. No unsafe blanket process kill.
             result = subprocess.run(argv, stdout=out, stderr=err, env=env)
-        records.append({"step": label, "exit_code": result.returncode,
-                        "seconds": round(time.monotonic()-started, 3)})
-        (run / "receipt.json").write_text(json.dumps(records, indent=2)+"\n")
+        records.append(
+            {
+                "step": label,
+                "exit_code": result.returncode,
+                "seconds": round(time.monotonic() - started, 3),
+            }
+        )
+        (run / "receipt.json").write_text(json.dumps(records, indent=2) + "\n")
         if result.returncode:
             raise SystemExit("Step failed: " + label + "; inspect private logs; do not auto-retry")
         return (run / (label + ".stdout")).read_text()
@@ -59,30 +70,65 @@ def main():
     if doctor.get("healthy") is not True:
         raise SystemExit("Scoped Ghidra readiness did not pass")
     binary = run / "synthetic-x86_64"
-    command("compile", ["xcrun", "clang", "-arch", "x86_64", "-O0", "-g", str(here/"fixture.c"), "-o", str(binary)])
+    command(
+        "compile",
+        [
+            "xcrun",
+            "clang",
+            "-arch",
+            "x86_64",
+            "-O0",
+            "-g",
+            str(here / "fixture.c"),
+            "-o",
+            str(binary),
+        ],
+    )
     before = hashlib.sha256(binary.read_bytes()).hexdigest()
-    argv = [str(rea), "decompile", str(binary), "_bounded_index", "--provider", "ghidra",
-            "--snapshot", str(run/"snapshot.json"), "--json"]
+    argv = [
+        str(rea),
+        "decompile",
+        str(binary),
+        "_bounded_index",
+        "--provider",
+        "ghidra",
+        "--snapshot",
+        str(run / "snapshot.json"),
+        "--json",
+    ]
     first = command("decompile", argv)
     second = command("replay", argv)
     # These are content-presence checks, not a proof of semantic equivalence.
     for label, value in (("decompile", first), ("replay", second)):
         evidence = json.loads(value)
         body = evidence.get("normalized_result")
-        if (evidence.get("provider", {}).get("id") != "ghidra"
-                or not isinstance(body, str)
-                or "bounded_index" not in body or "return" not in body):
+        if (
+            evidence.get("provider", {}).get("id") != "ghidra"
+            or not isinstance(body, str)
+            or "bounded_index" not in body
+            or "return" not in body
+        ):
             raise SystemExit(label + " lacks expected synthetic function content")
     if before != hashlib.sha256(binary.read_bytes()).hexdigest():
         raise SystemExit("Synthetic binary bytes changed")
-    if not (run/"snapshot.json").is_file():
+    if not (run / "snapshot.json").is_file():
         raise SystemExit("Expected snapshot is missing")
-    snapshot = json.loads((run/"snapshot.json").read_text())
+    snapshot = json.loads((run / "snapshot.json").read_text())
     cache_entries = len(snapshot.get("entries", [])) + len(snapshot.get("workflow_entries", []))
-    print(json.dumps({"status": "synthetic_smoke_pass", "game_analyzed": False,
-                      "binary_unchanged": True, "snapshot_cache_entries": cache_entries,
-                      "cache_reuse_proven": False, "steps": records,
-                      "private_receipt": str(run/"receipt.json")}, indent=2))
+    print(
+        json.dumps(
+            {
+                "status": "synthetic_smoke_pass",
+                "game_analyzed": False,
+                "binary_unchanged": True,
+                "snapshot_cache_entries": cache_entries,
+                "cache_reuse_proven": False,
+                "steps": records,
+                "private_receipt": str(run / "receipt.json"),
+            },
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

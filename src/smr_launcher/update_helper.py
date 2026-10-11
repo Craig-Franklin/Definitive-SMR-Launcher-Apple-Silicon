@@ -1,4 +1,5 @@
 """Use the full signed, staged app as a helper for an atomic bundle exchange."""
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -12,15 +13,23 @@ import re
 import time
 
 from .activation import _assert_no_symlink_ancestor, _atomic_json, _fsync_dir
-from .updates import (BUNDLE_NAME, UpdateError, current_app_bundle,
-                      trusted_team_from_bundle, verify_publisher, version_tuple)
+from .updates import (
+    BUNDLE_NAME,
+    UpdateError,
+    current_app_bundle,
+    trusted_team_from_bundle,
+    verify_publisher,
+    version_tuple,
+)
 
 
 @contextmanager
 def _install_lock(directory: Path) -> Iterator[None]:
     _assert_no_symlink_ancestor(directory)
     directory.mkdir(parents=True, mode=0o700, exist_ok=True)
-    fd = os.open(directory / ".install.lock", os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    fd = os.open(
+        directory / ".install.lock", os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600
+    )
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
         yield
@@ -63,21 +72,36 @@ def _paths(record: dict) -> tuple[Path, Path, Path, Path, str, str, str]:
         new_version = record["new_version"]
     except (KeyError, TypeError) as exc:
         raise UpdateError("Pending update record is incomplete") from exc
-    if (not isinstance(team, str) or not re.fullmatch(r"[A-Z0-9]{10}", team)
-            or version_tuple(new_version) <= version_tuple(old_version)
-            or target.name != BUNDLE_NAME or candidate.name != BUNDLE_NAME
-            or candidate.parent.parent != target.parent
-            or backup.parent != target.parent or not candidate.parent.name.startswith(".smr-update-")
-            or not backup.name.startswith(".smr-previous-")
-            or target == candidate or target == backup or candidate == backup):
+    if (
+        not isinstance(team, str)
+        or not re.fullmatch(r"[A-Z0-9]{10}", team)
+        or version_tuple(new_version) <= version_tuple(old_version)
+        or target.name != BUNDLE_NAME
+        or candidate.name != BUNDLE_NAME
+        or candidate.parent.parent != target.parent
+        or backup.parent != target.parent
+        or not candidate.parent.name.startswith(".smr-update-")
+        or not backup.name.startswith(".smr-previous-")
+        or target == candidate
+        or target == backup
+        or candidate == backup
+    ):
         raise UpdateError("Pending update paths or publisher are unsafe")
     for path in (target, candidate, backup, helper):
         _assert_no_symlink_ancestor(path)
     return target, candidate, backup, helper, team, old_version, new_version
 
 
-def _finalize(record_path: Path, record: dict, target: Path, candidate: Path,
-              backup: Path, team: str, old_version: str, new_version: str) -> None:
+def _finalize(
+    record_path: Path,
+    record: dict,
+    target: Path,
+    candidate: Path,
+    backup: Path,
+    team: str,
+    old_version: str,
+    new_version: str,
+) -> None:
     verify_publisher(target, team, new_version)
     if backup.exists():
         verify_publisher(backup, team, old_version, require_name=False)
@@ -136,7 +160,9 @@ def main(record_path: Path) -> None:
             return
         target, candidate, backup, helper, team, old_version, new_version = _paths(record)
         if backup.exists():
-            _finalize(record_path, record, target, candidate, backup, team, old_version, new_version)
+            _finalize(
+                record_path, record, target, candidate, backup, team, old_version, new_version
+            )
             return
         try:
             verify_publisher(target, team, new_version)

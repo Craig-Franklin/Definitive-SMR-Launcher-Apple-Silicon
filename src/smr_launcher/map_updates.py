@@ -1,4 +1,5 @@
 """Conservative map update discovery; importing creates a separate variant."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -41,13 +42,18 @@ def _version_label(value: Optional[tuple[str, tuple[int, int, int]]]) -> str:
 
 def _known_source(record: InstalledMap) -> bool:
     name = record.archive_filename
-    return (isinstance(name, str) and bool(name) and not name.startswith(".")
-            and not any(char in name for char in "/\\:")
-            and record.source_url == COLLECTION_URL + "/" + quote(name, safe=""))
+    return (
+        isinstance(name, str)
+        and bool(name)
+        and not name.startswith(".")
+        and not any(char in name for char in "/\\:")
+        and record.source_url == COLLECTION_URL + "/" + quote(name, safe="")
+    )
 
 
-def find_map_updates(installed_records: Iterable[InstalledMap],
-                     remotes: Iterable[RemoteMap]) -> tuple[MapUpdate, ...]:
+def find_map_updates(
+    installed_records: Iterable[InstalledMap], remotes: Iterable[RemoteMap]
+) -> tuple[MapUpdate, ...]:
     """Discover exact-family newer versions or verified same-name revisions.
 
     Only installed records with canonical collection provenance participate.
@@ -71,15 +77,20 @@ def find_map_updates(installed_records: Iterable[InstalledMap],
     for record in installed:
         parsed = _version(record.archive_filename)
         if parsed:
-            installed_highest[parsed[0]] = max(installed_highest.get(parsed[0], (0, 0, 0)), parsed[1])
+            installed_highest[parsed[0]] = max(
+                installed_highest.get(parsed[0], (0, 0, 0)), parsed[1]
+            )
     results = []
     seen = set()
     for record in installed:
         parsed = _version(record.archive_filename)
         newer = None
         if parsed:
-            candidates = [(version, remote) for version, remote in by_family.get(parsed[0], [])
-                          if version > installed_highest[parsed[0]]]
+            candidates = [
+                (version, remote)
+                for version, remote in by_family.get(parsed[0], [])
+                if version > installed_highest[parsed[0]]
+            ]
             if candidates:
                 maximum = max(version for version, _ in candidates)
                 matches = [remote for version, remote in candidates if version == maximum]
@@ -92,18 +103,34 @@ def find_map_updates(installed_records: Iterable[InstalledMap],
             kind = "new_version"
         else:
             previous_sha1 = getattr(record, "archive_sha1", "")
-            if (not isinstance(previous_sha1, str) or not re.fullmatch(r"[0-9a-f]{40}", previous_sha1)
-                    or previous_sha1 == candidate.sha1):
+            if (
+                not isinstance(previous_sha1, str)
+                or not re.fullmatch(r"[0-9a-f]{40}", previous_sha1)
+                or previous_sha1 == candidate.sha1
+            ):
                 continue
             # If these exact current bytes are already present, no import is due.
-            if any(other.archive_filename == candidate.name
-                   and getattr(other, "archive_sha1", "") == candidate.sha1 for other in installed):
+            if any(
+                other.archive_filename == candidate.name
+                and getattr(other, "archive_sha1", "") == candidate.sha1
+                for other in installed
+            ):
                 continue
             kind = "revised_archive"
         identity = (record.variant_id, candidate.name, candidate.sha1)
         if identity in seen:
             continue
         seen.add(identity)
-        results.append(MapUpdate(record.variant_id, record.archive_filename, candidate, kind,
-                                 _version_label(parsed), _version_label(_version(candidate.name))))
-    return tuple(sorted(results, key=lambda item: (item.installed_filename, item.installed_variant_id)))
+        results.append(
+            MapUpdate(
+                record.variant_id,
+                record.archive_filename,
+                candidate,
+                kind,
+                _version_label(parsed),
+                _version_label(_version(candidate.name)),
+            )
+        )
+    return tuple(
+        sorted(results, key=lambda item: (item.installed_filename, item.installed_variant_id))
+    )

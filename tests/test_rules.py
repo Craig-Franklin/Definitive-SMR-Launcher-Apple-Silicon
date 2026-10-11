@@ -1,4 +1,5 @@
 """Synthetic fixtures for exact, repeatable compatibility rules."""
+
 from pathlib import Path
 import hashlib
 import json
@@ -9,7 +10,14 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from smr_launcher.rules import AssetAddition, CompatibilityRule, RuleError, TokenPatch, applicable_rules, apply_rules
+from smr_launcher.rules import (
+    AssetAddition,
+    CompatibilityRule,
+    RuleError,
+    TokenPatch,
+    applicable_rules,
+    apply_rules,
+)
 import smr_launcher.rules as rule_module
 
 
@@ -30,12 +38,20 @@ class RuleTests(unittest.TestCase):
         self.archive = digest(b"archive")
         self.game = digest(b"game")
         self.patch = TokenPatch(
-            "UserMaps/Example/scenario.xml", digest(self.before), digest(self.after),
-            b"<limit>old</limit>", b"<limit>new</limit>",
+            "UserMaps/Example/scenario.xml",
+            digest(self.before),
+            digest(self.after),
+            b"<limit>old</limit>",
+            b"<limit>new</limit>",
         )
         self.rule = CompatibilityRule(
-            "example-limit", 1, "synthetic fixture", "Replace one known bad value",
-            self.archive, self.game, (self.patch,),
+            "example-limit",
+            1,
+            "synthetic fixture",
+            "Replace one known bad value",
+            self.archive,
+            self.game,
+            (self.patch,),
         )
 
     def test_exact_rule_is_deterministic_and_idempotent(self):
@@ -51,12 +67,22 @@ class RuleTests(unittest.TestCase):
         old_mtime = 946684800123456789
         os.utime(self.target, ns=(old_mtime, old_mtime))
         actual_mtime = self.target.stat().st_mtime_ns
-        first = apply_rules(self.root, self.archive, self.game, (self.rule,),
-                            metadata_policy=rule_module.PRESERVE_RESOURCE_MTIMES)
+        first = apply_rules(
+            self.root,
+            self.archive,
+            self.game,
+            (self.rule,),
+            metadata_policy=rule_module.PRESERVE_RESOURCE_MTIMES,
+        )
         self.assertEqual(self.target.read_bytes(), self.after)
         self.assertEqual(self.target.stat().st_mtime_ns, actual_mtime)
-        second = apply_rules(self.root, self.archive, self.game, (self.rule,),
-                             metadata_policy=rule_module.PRESERVE_RESOURCE_MTIMES)
+        second = apply_rules(
+            self.root,
+            self.archive,
+            self.game,
+            (self.rule,),
+            metadata_policy=rule_module.PRESERVE_RESOURCE_MTIMES,
+        )
         self.assertEqual(first, second)
         self.assertEqual(self.target.stat().st_mtime_ns, actual_mtime)
         legacy = apply_rules(self.root, self.archive, self.game, (self.rule,))
@@ -64,23 +90,44 @@ class RuleTests(unittest.TestCase):
         self.assertEqual(self.target.stat().st_mtime_ns, actual_mtime)
 
     def test_legacy_fingerprint_unchanged_and_unknown_policy_does_not_write(self):
-        descriptor = [dict(id=self.rule.rule_id, version=1, provenance=self.rule.provenance,
-                           reason=self.rule.reason, archive=self.archive, game=self.game,
-                           patches=[dict(path=self.patch.path, before=digest(self.before),
-                                         after=digest(self.after), old=digest(self.patch.old),
-                                         new=digest(self.patch.new))])]
+        descriptor = [
+            dict(
+                id=self.rule.rule_id,
+                version=1,
+                provenance=self.rule.provenance,
+                reason=self.rule.reason,
+                archive=self.archive,
+                game=self.game,
+                patches=[
+                    dict(
+                        path=self.patch.path,
+                        before=digest(self.before),
+                        after=digest(self.after),
+                        old=digest(self.patch.old),
+                        new=digest(self.patch.new),
+                    )
+                ],
+            )
+        ]
         expected = digest(json.dumps(descriptor, sort_keys=True, separators=(",", ":")).encode())
         with self.assertRaisesRegex(RuleError, "metadata policy"):
             apply_rules(self.root, self.archive, self.game, (self.rule,), metadata_policy="freshen")
         self.assertEqual(self.target.read_bytes(), self.before)
-        self.assertEqual(apply_rules(self.root, self.archive, self.game, (self.rule,)).fingerprint, expected)
+        self.assertEqual(
+            apply_rules(self.root, self.archive, self.game, (self.rule,)).fingerprint, expected
+        )
 
     def test_failed_timestamp_restore_leaves_target_unchanged(self):
         before_stat = self.target.stat()
         with patch.object(rule_module.os, "utime", side_effect=OSError("synthetic failure")):
             with self.assertRaises(OSError):
-                apply_rules(self.root, self.archive, self.game, (self.rule,),
-                            metadata_policy=rule_module.PRESERVE_RESOURCE_MTIMES)
+                apply_rules(
+                    self.root,
+                    self.archive,
+                    self.game,
+                    (self.rule,),
+                    metadata_policy=rule_module.PRESERVE_RESOURCE_MTIMES,
+                )
         self.assertEqual(self.target.read_bytes(), self.before)
         self.assertEqual(self.target.stat().st_mtime_ns, before_stat.st_mtime_ns)
         self.assertFalse(list(self.target.parent.glob(".smr-rule-*")))
@@ -98,17 +145,23 @@ class RuleTests(unittest.TestCase):
             apply_rules(self.root, self.archive, self.game, (self.rule,))
         self.assertEqual(self.target.read_bytes(), b"<scenario>changed</scenario>")
         self.target.write_bytes(self.before)
-        bad_patch = TokenPatch(self.patch.path, digest(self.before), digest(b"wrong"), self.patch.old, self.patch.new)
-        bad_rule = CompatibilityRule("bad-result", 1, "synthetic fixture", "bad hash",
-                                     self.archive, self.game, (bad_patch,))
+        bad_patch = TokenPatch(
+            self.patch.path, digest(self.before), digest(b"wrong"), self.patch.old, self.patch.new
+        )
+        bad_rule = CompatibilityRule(
+            "bad-result", 1, "synthetic fixture", "bad hash", self.archive, self.game, (bad_patch,)
+        )
         with self.assertRaises(RuleError):
             apply_rules(self.root, self.archive, self.game, (bad_rule,))
         self.assertEqual(self.target.read_bytes(), self.before)
 
     def test_full_preflight_avoids_partial_mutation(self):
-        missing = TokenPatch("UserMaps/Example/missing.xml", digest(b"old"), digest(b"new"), b"old", b"new")
-        later = CompatibilityRule("later", 1, "synthetic fixture", "missing target",
-                                  self.archive, self.game, (missing,))
+        missing = TokenPatch(
+            "UserMaps/Example/missing.xml", digest(b"old"), digest(b"new"), b"old", b"new"
+        )
+        later = CompatibilityRule(
+            "later", 1, "synthetic fixture", "missing target", self.archive, self.game, (missing,)
+        )
         with self.assertRaises(RuleError):
             apply_rules(self.root, self.archive, self.game, (self.rule, later))
         self.assertEqual(self.target.read_bytes(), self.before)
@@ -118,27 +171,47 @@ class RuleTests(unittest.TestCase):
         after = b"AAAAAAAAA"
         self.target.write_bytes(before)
         growing = TokenPatch(self.patch.path, digest(before), digest(after), before, after)
-        rule = CompatibilityRule("growing", 1, "synthetic fixture", "size boundary",
-                                 self.archive, self.game, (growing,))
+        rule = CompatibilityRule(
+            "growing", 1, "synthetic fixture", "size boundary", self.archive, self.game, (growing,)
+        )
         with patch.object(rule_module, "MAX_PATCHED_FILE_BYTES", 8):
             with self.assertRaises(RuleError):
                 apply_rules(self.root, self.archive, self.game, (rule,))
         self.assertEqual(self.target.read_bytes(), before)
 
     def test_ambiguous_versions_and_paths_are_rejected(self):
-        another_version = CompatibilityRule("example-limit", 2, "synthetic fixture", "other version",
-                                            self.archive, self.game, (self.patch,))
+        another_version = CompatibilityRule(
+            "example-limit",
+            2,
+            "synthetic fixture",
+            "other version",
+            self.archive,
+            self.game,
+            (self.patch,),
+        )
         with self.assertRaises(RuleError):
             applicable_rules((self.rule, another_version), self.archive, self.game)
-        overlap = CompatibilityRule("another", 1, "synthetic fixture", "same path",
-                                    self.archive, self.game, (self.patch,))
+        overlap = CompatibilityRule(
+            "another", 1, "synthetic fixture", "same path", self.archive, self.game, (self.patch,)
+        )
         with self.assertRaises(RuleError):
             applicable_rules((self.rule, overlap), self.archive, self.game)
-        case_alias = TokenPatch(self.patch.path.replace("scenario.xml", "Scenario.xml"),
-                                self.patch.before_sha256,
-                                self.patch.after_sha256, self.patch.old, self.patch.new)
-        alias = CompatibilityRule("case-alias", 1, "synthetic fixture", "same file by case",
-                                  self.archive, self.game, (case_alias,))
+        case_alias = TokenPatch(
+            self.patch.path.replace("scenario.xml", "Scenario.xml"),
+            self.patch.before_sha256,
+            self.patch.after_sha256,
+            self.patch.old,
+            self.patch.new,
+        )
+        alias = CompatibilityRule(
+            "case-alias",
+            1,
+            "synthetic fixture",
+            "same file by case",
+            self.archive,
+            self.game,
+            (case_alias,),
+        )
         with self.assertRaises(RuleError):
             applicable_rules((self.rule, alias), self.archive, self.game)
 
@@ -153,23 +226,49 @@ class RuleTests(unittest.TestCase):
     def test_asset_addition_is_hash_bound_and_metadata_preserving(self):
         data = b"new model bytes"
         addition = AssetAddition("UserMaps/Example/model.kfm", digest(data), data, 123456789)
-        rule = CompatibilityRule("add-model", 1, "synthetic fixture", "add one model",
-                                 self.archive, self.game, (), (addition,))
-        first = apply_rules(self.root, self.archive, self.game, (rule,),
-                            metadata_policy=rule_module.PRESERVE_RESOURCE_MTIMES)
+        rule = CompatibilityRule(
+            "add-model",
+            1,
+            "synthetic fixture",
+            "add one model",
+            self.archive,
+            self.game,
+            (),
+            (addition,),
+        )
+        first = apply_rules(
+            self.root,
+            self.archive,
+            self.game,
+            (rule,),
+            metadata_policy=rule_module.PRESERVE_RESOURCE_MTIMES,
+        )
         output = self.root / "UserMaps/Example/model.kfm"
         self.assertEqual(output.read_bytes(), data)
         self.assertEqual(output.stat().st_mtime_ns, 123456789)
-        second = apply_rules(self.root, self.archive, self.game, (rule,),
-                             metadata_policy=rule_module.PRESERVE_RESOURCE_MTIMES)
+        second = apply_rules(
+            self.root,
+            self.archive,
+            self.game,
+            (rule,),
+            metadata_policy=rule_module.PRESERVE_RESOURCE_MTIMES,
+        )
         self.assertEqual(first, second)
 
     def test_asset_addition_rejects_existing_different_target(self):
         data = b"new model bytes"
         addition = AssetAddition("UserMaps/Example/model.kfm", digest(data), data, 1)
         (self.root / "UserMaps/Example/model.kfm").write_bytes(b"different")
-        rule = CompatibilityRule("add-model", 1, "synthetic fixture", "add one model",
-                                 self.archive, self.game, (), (addition,))
+        rule = CompatibilityRule(
+            "add-model",
+            1,
+            "synthetic fixture",
+            "add one model",
+            self.archive,
+            self.game,
+            (),
+            (addition,),
+        )
         with self.assertRaisesRegex(RuleError, "already exists"):
             apply_rules(self.root, self.archive, self.game, (rule,))
 
@@ -182,12 +281,25 @@ class RuleTests(unittest.TestCase):
         os.utime(output, ns=(expected_mtime, expected_mtime))
         drifted_mtime = expected_mtime + 1_000_000_000
         os.utime(output, ns=(drifted_mtime, drifted_mtime))
-        rule = CompatibilityRule("add-model", 1, "synthetic fixture", "add one model",
-                                 self.archive, self.game, (self.patch,), (addition,))
+        rule = CompatibilityRule(
+            "add-model",
+            1,
+            "synthetic fixture",
+            "add one model",
+            self.archive,
+            self.game,
+            (self.patch,),
+            (addition,),
+        )
 
         with self.assertRaisesRegex(RuleError, "different mtime"):
-            apply_rules(self.root, self.archive, self.game, (rule,),
-                        metadata_policy=rule_module.PRESERVE_RESOURCE_MTIMES)
+            apply_rules(
+                self.root,
+                self.archive,
+                self.game,
+                (rule,),
+                metadata_policy=rule_module.PRESERVE_RESOURCE_MTIMES,
+            )
 
         self.assertEqual(self.target.read_bytes(), self.before)
         self.assertEqual(output.read_bytes(), data)
@@ -199,8 +311,16 @@ class RuleTests(unittest.TestCase):
         with output.open("wb") as stream:
             stream.truncate(64 * 1024 * 1024)
         addition = AssetAddition("UserMaps/Example/model.kfm", digest(data), data, 1)
-        rule = CompatibilityRule("add-model", 1, "synthetic fixture", "add one model",
-                                 self.archive, self.game, (), (addition,))
+        rule = CompatibilityRule(
+            "add-model",
+            1,
+            "synthetic fixture",
+            "add one model",
+            self.archive,
+            self.game,
+            (),
+            (addition,),
+        )
 
         with patch.object(Path, "read_bytes", side_effect=AssertionError("must not read target")):
             with self.assertRaisesRegex(RuleError, "already exists"):

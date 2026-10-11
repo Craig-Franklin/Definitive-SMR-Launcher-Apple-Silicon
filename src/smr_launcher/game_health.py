@@ -1,25 +1,39 @@
 """Bounded resource protection for the exact observed Railroads process."""
+
 import ctypes
 import ctypes.util
 import os
 import signal
 import time
 
-GIB = 1024 ** 3
+GIB = 1024**3
 FOOTPRINT_LIMIT = 8 * GIB
 HARD_FOOTPRINT_LIMIT = 16 * GIB
 SUSTAINED_SECONDS = 5
 
 
 class _Usage(ctypes.Structure):
-    _fields_ = [("uuid", ctypes.c_uint8 * 16)] + [(name, ctypes.c_uint64) for name in
-        ("user", "system", "idle", "interrupts", "pageins", "wired", "resident",
-         "footprint", "start", "exit")]
+    _fields_ = [("uuid", ctypes.c_uint8 * 16)] + [
+        (name, ctypes.c_uint64)
+        for name in (
+            "user",
+            "system",
+            "idle",
+            "interrupts",
+            "pageins",
+            "wired",
+            "resident",
+            "footprint",
+            "start",
+            "exit",
+        )
+    ]
 
 
 def physical_footprint(process):
     """Include compressed/swapped allocations; RSS hides this failure mode."""
     from .crash_monitor import running_game
+
     if running_game(process["executable"]) != process:
         return None
     lib = ctypes.CDLL(ctypes.util.find_library("proc"), use_errno=True)
@@ -36,6 +50,7 @@ def physical_footprint(process):
 def stop_game(process, *, probe=None, send_signal=os.kill, wait=time.sleep, clock=time.monotonic):
     """Recheck path, PID and birth immediately before every signal; never relaunch."""
     from .crash_monitor import running_game
+
     probe = probe or running_game
     for sig, seconds in ((signal.SIGTERM, 2), (signal.SIGKILL, 3)):
         current = probe(process["executable"])

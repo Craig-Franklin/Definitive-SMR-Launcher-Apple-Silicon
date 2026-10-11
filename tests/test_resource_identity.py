@@ -1,4 +1,5 @@
 """Synthetic metadata-aware resource fingerprint tests."""
+
 import os
 from pathlib import Path
 import shutil
@@ -173,7 +174,9 @@ class ResourceIdentityTests(unittest.TestCase):
                 return real_open(path, flags, *args, **kwargs)
 
             with patch.object(identity.os, "open", side_effect=deny):
-                with self.assertRaisesRegex(identity.ResourceFingerprintError, "Cannot open resource file"):
+                with self.assertRaisesRegex(
+                    identity.ResourceFingerprintError, "Cannot open resource file"
+                ):
                     self.fingerprint(assets)
 
     def test_file_replacement_during_read_fails_closed(self):
@@ -197,7 +200,9 @@ class ResourceIdentityTests(unittest.TestCase):
                 return data
 
             with patch.object(identity.os, "read", side_effect=replace_after_chunk):
-                with self.assertRaisesRegex(identity.ResourceFingerprintError, "changed while reading"):
+                with self.assertRaisesRegex(
+                    identity.ResourceFingerprintError, "changed while reading"
+                ):
                     self.fingerprint(assets)
             self.assertTrue(replaced)
 
@@ -210,16 +215,24 @@ class ResourceIdentityTests(unittest.TestCase):
 
             def fifo_swap(path, flags, *args, **kwargs):
                 nonlocal swapped
-                if os.fspath(path) == target.name and kwargs.get("dir_fd") is not None and not swapped:
+                if (
+                    os.fspath(path) == target.name
+                    and kwargs.get("dir_fd") is not None
+                    and not swapped
+                ):
                     swapped = True
                     os.unlink(target)
                     os.mkfifo(target)
-                    self.assertTrue(flags & getattr(os, "O_NONBLOCK", 0),
-                                    "resource opens must be nonblocking against a raced FIFO")
+                    self.assertTrue(
+                        flags & getattr(os, "O_NONBLOCK", 0),
+                        "resource opens must be nonblocking against a raced FIFO",
+                    )
                 return real_open(path, flags, *args, **kwargs)
 
             with patch.object(identity.os, "open", side_effect=fifo_swap):
-                with self.assertRaisesRegex(identity.ResourceFingerprintError, "changed before reading"):
+                with self.assertRaisesRegex(
+                    identity.ResourceFingerprintError, "changed before reading"
+                ):
                     self.fingerprint(assets)
             self.assertTrue(swapped)
 
@@ -248,12 +261,17 @@ class ResourceIdentityTests(unittest.TestCase):
     def test_missing_supplied_root_and_omitted_required_role_are_explicit(self):
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary).resolve()
-            with self.assertRaisesRegex(identity.ResourceFingerprintError, "Missing/unreadable root"):
+            with self.assertRaisesRegex(
+                identity.ResourceFingerprintError, "Missing/unreadable root"
+            ):
                 self.fingerprint(base / "missing" / "Assets")
             assets = self.make_assets(base)
-            with self.assertRaisesRegex(identity.ResourceFingerprintError, "Required resource roots"):
-                identity.fingerprint_resources({"installed_assets": assets},
-                                               required_roles=("user_maps",))
+            with self.assertRaisesRegex(
+                identity.ResourceFingerprintError, "Required resource roots"
+            ):
+                identity.fingerprint_resources(
+                    {"installed_assets": assets}, required_roles=("user_maps",)
+                )
 
     def test_full_profile_root_is_rejected_and_siblings_are_excluded(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -269,19 +287,26 @@ class ResourceIdentityTests(unittest.TestCase):
             (custom / "override.xml").write_bytes(b"override")
             (maps / "map.xml").write_bytes(b"map")
 
-            with self.assertRaisesRegex(identity.ResourceFingerprintError, "must name a assets directory"):
+            with self.assertRaisesRegex(
+                identity.ResourceFingerprintError, "must name a assets directory"
+            ):
                 identity.fingerprint_resources({"installed_assets": profile})
-            result = identity.fingerprint_resources({
-                "installed_assets": assets,
-                "custom_assets": custom,
-                "user_maps": maps,
-            }, required_roles=("installed_assets", "custom_assets", "user_maps"))
+            result = identity.fingerprint_resources(
+                {
+                    "installed_assets": assets,
+                    "custom_assets": custom,
+                    "user_maps": maps,
+                },
+                required_roles=("installed_assets", "custom_assets", "user_maps"),
+            )
             encoded = repr(result)
             self.assertNotIn("Settings.ini", encoded)
             self.assertNotIn("Saves", encoded)
             self.assertNotIn("Logs", encoded)
-            self.assertEqual({root["role"] for root in result["roots"]}, {
-                "installed_assets", "custom_assets", "user_maps"})
+            self.assertEqual(
+                {root["role"] for root in result["roots"]},
+                {"installed_assets", "custom_assets", "user_maps"},
+            )
 
     def test_entry_and_byte_limits_fail_closed(self):
         with tempfile.TemporaryDirectory() as temporary:

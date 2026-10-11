@@ -1,4 +1,5 @@
 """Immutable, operation-local gallery presentation; no Tk or gameplay cache."""
+
 from dataclasses import dataclass
 from pathlib import Path
 import hashlib
@@ -50,7 +51,12 @@ def _read_art(path, maximum=MAX_ART_BYTES):
         with os.fdopen(fd, "rb") as stream:
             fd = None
             data = stream.read(maximum + 1)
-        if len(data) > maximum or data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR" or len(data) < 24:
+        if (
+            len(data) > maximum
+            or data[:8] != b"\x89PNG\r\n\x1a\n"
+            or data[12:16] != b"IHDR"
+            or len(data) < 24
+        ):
             return b""
         width, height = struct.unpack(">II", data[16:24])
         return data if 0 < width <= MAX_ART_DIMENSION and 0 < height <= MAX_ART_DIMENSION else b""
@@ -85,15 +91,29 @@ def gallery_snapshot(app, cancelled, progress=None, *, history_error=""):
         except Exception as exc:
             label = "Needs inspection"
             notice = "Gameplay record needs inspection: " + str(exc)
-        art = _read_art(app.map_icon(record), min(MAX_ART_BYTES, remaining_art)) if remaining_art else b""
+        art = (
+            _read_art(app.map_icon(record), min(MAX_ART_BYTES, remaining_art))
+            if remaining_art
+            else b""
+        )
         remaining_art -= len(art)
         error = history_error
         try:
             summary = summarize(history, context(record, app.installation.executable_sha256))
         except (ValueError, AttributeError, TypeError) as exc:
             summary, error = None, str(exc)
-        result.append(GalleryItem(record, metadata, label, notice, art,
-                                  hashlib.sha256(art).hexdigest() if art else "", summary, error))
+        result.append(
+            GalleryItem(
+                record,
+                metadata,
+                label,
+                notice,
+                art,
+                hashlib.sha256(art).hexdigest() if art else "",
+                summary,
+                error,
+            )
+        )
         if progress:
             progress(len(result), len(records))
     return tuple(result) if not cancelled.is_set() else ()
@@ -104,9 +124,18 @@ def filter_snapshot(snapshot, query, wanted, order):
     records = []
     for item in snapshot:
         record, metadata = item.record, item.metadata
-        if query not in " ".join((record.name, metadata.name or "", metadata.author or "", metadata.description)).casefold():
+        if (
+            query
+            not in " ".join(
+                (record.name, metadata.name or "", metadata.author or "", metadata.description)
+            ).casefold()
+        ):
             continue
-        if wanted in ("Single player", "Multiplayer") and wanted.replace(" ", "").casefold() not in (metadata.map_type or "").replace(" ", "").casefold():
+        if (
+            wanted in ("Single player", "Multiplayer")
+            and wanted.replace(" ", "").casefold()
+            not in (metadata.map_type or "").replace(" ", "").casefold()
+        ):
             continue
         if wanted in ("Verified", "Not verified", "Known issue") and item.verification != wanted:
             continue
@@ -115,6 +144,17 @@ def filter_snapshot(snapshot, query, wanted, order):
         field = "updated" if order == "Updated newest" else "created"
         known = [r for r in records if getattr(r.metadata, field)]
         unknown = [r for r in records if not getattr(r.metadata, field)]
-        known.sort(key=lambda r: (getattr(r.metadata, field), r.record.name.casefold()), reverse=order != "Created oldest")
+        known.sort(
+            key=lambda r: (getattr(r.metadata, field), r.record.name.casefold()),
+            reverse=order != "Created oldest",
+        )
         return tuple(known + sorted(unknown, key=lambda r: r.record.name.casefold()))
-    return tuple(sorted(records, key=lambda r: ((r.metadata.author or "~").casefold() if order == "Author" else "", r.record.name.casefold())))
+    return tuple(
+        sorted(
+            records,
+            key=lambda r: (
+                (r.metadata.author or "~").casefold() if order == "Author" else "",
+                r.record.name.casefold(),
+            ),
+        )
+    )

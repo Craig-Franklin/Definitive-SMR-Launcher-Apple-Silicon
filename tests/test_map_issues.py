@@ -1,4 +1,5 @@
 """Persistent edition warnings must not become fabricated scenario failures."""
+
 from dataclasses import replace
 from types import SimpleNamespace
 import unittest
@@ -20,14 +21,24 @@ class MapWarningControls(unittest.TestCase):
         app = self.application
         app.setup()
         record = app.import_archive(self.archive)
-        context = dict(archive_sha256=record.archive_sha256, variant_id=record.variant_id,
-                       game_executable_sha256=app.installation.executable_sha256)
+        context = dict(
+            archive_sha256=record.archive_sha256,
+            variant_id=record.variant_id,
+            game_executable_sha256=app.installation.executable_sha256,
+        )
         store = MapIssueStore(app.library)
+
         def retain():
-            return store.record(context, incident_id="b"*64,
-                occurred_at="2026-10-11T14:00:00+00:00", kind="resource_limit",
-                detail="Map loading failed with excessive memory use.")
-        retain(); retain()
+            return store.record(
+                context,
+                incident_id="b" * 64,
+                occurred_at="2026-10-11T14:00:00+00:00",
+                kind="resource_limit",
+                detail="Map loading failed with excessive memory use.",
+            )
+
+        retain()
+        retain()
         self.assertEqual(len(store.for_map(record, app.installation.executable_sha256)), 1)
         result = app.verification_for(record)
         self.assertEqual(result.status, "Known issue")
@@ -37,15 +48,30 @@ class MapWarningControls(unittest.TestCase):
         self.assertEqual(app.catalogue_verification()[record.variant_id].status, "Known issue")
         restarted = LauncherApplication(app.installation, app.library)
         self.assertEqual(restarted.verification_for(record).status, "Known issue")
-        self.assertEqual(store.for_map(replace(record, variant_id="c"*64), context["game_executable_sha256"]), ())
-        self.assertEqual(store.for_map(record, "d"*64), ())
-        self.assertEqual(store.for_map(replace(record, archive_sha256="e"*64), context["game_executable_sha256"]), ())
+        self.assertEqual(
+            store.for_map(replace(record, variant_id="c" * 64), context["game_executable_sha256"]),
+            (),
+        )
+        self.assertEqual(store.for_map(record, "d" * 64), ())
+        self.assertEqual(
+            store.for_map(
+                replace(record, archive_sha256="e" * 64), context["game_executable_sha256"]
+            ),
+            (),
+        )
 
     def test_unbound_context_does_not_assign_map_issue(self):
         self.application.setup()
         store = MapIssueStore(self.application.library)
-        self.assertIsNone(store.record({}, incident_id="b"*64,
-            occurred_at="2026-10-11T14:00:00+00:00", kind="crash", detail="Crash"))
+        self.assertIsNone(
+            store.record(
+                {},
+                incident_id="b" * 64,
+                occurred_at="2026-10-11T14:00:00+00:00",
+                kind="crash",
+                detail="Crash",
+            )
+        )
         self.assertFalse(store.root.exists())
 
 
@@ -55,8 +81,9 @@ class MonitorWarningControls(unittest.TestCase):
     write_report = monitor_fixtures.MonitorControls.write_report
 
     def bind_map(self):
-        record = SimpleNamespace(profile_id="map-test", archive_sha256="b"*64,
-                                 variant_id="c"*64)
+        record = SimpleNamespace(
+            profile_id="map-test", archive_sha256="b" * 64, variant_id="c" * 64
+        )
         self.app.catalogue = lambda: [record]
         self.app.profiles.active_profile = lambda: record.profile_id
         return record
@@ -67,25 +94,28 @@ class MonitorWarningControls(unittest.TestCase):
         monitor = self.monitor()
         monitor.poll_once()
         store = MapIssueStore(self.app.library)
-        self.assertEqual(len(store.for_map(record, "a"*64)), 1)
+        self.assertEqual(len(store.for_map(record, "a" * 64)), 1)
         self.publisher.publish.assert_not_called()
         # Simulate a pre-upgrade crash incident with no issue receipt.
-        for path in store.root.glob("*.json"): path.unlink()
+        for path in store.root.glob("*.json"):
+            path.unlink()
         restarted = self.monitor()
-        self.assertEqual(len(store.for_map(record, "a"*64)), 1)
+        self.assertEqual(len(store.for_map(record, "a" * 64)), 1)
         restarted.poll_once()
-        self.assertEqual(len(store.for_map(record, "a"*64)), 1)
+        self.assertEqual(len(store.for_map(record, "a" * 64)), 1)
 
     def test_guard_retains_evidence_and_warning_before_stop_even_when_crash_monitor_off(self):
         record = self.bind_map()
         monitor = self.monitor()
         monitor.configure(enabled=False, automatic_reporting=False)
+
         def stop(process):
             self.assertEqual(process, PROCESS)
             self.assertEqual(len(list(monitor.root.glob("resource-*.json"))), 1)
-            self.assertEqual(len(monitor.map_issues.for_map(record, "a"*64)), 1)
+            self.assertEqual(len(monitor.map_issues.for_map(record, "a" * 64)), 1)
+
         stopper = Mock(side_effect=stop)
-        monitor.resource_guard = ResourceGuard(probe=lambda p: 200*GIB, stopper=stopper)
+        monitor.resource_guard = ResourceGuard(probe=lambda p: 200 * GIB, stopper=stopper)
         monitor.poll_health_once()
         stopper.assert_called_once()
         self.assertEqual(len(monitor.take_events()), 1)
@@ -113,22 +143,25 @@ class MonitorWarningControls(unittest.TestCase):
         self.probe.return_value = None
         self.write_report(pid=999)
         monitor.poll_once()
-        self.assertEqual(monitor.map_issues.for_map(record, "a"*64), ())
+        self.assertEqual(monitor.map_issues.for_map(record, "a" * 64), ())
 
     def test_blocked_publisher_does_not_block_resource_protection(self):
         from threading import Event, Thread
+
         self.bind_map()
         monitor = self.monitor()
         self.write_report()
         monitor.configure(enabled=True, automatic_reporting=True)
         entered, release = Event(), Event()
+
         def publish(*args, **kwargs):
             entered.set()
             release.wait(2)
             return dict(status="pending")
+
         self.publisher.publish.side_effect = publish
         stopper = Mock()
-        monitor.resource_guard = ResourceGuard(probe=lambda p: 200*GIB, stopper=stopper)
+        monitor.resource_guard = ResourceGuard(probe=lambda p: 200 * GIB, stopper=stopper)
         polling = Thread(target=monitor.poll_once)
         polling.start()
         try:
@@ -143,7 +176,7 @@ class MonitorWarningControls(unittest.TestCase):
     def test_original_game_resource_failure_does_not_implicate_custom_map(self):
         monitor = self.monitor()
         stopper = Mock()
-        monitor.resource_guard = ResourceGuard(probe=lambda p: 200*GIB, stopper=stopper)
+        monitor.resource_guard = ResourceGuard(probe=lambda p: 200 * GIB, stopper=stopper)
         monitor.poll_health_once()
         stopper.assert_called_once()
         self.assertFalse(monitor.map_issues.root.exists())
@@ -154,7 +187,7 @@ class MonitorWarningControls(unittest.TestCase):
         monitor.arm = Mock(side_effect=OSError("disk full"))
         monitor._retain_resource_failure = Mock(side_effect=OSError("disk full"))
         stopper = Mock()
-        monitor.resource_guard = ResourceGuard(probe=lambda p: 200*GIB, stopper=stopper)
+        monitor.resource_guard = ResourceGuard(probe=lambda p: 200 * GIB, stopper=stopper)
         monitor.poll_health_once()
         stopper.assert_called_once_with(PROCESS)
         self.assertIn("could not be saved", monitor.take_events()[0])

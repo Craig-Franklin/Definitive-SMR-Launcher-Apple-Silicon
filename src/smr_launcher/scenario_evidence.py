@@ -3,6 +3,7 @@
 Raw facts, protocols, applicability and interpretations are separate records.
 The ledger order selects the latest interpretation; it never edits an observation.
 """
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -18,8 +19,13 @@ import math
 import re
 
 from .activation import _assert_no_symlink_ancestor, _fsync_dir
-from .resource_identity import (SCHEMA_VERSION as RESOURCE_SCHEMA, ALGORITHM as RESOURCE_ALGORITHM,
-                                _open_directory_path, _verify_directory_path, ResourceFingerprintError)
+from .resource_identity import (
+    SCHEMA_VERSION as RESOURCE_SCHEMA,
+    ALGORITHM as RESOURCE_ALGORITHM,
+    _open_directory_path,
+    _verify_directory_path,
+    ResourceFingerprintError,
+)
 
 LEGACY_SCHEMA = "scenario-action-evidence-v1"
 SCHEMA = "scenario-action-evidence-v2"
@@ -30,14 +36,41 @@ MAX_RECORD_BYTES = 1024 * 1024
 MAX_STORE_BYTES = 32 * 1024 * 1024
 MAX_RECORDS = 10000
 MAX_RECEIPT_BYTES = 16 * 1024 * 1024
-FEATURES = ("industries", "production", "transport", "geometry", "materials",
-            "animations", "placements", "terrain", "goals", "events", "eras", "difficulty")
-REQUIRED_ACTIONS = ("load", "camera", "track_construction", "station_construction",
-                    "train_purchase_routing", "cargo_transport", "bridge_construction",
-                    "annex_construction", "tunnel_construction",
-                    "industry_construction_production", "goals_events", "era_transition",
-                    "difficulty", "ai_competition", "autosave", "manual_save", "reload",
-                    "continue_after_reload", "extended_play")
+FEATURES = (
+    "industries",
+    "production",
+    "transport",
+    "geometry",
+    "materials",
+    "animations",
+    "placements",
+    "terrain",
+    "goals",
+    "events",
+    "eras",
+    "difficulty",
+)
+REQUIRED_ACTIONS = (
+    "load",
+    "camera",
+    "track_construction",
+    "station_construction",
+    "train_purchase_routing",
+    "cargo_transport",
+    "bridge_construction",
+    "annex_construction",
+    "tunnel_construction",
+    "industry_construction_production",
+    "goals_events",
+    "era_transition",
+    "difficulty",
+    "ai_competition",
+    "autosave",
+    "manual_save",
+    "reload",
+    "continue_after_reload",
+    "extended_play",
+)
 OUTCOMES = ("pass", "failure", "partial", "unknown", "historical_limited")
 
 
@@ -47,8 +80,9 @@ class EvidenceError(ValueError):
 
 def canonical(value):
     try:
-        return json.dumps(value, sort_keys=True, separators=(",", ":"),
-                          ensure_ascii=True, allow_nan=False).encode("utf-8")
+        return json.dumps(
+            value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
+        ).encode("utf-8")
     except (TypeError, ValueError, RecursionError) as exc:
         raise EvidenceError("Evidence must contain finite JSON values") from exc
 
@@ -58,7 +92,11 @@ def digest(value):
 
 
 def sha(value):
-    if not isinstance(value, str) or len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(c not in "0123456789abcdef" for c in value)
+    ):
         raise EvidenceError("Exact SHA-256 identity required")
     return value
 
@@ -72,7 +110,13 @@ def text(value):
 def relative(value):
     text(value)
     p = PurePosixPath(value)
-    if p.is_absolute() or str(p) != value or any(x in (".", "..") for x in p.parts) or "\\" in value or "\x00" in value:
+    if (
+        p.is_absolute()
+        or str(p) != value
+        or any(x in (".", "..") for x in p.parts)
+        or "\\" in value
+        or "\x00" in value
+    ):
         raise EvidenceError("Unsafe relative evidence path")
     return value
 
@@ -98,6 +142,7 @@ def decode(data):
                 raise EvidenceError("Duplicate JSON field")
             result[key] = value
         return result
+
     return json.loads(data, object_pairs_hook=pairs)
 
 
@@ -120,7 +165,12 @@ def open_plain(path, flags, mode=0o600):
     fd = None
     try:
         with parent_handle(path) as parent_fd:
-            fd = os.open(path.name, flags | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0), mode, dir_fd=parent_fd)
+            fd = os.open(
+                path.name,
+                flags | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+                mode,
+                dir_fd=parent_fd,
+            )
             opened = os.fstat(fd)
             if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
                 raise EvidenceError("Evidence must be a plain regular file")
@@ -142,7 +192,18 @@ def read_bytes(path, limit):
             data = stream.read(limit + 1)
             after = os.fstat(stream.fileno())
             current = path.stat()
-            if len(data) > limit or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns) or (after.st_dev, after.st_ino) != (current.st_dev, current.st_ino):
+            if (
+                len(data) > limit
+                or (
+                    before.st_dev,
+                    before.st_ino,
+                    before.st_size,
+                    before.st_mtime_ns,
+                    before.st_ctime_ns,
+                )
+                != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
+                or (after.st_dev, after.st_ino) != (current.st_dev, current.st_ino)
+            ):
                 raise EvidenceError("Evidence changed while reading")
             safe_path(path)
             return data
@@ -159,6 +220,7 @@ def receipt(root, name):
 @dataclass(frozen=True)
 class EvidenceRecord:
     """Canonical bytes prevent caller mutation of nested facts."""
+
     encoded: bytes
 
     @classmethod
@@ -184,7 +246,12 @@ class EvidenceRecord:
         if self.kind != "observation":
             raise EvidenceError("Only observations have observed input identities")
         p = self.payload
-        return digest({k:p[k] for k in ("scenario", "build", "contract", "action", "protocol", "actual_context")})
+        return digest(
+            {
+                k: p[k]
+                for k in ("scenario", "build", "contract", "action", "protocol", "actual_context")
+            }
+        )
 
     @property
     def kind(self):
@@ -201,11 +268,18 @@ class EvidenceRecord:
             v = self.value
             if self.encoded != canonical(v):
                 raise EvidenceError("Immutable records require canonical bytes")
-            if set(v) != {"id", "schema", "kind", "payload", "refs"} or v["schema"] not in (SCHEMA, LEGACY_SCHEMA):
+            if set(v) != {"id", "schema", "kind", "payload", "refs"} or v["schema"] not in (
+                SCHEMA,
+                LEGACY_SCHEMA,
+            ):
                 raise EvidenceError("Unexpected evidence schema")
             if sha(v["id"]) != digest({k: v[k] for k in v if k != "id"}):
                 raise EvidenceError("Record identity mismatch")
-            if not isinstance(v["refs"], list) or len(v["refs"]) > 1000 or len(set(v["refs"])) != len(v["refs"]):
+            if (
+                not isinstance(v["refs"], list)
+                or len(v["refs"]) > 1000
+                or len(set(v["refs"])) != len(v["refs"])
+            ):
                 raise EvidenceError("Invalid record references")
             for ref in v["refs"]:
                 sha(ref)
@@ -218,12 +292,18 @@ class EvidenceRecord:
 
 
 def scenario_key(archive, edition, path, scenario_sha256):
-    return {"archive_sha256": sha(archive), "edition_id": sha(edition),
-            "scenario_path": relative(path), "scenario_sha256": sha(scenario_sha256)}
+    return {
+        "archive_sha256": sha(archive),
+        "edition_id": sha(edition),
+        "scenario_path": relative(path),
+        "scenario_sha256": sha(scenario_sha256),
+    }
 
 
 def validate_scenario(s):
-    if not isinstance(s, dict) or s != scenario_key(s["archive_sha256"], s["edition_id"], s["scenario_path"], s["scenario_sha256"]):
+    if not isinstance(s, dict) or s != scenario_key(
+        s["archive_sha256"], s["edition_id"], s["scenario_path"], s["scenario_sha256"]
+    ):
         raise EvidenceError("Incomplete exact scenario identity")
 
 
@@ -235,11 +315,17 @@ def _known_option_value(value, depth=0):
         return
     if type(value) is float and math.isfinite(value):
         return
-    if type(value) is str and value.strip() and len(value) <= 4000 and value.casefold() not in ("unknown", "unresolved", "unattested"):
+    if (
+        type(value) is str
+        and value.strip()
+        and len(value) <= 4000
+        and value.casefold() not in ("unknown", "unresolved", "unattested")
+    ):
         return
     if type(value) is dict and value and len(value) <= 200:
         for key, item in value.items():
-            text(key); _known_option_value(item, depth + 1)
+            text(key)
+            _known_option_value(item, depth + 1)
         return
     if type(value) is list and value and len(value) <= 200:
         for item in value:
@@ -255,21 +341,36 @@ def attest_options(values, *, required_fields, contract_version, basis):
     future work. Every declared field must be present/resolved. Raw dictionaries
     are deliberately untrusted. Synthetic controls may explicitly attest theirs.
     """
-    result = {"schema": OPTIONS_SCHEMA, "state": "known", "values": values,
-              "required_fields": sorted(required_fields), "contract_version": contract_version,
-              "basis": basis}
+    result = {
+        "schema": OPTIONS_SCHEMA,
+        "state": "known",
+        "values": values,
+        "required_fields": sorted(required_fields),
+        "contract_version": contract_version,
+        "basis": basis,
+    }
     validate_options(result)
     return decode(canonical(result))
 
 
 def validate_options(value):
-    if type(value) is not dict or set(value) != {"schema", "state", "values", "required_fields", "contract_version", "basis"} or value["schema"] != OPTIONS_SCHEMA:
+    if (
+        type(value) is not dict
+        or set(value)
+        != {"schema", "state", "values", "required_fields", "contract_version", "basis"}
+        or value["schema"] != OPTIONS_SCHEMA
+    ):
         raise EvidenceError("Versioned option attestation required")
     if value["state"] not in ("known", "unknown") or type(value["values"]) is not dict:
         raise EvidenceError("Unknown options attestation state")
     text(value["basis"])
     fields = value["required_fields"]
-    if type(fields) is not list or len(fields) > 200 or any(type(k) is not str for k in fields) or fields != sorted(set(fields)):
+    if (
+        type(fields) is not list
+        or len(fields) > 200
+        or any(type(k) is not str for k in fields)
+        or fields != sorted(set(fields))
+    ):
         raise EvidenceError("Explicit unique bounded option fields required")
     if value["state"] == "known":
         text(value["contract_version"])
@@ -288,27 +389,49 @@ def option_attestation(value=None):
         return decode(canonical(value))
     if value is not None and type(value) is not dict:
         raise EvidenceError("Options must be an attestation or unresolved dictionary")
-    return {"schema": OPTIONS_SCHEMA, "state": "unknown", "values": value or {},
-            "required_fields": [], "contract_version": "", "basis": "No exact option attestation supplied"}
+    return {
+        "schema": OPTIONS_SCHEMA,
+        "state": "unknown",
+        "values": value or {},
+        "required_fields": [],
+        "contract_version": "",
+        "basis": "No exact option attestation supplied",
+    }
 
 
 def engine_context(game_sha256, prepared_output_sha256, resources, options=None):
-    result = {"schema": CONTEXT_SCHEMA, "game_sha256": game_sha256,
-              "prepared_output_sha256": prepared_output_sha256,
-              "resources_identity": resources["identity"],
-              "provider_roles": [r["role"] for r in resources["roots"]],
-              "options": option_attestation(options)}
+    result = {
+        "schema": CONTEXT_SCHEMA,
+        "game_sha256": game_sha256,
+        "prepared_output_sha256": prepared_output_sha256,
+        "resources_identity": resources["identity"],
+        "provider_roles": [r["role"] for r in resources["roots"]],
+        "options": option_attestation(options),
+    }
     validate_context(result)
     return result
 
 
 def validate_context(p, *, legacy=False):
-    sha(p["game_sha256"]); sha(p["resources_identity"]); sha(p["prepared_output_sha256"])
+    sha(p["game_sha256"])
+    sha(p["resources_identity"])
+    sha(p["prepared_output_sha256"])
     if legacy:
         if not isinstance(p["options"], dict):
             raise EvidenceError("Legacy exact options object required")
         return
-    if set(p) != {"schema", "game_sha256", "resources_identity", "prepared_output_sha256", "provider_roles", "options"} or p["schema"] != CONTEXT_SCHEMA:
+    if (
+        set(p)
+        != {
+            "schema",
+            "game_sha256",
+            "resources_identity",
+            "prepared_output_sha256",
+            "provider_roles",
+            "options",
+        }
+        or p["schema"] != CONTEXT_SCHEMA
+    ):
         raise EvidenceError("Versioned exact context required")
     if p["provider_roles"] != list(PROVIDER_ROLES):
         raise EvidenceError("All three actual resource providers are required")
@@ -328,27 +451,43 @@ def context_identity(context, *, require_complete=True):
 
 def validate_payload(kind, p, *, legacy=False):
     if kind == "inventory":
-        sha(p["sha256"]); text(p["schema"])
+        sha(p["sha256"])
+        text(p["schema"])
         if not isinstance(p["scenarios"], list) or len(p["scenarios"]) > 2000:
             raise EvidenceError("Inventory bound exceeded")
         for s in p["scenarios"]:
             validate_scenario(s)
         for e in p.get("unbound_editions", []):
-            sha(e["archive_sha256"]); sha(e["edition_id"]); text(e["edition_kind"])
+            sha(e["archive_sha256"])
+            sha(e["edition_id"])
+            text(e["edition_kind"])
             for name in e["scenario_paths"]:
                 relative(name)
     elif kind == "build":
-        sha(p["inventory"]); sha(p["archive_sha256"]); sha(p["edition_id"])
-        validate_context(p["context"], legacy=legacy); sha(p["prepared_output_sha256"])
+        sha(p["inventory"])
+        sha(p["archive_sha256"])
+        sha(p["edition_id"])
+        validate_context(p["context"], legacy=legacy)
+        sha(p["prepared_output_sha256"])
         if p["context"]["prepared_output_sha256"] != p["prepared_output_sha256"]:
             raise EvidenceError("Prepared output context mismatch")
         r = p["resource_receipt"]
-        if r["identity"] != p["context"]["resources_identity"] or r["identity"] != digest({k:r[k] for k in ("schema", "algorithm", "roots")}):
+        if r["identity"] != p["context"]["resources_identity"] or r["identity"] != digest(
+            {k: r[k] for k in ("schema", "algorithm", "roots")}
+        ):
             raise EvidenceError("Resource receipt identity mismatch")
-        if type(r["schema"]) is not int or r["schema"] != RESOURCE_SCHEMA or r["algorithm"] != RESOURCE_ALGORITHM:
+        if (
+            type(r["schema"]) is not int
+            or r["schema"] != RESOURCE_SCHEMA
+            or r["algorithm"] != RESOURCE_ALGORITHM
+        ):
             raise EvidenceError("Unsupported resource receipt schema")
         roles = [x["role"] for x in r["roots"]]
-        if not roles or roles != sorted(set(roles)) or set(roles) - {"installed_assets", "custom_assets", "user_maps"}:
+        if (
+            not roles
+            or roles != sorted(set(roles))
+            or set(roles) - {"installed_assets", "custom_assets", "user_maps"}
+        ):
             raise EvidenceError("Complete unique provider resource receipt required")
         if not legacy and roles != list(PROVIDER_ROLES):
             raise EvidenceError("Omitted provider is unknown, not absent")
@@ -372,10 +511,16 @@ def validate_payload(kind, p, *, legacy=False):
                         raise EvidenceError("Exact resource sizes required")
                 elif entry["kind"] != "directory":
                     raise EvidenceError("Unknown resource provider entry")
-            if len(set(paths)) != len(paths) or entries[0]["path"] != "." or entries[0]["kind"] != "directory":
+            if (
+                len(set(paths)) != len(paths)
+                or entries[0]["path"] != "."
+                or entries[0]["kind"] != "directory"
+            ):
                 raise EvidenceError("Incomplete or duplicate provider entries")
     elif kind == "contract":
-        validate_scenario(p["scenario"]); sha(p["build"]); text(p["version"])
+        validate_scenario(p["scenario"])
+        sha(p["build"])
+        text(p["version"])
         if set(p["actions"]) != set(REQUIRED_ACTIONS) or set(p["features"]) != set(FEATURES):
             raise EvidenceError("Full versioned action/feature contract required")
         for a in p["actions"].values():
@@ -386,21 +531,35 @@ def validate_payload(kind, p, *, legacy=False):
                 text(a["protocol"][k])
         cargo = p["actions"]["cargo_transport"]["protocol"].get("required_assertions", {})
         if set(cargo) != {"goods", "car_attachment", "delivery"}:
-            raise EvidenceError("Cargo requires distinct goods, car attachment and delivery assertions")
+            raise EvidenceError(
+                "Cargo requires distinct goods, car attachment and delivery assertions"
+            )
         for assertion in cargo.values():
             text(assertion)
         for name, f in p["features"].items():
-            if not isinstance(f["actions"], list) or not f["actions"] or len(set(f["actions"])) != len(f["actions"]) or set(f["actions"]) - set(REQUIRED_ACTIONS):
+            if (
+                not isinstance(f["actions"], list)
+                or not f["actions"]
+                or len(set(f["actions"])) != len(f["actions"])
+                or set(f["actions"]) - set(REQUIRED_ACTIONS)
+            ):
                 raise EvidenceError("Feature-specific action coverage must be explicit")
             for action in f["actions"]:
-                if p["actions"][action]["protocol"].get("feature_assertions", {}).get(name) != f["expected_loaded"]:
-                    raise EvidenceError("Feature coverage needs an independently fixed loaded assertion")
+                if (
+                    p["actions"][action]["protocol"].get("feature_assertions", {}).get(name)
+                    != f["expected_loaded"]
+                ):
+                    raise EvidenceError(
+                        "Feature coverage needs an independently fixed loaded assertion"
+                    )
             if f["state"] not in ("reviewed", "unknown"):
                 raise EvidenceError("Unresolved feature expectation")
             for k in ("authored_intent", "expected_loaded", "basis"):
                 text(f[k])
     elif kind == "observation":
-        validate_scenario(p["scenario"]); sha(p["build"]); sha(p["contract"])
+        validate_scenario(p["scenario"])
+        sha(p["build"])
+        sha(p["contract"])
         validate_context(p["actual_context"], legacy=legacy)
         if p["action"] not in REQUIRED_ACTIONS or p["outcome"] not in OUTCOMES:
             raise EvidenceError("Unknown action or outcome")
@@ -410,6 +569,7 @@ def validate_payload(kind, p, *, legacy=False):
             text(p["protocol"][k])
         text(p["observed_at"])
         from datetime import datetime
+
         if datetime.fromisoformat(p["observed_at"]).tzinfo is None:
             raise EvidenceError("Observation requires a dated time zone")
         if not isinstance(p["evidence"], list) or len(p["evidence"]) > 100:
@@ -417,26 +577,38 @@ def validate_payload(kind, p, *, legacy=False):
         if p["outcome"] == "pass" and not p["evidence"]:
             raise EvidenceError("Pass needs readable evidence")
         for r in p["evidence"]:
-            relative(r["path"]); sha(r["sha256"])
+            relative(r["path"])
+            sha(r["sha256"])
             if type(r["bytes"]) is not int or not 0 <= r["bytes"] <= MAX_RECEIPT_BYTES:
                 raise EvidenceError("Evidence size bound exceeded")
     elif kind == "interpretation":
-        sha(p["observation"]); text(p["analysis_version"]); text(p["contract_version"])
+        sha(p["observation"])
+        text(p["analysis_version"])
+        text(p["contract_version"])
         if p["outcome"] not in OUTCOMES:
             raise EvidenceError("Unknown interpretation outcome")
         text(p["reason"])
     elif kind == "finding":
-        validate_scenario(p["scenario"]); sha(p["build"]); text(p["analyzer_version"]); text(p["finding"])
+        validate_scenario(p["scenario"])
+        sha(p["build"])
+        text(p["analyzer_version"])
+        text(p["finding"])
     elif kind == "provenance":
-        sha(p["observation"]); sha(p["driver_sha256"]); text(p["driver_version"])
+        sha(p["observation"])
+        sha(p["driver_sha256"])
+        text(p["driver_version"])
     elif kind == "report_target":
-        relative(p["path"]); relative(p["ledger_name"])
+        relative(p["path"])
+        relative(p["ledger_name"])
         if "/" in p["path"] or "/" in p["ledger_name"]:
             raise EvidenceError("Report ownership must be a plain ledger sibling")
     elif kind == "report_publication":
-        relative(p["path"]); sha(p["target"]); sha(p["sha256"])
+        relative(p["path"])
+        sha(p["target"])
+        sha(p["sha256"])
     elif kind == "legacy":
         from .verification import GameplayVerification
+
         GameplayVerification.from_json(p["record"])
         if p["scope"] != "unscoped_historical_limited":
             raise EvidenceError("Legacy facts must remain unscoped")
@@ -460,26 +632,55 @@ def bind_inventory(path, expected_sha256):
             if "scenarios" not in edition:
                 if edition["edition_kind"] not in ("prepared", "unclassified"):
                     raise EvidenceError("Original edition lacks exact scenario identity rows")
-                unbound.append(dict(archive_sha256=edition["archive_sha256"], edition_id=edition["edition_id"],
-                                    edition_kind=edition["edition_kind"], scenario_paths=edition["scenario_relative_paths"]))
+                unbound.append(
+                    dict(
+                        archive_sha256=edition["archive_sha256"],
+                        edition_id=edition["edition_id"],
+                        edition_kind=edition["edition_kind"],
+                        scenario_paths=edition["scenario_relative_paths"],
+                    )
+                )
                 continue
             for s in edition["scenarios"]:
-                scenarios.append(scenario_key(edition["archive_sha256"], edition["edition_id"],
-                                              s["scenario_relative_path"], s["scenario_sha256"]))
-        return EvidenceRecord.create("inventory", {"sha256": expected_sha256,
-            "schema": v["schema"], "scenarios": sorted(scenarios, key=canonical),
-            "unbound_editions": sorted(unbound, key=canonical)})
+                scenarios.append(
+                    scenario_key(
+                        edition["archive_sha256"],
+                        edition["edition_id"],
+                        s["scenario_relative_path"],
+                        s["scenario_sha256"],
+                    )
+                )
+        return EvidenceRecord.create(
+            "inventory",
+            {
+                "sha256": expected_sha256,
+                "schema": v["schema"],
+                "scenarios": sorted(scenarios, key=canonical),
+                "unbound_editions": sorted(unbound, key=canonical),
+            },
+        )
     except (KeyError, ValueError, TypeError) as exc:
         raise EvidenceError("Inventory identity rows need inspection") from exc
 
 
-def build_record(inventory, archive, edition, prepared_output_sha256, resources, game_sha256, options):
+def build_record(
+    inventory, archive, edition, prepared_output_sha256, resources, game_sha256, options
+):
     # Locations and compiler/logging provenance do not select engine input bytes.
-    r = {k:resources[k] for k in ("schema", "algorithm", "identity")}
-    r["roots"] = [{"role":x["role"], "entries":x["entries"]} for x in resources["roots"]]
-    return EvidenceRecord.create("build", {"inventory":inventory.id, "archive_sha256":archive,
-        "edition_id":edition, "prepared_output_sha256":prepared_output_sha256,
-        "resource_receipt":r, "context":engine_context(game_sha256, prepared_output_sha256, resources, options)}, (inventory.id,))
+    r = {k: resources[k] for k in ("schema", "algorithm", "identity")}
+    r["roots"] = [{"role": x["role"], "entries": x["entries"]} for x in resources["roots"]]
+    return EvidenceRecord.create(
+        "build",
+        {
+            "inventory": inventory.id,
+            "archive_sha256": archive,
+            "edition_id": edition,
+            "prepared_output_sha256": prepared_output_sha256,
+            "resource_receipt": r,
+            "context": engine_context(game_sha256, prepared_output_sha256, resources, options),
+        },
+        (inventory.id,),
+    )
 
 
 class EvidenceStore:
@@ -488,6 +689,7 @@ class EvidenceStore:
     A partial/interrupted transaction leaves an invalid suffix. Reads and later
     appends refuse it, including otherwise complete records before the suffix.
     """
+
     def __init__(self, path, *, max_bytes=MAX_STORE_BYTES, max_records=MAX_RECORDS):
         self.path = safe_path(path)
         self.root = self.path.parent
@@ -518,35 +720,56 @@ class EvidenceStore:
         for ref in v["refs"]:
             if ref not in existing:
                 raise EvidenceError("Missing referenced record")
+
         def require(name, kind):
             ref = p[name]
             if ref not in v["refs"] or ref not in existing or existing[ref].kind != kind:
                 raise EvidenceError("Missing or wrong typed record reference")
             return existing[ref].payload
+
         if record.kind == "build":
             inv = require("inventory", "inventory")
-            if not any(s["archive_sha256"] == p["archive_sha256"] and s["edition_id"] == p["edition_id"] for s in inv["scenarios"]):
+            if not any(
+                s["archive_sha256"] == p["archive_sha256"] and s["edition_id"] == p["edition_id"]
+                for s in inv["scenarios"]
+            ):
                 raise EvidenceError("Build edition absent from accepted inventory")
         if record.kind in ("contract", "observation", "finding"):
             b = require("build", "build")
             inv = existing[b["inventory"]].payload
-            if p["scenario"] not in inv["scenarios"] or (p["scenario"]["archive_sha256"],p["scenario"]["edition_id"]) != (b["archive_sha256"],b["edition_id"]):
+            if p["scenario"] not in inv["scenarios"] or (
+                p["scenario"]["archive_sha256"],
+                p["scenario"]["edition_id"],
+            ) != (b["archive_sha256"], b["edition_id"]):
                 raise EvidenceError("Scenario absent from exact inventory/build")
         if record.kind == "observation":
             c = require("contract", "contract")
-            if c["build"] != p["build"] or c["scenario"] != p["scenario"] or canonical(c["actions"][p["action"]]["protocol"]) != canonical(p["protocol"]):
+            if (
+                c["build"] != p["build"]
+                or c["scenario"] != p["scenario"]
+                or canonical(c["actions"][p["action"]]["protocol"]) != canonical(p["protocol"])
+            ):
                 raise EvidenceError("Observation differs from independently fixed protocol")
             targets = {r.payload["path"] for r in existing.values() if r.kind == "report_target"}
-            if record.value["schema"] == SCHEMA and any(e["path"] in targets or ".report-" in e["path"] for e in p["evidence"]):
+            if record.value["schema"] == SCHEMA and any(
+                e["path"] in targets or ".report-" in e["path"] for e in p["evidence"]
+            ):
                 raise EvidenceError("Mutable report snapshots cannot be raw evidence")
             if p["outcome"] != "historical_limited":
                 for r in p["evidence"]:
                     if receipt(self.root, r["path"]) != r:
                         raise EvidenceError("Referenced evidence integrity changed")
         if record.kind == "report_target":
-            if p["ledger_name"] != self.path.name or not self._is_report_path(self.root / p["path"]):
+            if p["ledger_name"] != self.path.name or not self._is_report_path(
+                self.root / p["path"]
+            ):
                 raise EvidenceError("Report target belongs to another ledger")
-            if any(p["path"] == evidence["path"] for r in existing.values() if r.kind == "observation" for evidence in r.payload["evidence"]):
+            if any(
+                p["path"] == evidence["path"]
+                for r in existing.values()
+                if r.kind == "observation"
+                for evidence in r.payload["evidence"]
+            ):
                 raise EvidenceError("Referenced evidence cannot become a report target")
         if record.kind == "report_publication":
             target = require("target", "report_target")
@@ -573,7 +796,13 @@ class EvidenceStore:
                     raise EvidenceError("Record bound exceeded")
                 v = decode(line)
                 if v.get("commit") is not None:
-                    if set(v) != {"commit", "count"} or type(v["count"]) is not int or v["count"] != len(pending) or not pending or v["commit"] != digest([r.id for r in pending]):
+                    if (
+                        set(v) != {"commit", "count"}
+                        or type(v["count"]) is not int
+                        or v["count"] != len(pending)
+                        or not pending
+                        or v["commit"] != digest([r.id for r in pending])
+                    ):
                         raise EvidenceError("Invalid transaction commit")
                     for r in pending:
                         if r.id in existing:
@@ -584,7 +813,9 @@ class EvidenceStore:
                             raise EvidenceError("Store entry bound exceeded")
                     pending = []
                 else:
-                    r = EvidenceRecord(canonical(v)); r.validate(); pending.append(r)
+                    r = EvidenceRecord(canonical(v))
+                    r.validate()
+                    pending.append(r)
             if pending:
                 raise EvidenceError("Interrupted uncommitted evidence suffix")
             return tuple(existing.values())
@@ -600,7 +831,9 @@ class EvidenceStore:
         self._validate_references(record, existing)
         if len(existing) >= self.max_records:
             raise EvidenceError("Store entry bound exceeded")
-        data = record.encoded + b"\n" + canonical({"commit":digest([record.id]), "count":1}) + b"\n"
+        data = (
+            record.encoded + b"\n" + canonical({"commit": digest([record.id]), "count": 1}) + b"\n"
+        )
         if (self.path.stat().st_size if self.path.exists() else 0) + len(data) > self.max_bytes:
             raise EvidenceError("Store byte bound exceeded")
         safe_path(self.path)
@@ -620,7 +853,7 @@ class EvidenceStore:
             raise EvidenceError("Report ownership/publication is managed only by snapshot")
         record.validate()
         with self._writer():
-            return self._append_locked(record, {r.id:r for r in self.records()})
+            return self._append_locked(record, {r.id: r for r in self.records()})
 
     def report_path(self, name):
         """A report namespace owned by this ledger, never an arbitrary sibling."""
@@ -630,51 +863,100 @@ class EvidenceStore:
 
     def _is_report_path(self, path):
         prefix = self.path.name + ".report-"
-        if path.parent != self.root or not path.name.startswith(prefix) or not path.name.endswith(".json"):
+        if (
+            path.parent != self.root
+            or not path.name.startswith(prefix)
+            or not path.name.endswith(".json")
+        ):
             return False
-        name = path.name[len(prefix):-5]
+        name = path.name[len(prefix) : -5]
         return bool(re.fullmatch(r"[a-z0-9][a-z0-9-]{0,79}", name))
 
     def snapshot(self, path, report):
         with self._writer():
             records = self.records()
-            existing = {r.id:r for r in records}
+            existing = {r.id: r for r in records}
             path = safe_path(path)
             if not self._is_report_path(path):
                 raise EvidenceError("Snapshot target must belong to this ledger's report namespace")
-            if any(path.name == e["path"] for r in records if r.kind == "observation" for e in r.payload["evidence"]):
+            if any(
+                path.name == e["path"]
+                for r in records
+                if r.kind == "observation"
+                for e in r.payload["evidence"]
+            ):
                 raise EvidenceError("Referenced immutable evidence cannot be replaced")
-            target = next((r for r in records if r.kind == "report_target" and r.payload["path"] == path.name), None)
-            prior = [r for r in records if r.kind == "report_publication" and r.payload["path"] == path.name]
+            target = next(
+                (
+                    r
+                    for r in records
+                    if r.kind == "report_target" and r.payload["path"] == path.name
+                ),
+                None,
+            )
+            prior = [
+                r
+                for r in records
+                if r.kind == "report_publication" and r.payload["path"] == path.name
+            ]
             before = None
             if path.exists():
                 if target is None or not prior:
-                    raise EvidenceError("Existing artifact has no supported report ownership/publication")
+                    raise EvidenceError(
+                        "Existing artifact has no supported report ownership/publication"
+                    )
                 before = read_bytes(path, MAX_RECORD_BYTES)
                 if hashlib.sha256(before).hexdigest() != prior[-1].payload["sha256"]:
                     raise EvidenceError("Owned report bytes differ from the committed publication")
                 document = decode(before)
-                if document.get("owner") != target.id or document.get("ledger_name") != self.path.name or document.get("schema") != SCHEMA:
+                if (
+                    document.get("owner") != target.id
+                    or document.get("ledger_name") != self.path.name
+                    or document.get("schema") != SCHEMA
+                ):
                     raise EvidenceError("Existing report ownership is invalid")
             elif prior:
                 raise EvidenceError("Published report is missing; explicit recovery required")
             if target is None:
-                target = EvidenceRecord.create("report_target", {"path":path.name, "ledger_name":self.path.name})
-            result = {"schema":SCHEMA, "owner":target.id, "ledger_name":self.path.name,
-                      "ledger_identity":digest([r.id for r in records]), "report":report}
+                target = EvidenceRecord.create(
+                    "report_target", {"path": path.name, "ledger_name": self.path.name}
+                )
+            result = {
+                "schema": SCHEMA,
+                "owner": target.id,
+                "ledger_name": self.path.name,
+                "ledger_identity": digest([r.id for r in records]),
+                "report": report,
+            }
             encoded = canonical(result) + b"\n"
             if len(encoded) > MAX_RECORD_BYTES:
                 raise EvidenceError("Snapshot bound exceeded")
             identity = hashlib.sha256(encoded).hexdigest()
-            publication = EvidenceRecord.create("report_publication", {"target":target.id, "path":path.name, "sha256":identity}, (target.id,))
+            publication = EvidenceRecord.create(
+                "report_publication",
+                {"target": target.id, "path": path.name, "sha256": identity},
+                (target.id,),
+            )
             additions = [r for r in (target, publication) if r.id not in existing]
-            append_bytes = sum(len(r.encoded) + 1 + len(canonical({"commit":digest([r.id]), "count":1})) + 1 for r in additions)
-            if len(existing) + len(additions) > self.max_records or (self.path.stat().st_size if self.path.exists() else 0) + append_bytes > self.max_bytes:
+            append_bytes = sum(
+                len(r.encoded) + 1 + len(canonical({"commit": digest([r.id]), "count": 1})) + 1
+                for r in additions
+            )
+            if (
+                len(existing) + len(additions) > self.max_records
+                or (self.path.stat().st_size if self.path.exists() else 0) + append_bytes
+                > self.max_bytes
+            ):
                 raise EvidenceError("Snapshot publication would exceed store bounds")
             self._append_locked(target, existing)
             temporary = ".snapshot-" + uuid.uuid4().hex
             with parent_handle(path) as parent_fd:
-                fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600, dir_fd=parent_fd)
+                fd = os.open(
+                    temporary,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                    0o600,
+                    dir_fd=parent_fd,
+                )
                 try:
                     with os.fdopen(fd, "wb") as stream:
                         stream.write(encoded)
@@ -686,7 +968,13 @@ class EvidenceStore:
                     if before is None:
                         if path.exists():
                             raise EvidenceError("Artifact appeared at reserved report target")
-                        os.link(temporary, path.name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd, follow_symlinks=False)
+                        os.link(
+                            temporary,
+                            path.name,
+                            src_dir_fd=parent_fd,
+                            dst_dir_fd=parent_fd,
+                            follow_symlinks=False,
+                        )
                         os.unlink(temporary, dir_fd=parent_fd)
                     else:
                         if read_bytes(path, MAX_RECORD_BYTES) != before:

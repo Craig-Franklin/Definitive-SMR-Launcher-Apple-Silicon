@@ -1,4 +1,5 @@
 """A completed remote fetch must preserve the tab chosen while it ran."""
+
 from pathlib import Path
 from unittest.mock import Mock, patch
 from types import SimpleNamespace
@@ -15,12 +16,23 @@ class SelectionTree:
         self.items = {}
         self.selected = ()
 
-    def winfo_exists(self): return True
-    def get_children(self): return tuple(self.items)
-    def delete(self, key): self.items.pop(key)
-    def insert(self, parent, position, iid, values): self.items[iid] = values
-    def selection_set(self, keys): self.selected = tuple(keys)
-    def selection(self): return self.selected
+    def winfo_exists(self):
+        return True
+
+    def get_children(self):
+        return tuple(self.items)
+
+    def delete(self, key):
+        self.items.pop(key)
+
+    def insert(self, parent, position, iid, values):
+        self.items[iid] = values
+
+    def selection_set(self, keys):
+        self.selected = tuple(keys)
+
+    def selection(self):
+        return self.selected
 
 
 class ScheduledRoot:
@@ -38,7 +50,8 @@ class ScheduledRoot:
     def after_cancel(self, key):
         self.cancelled.append(key)
 
-    def destroy(self): pass
+    def destroy(self):
+        pass
 
 
 class NavigationTests(unittest.TestCase):
@@ -78,13 +91,18 @@ class NavigationTests(unittest.TestCase):
         window.grid_frame = object()
         window._render_gallery = Mock()
         window._clear_content = Mock()
-        window.sidebar = Mock(); window.sidebar_separator = Mock()
-        window.search_entry = Mock(); window.search_label = Mock()
-        window.content = Mock(); window.nav_buttons = {}
-        window.steam_label = Mock(); window._activity_view = Mock()
+        window.sidebar = Mock()
+        window.sidebar_separator = Mock()
+        window.search_entry = Mock()
+        window.search_label = Mock()
+        window.content = Mock()
+        window.nav_buttons = {}
+        window.steam_label = Mock()
+        window._activity_view = Mock()
         window._localize_widgets = Mock()
         window.pending_update = None
-        window.busy = False; window.bulk_active = False
+        window.busy = False
+        window.bulk_active = False
         window._stop_speech = Mock()
 
         window._search_changed()
@@ -107,7 +125,9 @@ class NavigationTests(unittest.TestCase):
 
     def test_play_reports_verification_error_and_does_not_launch(self):
         window = LauncherWindow.__new__(LauncherWindow)
-        window.app = Mock(); window.root = Mock(); window.status = Mock()
+        window.app = Mock()
+        window.root = Mock()
+        window.status = Mock()
         record = SimpleNamespace(profile_id="map-example")
         window._records = Mock(return_value=(record,))
         window.app.catalogue.return_value = (record,)
@@ -126,7 +146,9 @@ class NavigationTests(unittest.TestCase):
 
     def test_map_details_survives_resource_inspection_failure_without_second_read(self):
         window = LauncherWindow.__new__(LauncherWindow)
-        window.root = Mock(); window.status = Mock(); window.secondary = "grey"
+        window.root = Mock()
+        window.status = Mock()
+        window.secondary = "grey"
         window.app = Mock()
         window.app.verification_for.side_effect = RuntimeError("Resource changed during inspection")
         window.app.compatibility_recipes.return_value = ()
@@ -135,24 +157,48 @@ class NavigationTests(unittest.TestCase):
         window._localize_widgets = Mock()
         window._attach_activity = Mock()
         window._submit = Mock()
-        window._metadata = Mock(return_value=SimpleNamespace(
-            name="Example", author="", modified_by="", version="", created="", updated="",
-            map_type="", source_urls=(), description="Briefing", raw_text=""))
-        record = SimpleNamespace(name="Example", source_label="Local", archive_modified="",
-            archive_filename="Example.7z", source_url="", archive_sha256="a" * 64,
-            variant_id="b" * 64)
+        window._metadata = Mock(
+            return_value=SimpleNamespace(
+                name="Example",
+                author="",
+                modified_by="",
+                version="",
+                created="",
+                updated="",
+                map_type="",
+                source_urls=(),
+                description="Briefing",
+                raw_text="",
+            )
+        )
+        record = SimpleNamespace(
+            name="Example",
+            source_label="Local",
+            archive_modified="",
+            archive_filename="Example.7z",
+            source_url="",
+            archive_sha256="a" * 64,
+            variant_id="b" * 64,
+        )
         window.app.library = Path("/synthetic/library")
         window.app.map_metadata.return_value = window._metadata.return_value
-        with patch("smr_launcher.gui.tk") as tk, patch("smr_launcher.gui.ttk") as ttk, \
-             patch("smr_launcher.gui.HistoryPanel"), \
-             patch("smr_launcher.gui.render_linked_text", side_effect=lambda w, text: w.insert("1.0", text)), \
-             patch("smr_launcher.gui._checks_text", return_value="Static checks"):
+        with (
+            patch("smr_launcher.gui.tk") as tk,
+            patch("smr_launcher.gui.ttk") as ttk,
+            patch("smr_launcher.gui.HistoryPanel"),
+            patch(
+                "smr_launcher.gui.render_linked_text",
+                side_effect=lambda w, text: w.insert("1.0", text),
+            ),
+            patch("smr_launcher.gui._checks_text", return_value="Static checks"),
+        ):
             window._map_details(record)
             _label, prepare, finished = window._submit.call_args.args
             finished(prepare())
             window.app.verification_for.assert_called_once_with(record)
-            self.assertTrue(any(c.kwargs.get("text") == "Needs inspection"
-                                for c in ttk.Label.call_args_list))
+            self.assertTrue(
+                any(c.kwargs.get("text") == "Needs inspection" for c in ttk.Label.call_args_list)
+            )
             contents = [c.args[1] for c in tk.Text.return_value.insert.call_args_list]
             self.assertTrue(any("Resource changed during inspection" in text for text in contents))
             self.assertFalse(any("No local gameplay result recorded" in text for text in contents))
@@ -169,7 +215,8 @@ class NavigationTests(unittest.TestCase):
         window.collection_detail = Mock()
         window.download_states = {}
         window.imported_names = set()
-        window.search = Mock(); window.search.get.return_value = ""
+        window.search = Mock()
+        window.search.get.return_value = ""
         window._records = Mock(return_value=())
         window._controls = Mock()
         window._collection_rows()
@@ -195,8 +242,11 @@ class NavigationTests(unittest.TestCase):
 
     def test_get_started_uses_guarded_setup_and_only_navigates_on_success(self):
         window = LauncherWindow.__new__(LauncherWindow)
-        window.app = Mock(); window.busy = False
-        window._submit = Mock(); window._show = Mock(); window.status = Mock()
+        window.app = Mock()
+        window.busy = False
+        window._submit = Mock()
+        window._show = Mock()
+        window.status = Mock()
         window.setup()
         _, operation, finished = window._submit.call_args.args
         self.assertEqual(operation, window.app.setup)

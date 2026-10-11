@@ -4,6 +4,7 @@ Directory mtimes, absolute paths and inode numbers are deliberately excluded
 from preparation identity. The existing, stricter runtime resource fingerprint
 is unchanged. These hashes do not establish effective VFS resource selection.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -21,22 +22,30 @@ FILE_CONTEXT_ALGORITHM = "sha256-resource-files-content-mtime-ns-v1"
 
 
 def _digest(value: object) -> str:
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
-                                     ensure_ascii=True).encode("ascii")).hexdigest()
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+    ).hexdigest()
 
 
 def file_context(roots: dict, *, required_roles=(), hash_cache=None) -> dict:
     """Safely read resource files and return a location-independent binding."""
     snapshot = fingerprint_resources(roots, required_roles=required_roles, hash_cache=hash_cache)
-    roles = {root["role"]: [entry for entry in root["entries"] if entry["kind"] == "file"]
-             for root in snapshot["roots"]}
+    roles = {
+        root["role"]: [entry for entry in root["entries"] if entry["kind"] == "file"]
+        for root in snapshot["roots"]
+    }
     return _context(roles)
 
 
 def _context(roles: dict) -> dict:
-    payload = {"schema": 1, "algorithm": FILE_CONTEXT_ALGORITHM,
-               "roots": [{"role": role, "files": sorted(roles[role], key=lambda entry: entry["path"])}
-                         for role in sorted(roles)]}
+    payload = {
+        "schema": 1,
+        "algorithm": FILE_CONTEXT_ALGORITHM,
+        "roots": [
+            {"role": role, "files": sorted(roles[role], key=lambda entry: entry["path"])}
+            for role in sorted(roles)
+        ],
+    }
     return {**payload, "identity": _digest(payload)}
 
 
@@ -47,8 +56,10 @@ def expected_patched_context(source: dict, rules: tuple) -> dict:
     and lengths change according to the exact byte patches; no file may appear,
     disappear or change metadata incidentally during copying/preparation.
     """
-    roles = {root["role"]: {file["path"]: dict(file) for file in root["files"]}
-             for root in source["roots"]}
+    roles = {
+        root["role"]: {file["path"]: dict(file) for file in root["files"]}
+        for root in source["roots"]
+    }
     seen = set()
     for rule in rules:
         for patch in rule.patches:
@@ -75,9 +86,16 @@ def expected_patched_context(source: dict, rules: tuple) -> dict:
                 if files[relative]["sha256"] != addition.after_sha256:
                     raise RuleError("Recipe context addition target exists")
                 continue
-            files[relative] = {"path": relative, "kind": "file", "size": len(addition.data),
-                               "mtime_ns": addition.mtime_ns, "sha256": addition.after_sha256}
-    return _context({role: [files[path] for path in sorted(files)] for role, files in roles.items()})
+            files[relative] = {
+                "path": relative,
+                "kind": "file",
+                "size": len(addition.data),
+                "mtime_ns": addition.mtime_ns,
+                "sha256": addition.after_sha256,
+            }
+    return _context(
+        {role: [files[path] for path in sorted(files)] for role, files in roles.items()}
+    )
 
 
 def map_file_context(root: Path, *, hash_cache=None) -> dict:
@@ -123,15 +141,27 @@ class RecipePreparationBinding:
     stock_files_sha256: str
 
     def __post_init__(self):
-        if not isinstance(self.recipe_id, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,119}", self.recipe_id):
+        if not isinstance(self.recipe_id, str) or not re.fullmatch(
+            r"[a-z][a-z0-9-]{0,119}", self.recipe_id
+        ):
             raise RuleError("Recipe binding needs a stable recipe ID")
-        for value in (self.recipe_sha256, self.compiler_sha256,
-                      self.source_files_sha256, self.stock_files_sha256):
+        for value in (
+            self.recipe_sha256,
+            self.compiler_sha256,
+            self.source_files_sha256,
+            self.stock_files_sha256,
+        ):
             if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
                 raise RuleError("Recipe context binding needs exact SHA-256 identities")
 
     def as_json(self) -> dict:
-        return dict(schema=1, recipe_id=self.recipe_id, recipe_sha256=self.recipe_sha256,
-                    compiler_sha256=self.compiler_sha256, source_files_sha256=self.source_files_sha256,
-                    stock_files_sha256=self.stock_files_sha256, file_context_algorithm=FILE_CONTEXT_ALGORITHM,
-                    metadata_policy=PRESERVE_RESOURCE_MTIMES)
+        return dict(
+            schema=1,
+            recipe_id=self.recipe_id,
+            recipe_sha256=self.recipe_sha256,
+            compiler_sha256=self.compiler_sha256,
+            source_files_sha256=self.source_files_sha256,
+            stock_files_sha256=self.stock_files_sha256,
+            file_context_algorithm=FILE_CONTEXT_ALGORITHM,
+            metadata_policy=PRESERVE_RESOURCE_MTIMES,
+        )

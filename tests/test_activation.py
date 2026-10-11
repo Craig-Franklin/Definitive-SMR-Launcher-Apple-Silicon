@@ -1,4 +1,5 @@
 """Synthetic filesystem checks; no game, downloaded maps, or saves are used."""
+
 from pathlib import Path
 import hashlib
 import stat
@@ -7,7 +8,13 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from smr_launcher.activation import ActivationError, FilesystemProfiles, ORIGINAL, RecoveryError, _macos_exchange
+from smr_launcher.activation import (
+    ActivationError,
+    FilesystemProfiles,
+    ORIGINAL,
+    RecoveryError,
+    _macos_exchange,
+)
 
 
 class ActivationTests(unittest.TestCase):
@@ -50,7 +57,9 @@ class ActivationTests(unittest.TestCase):
         original, a = self.prepared("A")
         _, b = self.prepared("B")
         stored_a = self.store / "profiles" / a / "CustomAssets/shared.xml"
-        self.assertNotEqual(original.joinpath("CustomAssets/shared.xml").stat().st_ino, stored_a.stat().st_ino)
+        self.assertNotEqual(
+            original.joinpath("CustomAssets/shared.xml").stat().st_ino, stored_a.stat().st_ino
+        )
         self.manager.switch(a)
         (self.live / "Saves/autosave.sav").write_bytes(b"A future autosave")
         (self.live / "Saves/stray.txt").write_bytes(b"A unrelated future file")
@@ -82,15 +91,21 @@ class ActivationTests(unittest.TestCase):
                     (live / "Saves/original.sav").write_bytes(b"O")
                     (prepared / "CustomAssets/a.xml").write_bytes(b"A")
                     (prepared / "Saves/a.sav").write_bytes(b"A save")
+
                     def fault(event):
                         if event == stop_at:
                             raise RuntimeError("simulated interruption")
-                    manager = FilesystemProfiles(live, store, ("CustomAssets", "UserMaps"), lambda: False, fault_hook=fault)
+
+                    manager = FilesystemProfiles(
+                        live, store, ("CustomAssets", "UserMaps"), lambda: False, fault_hook=fault
+                    )
                     manager.enroll_original()
                     profile = manager.register_variant(hashlib.sha256(b"A").hexdigest(), prepared)
                     with self.assertRaisesRegex(RuntimeError, "simulated interruption"):
                         manager.switch(profile)
-                    resumed = FilesystemProfiles(live, store, ("CustomAssets", "UserMaps"), lambda: False)
+                    resumed = FilesystemProfiles(
+                        live, store, ("CustomAssets", "UserMaps"), lambda: False
+                    )
                     expected = ORIGINAL if stop_at == "after_journal" else profile
                     self.assertEqual(resumed.recover(), expected)
                     self.assertEqual(resumed.recover(), expected)
@@ -113,9 +128,11 @@ class ActivationTests(unittest.TestCase):
 
     def test_game_started_during_exchange_defers_commit_until_recovery(self):
         _, profile = self.prepared("A")
+
         def start_game(event):
             if event == "after_exchange":
                 self.running = True
+
         manager = self.make_manager(fault=start_game)
         with self.assertRaises(ActivationError):
             manager.switch(profile)
@@ -131,9 +148,11 @@ class ActivationTests(unittest.TestCase):
     def test_coordinated_play_launches_after_committing_target(self):
         _, profile = self.prepared("A")
         observed = []
+
         def launch():
             observed.append((self.live / "CustomAssets/shared.xml").read_bytes())
             self.running = True
+
         self.assertEqual(self.manager.play(profile, launch, startup_seconds=1), profile)
         self.assertEqual(observed, [b"A asset"])
         self.running = False
@@ -142,10 +161,14 @@ class ActivationTests(unittest.TestCase):
 
     def test_external_start_at_exchange_keeps_journal_for_recovery(self):
         _, profile = self.prepared("A")
+
         def race(first, second):
             self.running = True
             _macos_exchange(first, second)
-        manager = FilesystemProfiles(self.live, self.store, ("CustomAssets", "UserMaps"), lambda: self.running, exchange=race)
+
+        manager = FilesystemProfiles(
+            self.live, self.store, ("CustomAssets", "UserMaps"), lambda: self.running, exchange=race
+        )
         with self.assertRaises(ActivationError):
             manager.switch(profile)
         self.assertTrue((self.store / "journal.json").exists())
@@ -205,10 +228,14 @@ class ActivationTests(unittest.TestCase):
         (stored / "Saves/new.sav").write_bytes(b"new")
         self.assertEqual((stored / "Saves/new.sav").read_bytes(), b"new")
         self.assertEqual(stat.S_IMODE((source / "Saves").stat().st_mode), 0o555)
-        self.assertNotEqual((source / "Saves/old.sav").stat().st_ino, (stored / "Saves/old.sav").stat().st_ino)
+        self.assertNotEqual(
+            (source / "Saves/old.sav").stat().st_ino, (stored / "Saves/old.sav").stat().st_ino
+        )
 
     def test_another_store_cannot_enroll_or_switch_the_same_live_root(self):
-        rival = FilesystemProfiles(self.live, self.root / "rival-store", ("CustomAssets", "UserMaps"), lambda: False)
+        rival = FilesystemProfiles(
+            self.live, self.root / "rival-store", ("CustomAssets", "UserMaps"), lambda: False
+        )
         with self.assertRaises(RecoveryError):
             rival.enroll_original()
         _, profile = self.prepared("A")
@@ -220,7 +247,9 @@ class ActivationTests(unittest.TestCase):
         alias = self.live.with_name("LiVe")
         if not alias.samefile(self.live):
             self.skipTest("Test volume is case sensitive")
-        rival = FilesystemProfiles(alias, self.root / "rival-store", ("CustomAssets", "UserMaps"), lambda: False)
+        rival = FilesystemProfiles(
+            alias, self.root / "rival-store", ("CustomAssets", "UserMaps"), lambda: False
+        )
         self.assertEqual(rival.live, self.manager.live)
         self.assertEqual(rival.lock_file, self.manager.lock_file)
         with self.assertRaises(RecoveryError):
@@ -230,7 +259,9 @@ class ActivationTests(unittest.TestCase):
         fresh = self.root / "fresh-live"
         for name in ("CustomAssets", "UserMaps", "Saves"):
             (fresh / name).mkdir(parents=True, exist_ok=True)
-        denied = FilesystemProfiles(fresh, self.root / "fresh-store", ("CustomAssets", "UserMaps"), lambda: True)
+        denied = FilesystemProfiles(
+            fresh, self.root / "fresh-store", ("CustomAssets", "UserMaps"), lambda: True
+        )
         with self.assertRaises(ActivationError):
             denied.enroll_original()
         self.assertFalse(denied.binding_file.exists())
@@ -247,32 +278,39 @@ class ActivationTests(unittest.TestCase):
 
     def test_optional_observed_adapter_retains_full_save_round_trip(self):
         from smr_launcher.live_run_authority import ObservedIO
+
         events = []
+
         class Adapter(ObservedIO):
             def call(self, name, function, *args, **kwargs):
                 result = super().call(name, function, *args, **kwargs)
                 events.append(name)
                 return result
+
         self.manager.observed_io = Adapter()
         _, profile = self.prepared("observed")
         self.manager.switch(profile)
         (self.live / "Saves/future.sav").write_bytes(b"observed future save")
         self.manager.switch(ORIGINAL)
         self.assertEqual((self.live / "Saves/original.sav").read_bytes(), b"original save")
-        self.assertEqual((self.manager._profile_path(profile) / "Saves/future.sav").read_bytes(),
-                         b"observed future save")
+        self.assertEqual(
+            (self.manager._profile_path(profile) / "Saves/future.sav").read_bytes(),
+            b"observed future save",
+        )
         self.assertIn("activation.lock_close", events)
         self.assertIn("activation.lock_exit", events)
         self.assertIn("activation.exchange_syscall", events)
 
     def test_observed_close_error_is_not_a_successful_context_return(self):
         from smr_launcher.live_run_authority import ObservedIO
+
         class Adapter(ObservedIO):
             def call(self, name, function, *args, **kwargs):
                 result = super().call(name, function, *args, **kwargs)
                 if name == "activation.lock_close":
                     raise OSError("successful close effect but return lost")
                 return result
+
         self.manager.observed_io = Adapter()
         with self.assertRaisesRegex(OSError, "return lost"):
             self.manager.active_profile()
@@ -289,27 +327,43 @@ class ObservedRecoveryRaceTests(unittest.TestCase):
         from smr_launcher import live_run_authority as live
         import time
         from unittest.mock import patch
+
         with tempfile.TemporaryDirectory() as temp:
-            root=Path(temp).resolve();source=root/'live';source.mkdir()
-            for name in ('CustomAssets','UserMaps','Saves'):(source/name).mkdir()
-            (source/'Saves/future.sav').write_bytes(b'original and future save')
-            profiles=activation.FilesystemProfiles(source,root/'store',('CustomAssets','UserMaps'),game_running=lambda:False)
+            root = Path(temp).resolve()
+            source = root / "live"
+            source.mkdir()
+            for name in ("CustomAssets", "UserMaps", "Saves"):
+                (source / name).mkdir()
+            (source / "Saves/future.sav").write_bytes(b"original and future save")
+            profiles = activation.FilesystemProfiles(
+                source, root / "store", ("CustomAssets", "UserMaps"), game_running=lambda: False
+            )
             profiles.enroll_original()
-            pin=root/'pin';pin.write_bytes(b'fixture input')
-            supervisor=live.FiniteSupervisor(time.monotonic()+3)
-            owner=live._new_owner([pin],[{'input_identity':'fixture'}],supervisor,lambda:True)
-            before=live.SettingsPreimage.capture(source)
-            history=b'not even parseable historical activation bytes'
+            pin = root / "pin"
+            pin.write_bytes(b"fixture input")
+            supervisor = live.FiniteSupervisor(time.monotonic() + 3)
+            owner = live._new_owner(
+                [pin], [{"input_identity": "fixture"}], supervisor, lambda: True
+            )
+            before = live.SettingsPreimage.capture(source)
+            history = b"not even parseable historical activation bytes"
             profiles.journal.write_bytes(history)
-            profiles.observed_io=live.ObservedIO()
-            cookie=live._observing.set(owner)
+            profiles.observed_io = live.ObservedIO()
+            cookie = live._observing.set(owner)
             try:
                 with profiles._locked():
-                    with patch.object(activation,'_read_json',side_effect=AssertionError('zero history/state reads')) as reader:
-                        with self.assertRaises(activation.RecoveryError):profiles._recover_locked()
-                        self.assertEqual(reader.call_count,0)
+                    with patch.object(
+                        activation,
+                        "_read_json",
+                        side_effect=AssertionError("zero history/state reads"),
+                    ) as reader:
+                        with self.assertRaises(activation.RecoveryError):
+                            profiles._recover_locked()
+                        self.assertEqual(reader.call_count, 0)
                 self.assertTrue(owner._revoked)
-                self.assertEqual(profiles.journal.read_bytes(),history)
-                self.assertEqual(live.SettingsPreimage.capture(source),before)
+                self.assertEqual(profiles.journal.read_bytes(), history)
+                self.assertEqual(live.SettingsPreimage.capture(source), before)
             finally:
-                live._observing.reset(cookie);supervisor.close();owner.close()
+                live._observing.reset(cookie)
+                supervisor.close()
+                owner.close()

@@ -1,4 +1,5 @@
 """Independent, bounded package extraction into a caller-owned private location."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -124,7 +125,12 @@ def extract_package(
     try:
         _check(lib.archive_read_support_filter_all(archive), lib, archive, "Enable archive filters")
         _check(lib.archive_read_support_format_all(archive), lib, archive, "Enable archive formats")
-        _check(lib.archive_read_open_filename(archive, os.fsencode(source), 10240), lib, archive, "Open package")
+        _check(
+            lib.archive_read_open_filename(archive, os.fsencode(source), 10240),
+            lib,
+            archive,
+            "Open package",
+        )
         while True:
             header = ctypes.c_void_p()
             result = lib.archive_read_next_header(archive, ctypes.byref(header))
@@ -136,7 +142,11 @@ def extract_package(
                 raise PackageError("Package entry lost its name")
             name = raw.decode("utf-8", "strict")
             kind = lib.archive_entry_filetype(header)
-            if inspection.wrapper and name.rstrip("/") == inspection.wrapper and kind == stat.S_IFDIR:
+            if (
+                inspection.wrapper
+                and name.rstrip("/") == inspection.wrapper
+                and kind == stat.S_IFDIR
+            ):
                 _check(lib.archive_read_data_skip(archive), lib, archive, "Skip package wrapper")
                 continue
             if position >= len(entries) or name != entries[position].archive_path:

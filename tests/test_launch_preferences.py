@@ -1,4 +1,5 @@
 """Synthetic Settings.ini preparation checks for custom-map launch."""
+
 from pathlib import Path
 import sys
 import unittest
@@ -8,11 +9,13 @@ from smr_launcher.launch_preferences import LaunchPreferencesError, prepare_sett
 
 
 SCENARIO = "UserMaps/Example/RRT_Scenario_User_Example.xml"
-BASE = ("[User Settings]\n"
-        "PlayerName = Craig\n"
-        "LastScenarioName = RRT_Scenario_User_Old.xml\n"
-        "SkipOpeningMovies = 0\n"
-        "Quickstart = 1\n")
+BASE = (
+    "[User Settings]\n"
+    "PlayerName = Craig\n"
+    "LastScenarioName = RRT_Scenario_User_Old.xml\n"
+    "SkipOpeningMovies = 0\n"
+    "Quickstart = 1\n"
+)
 
 
 def encoded(text, kind):
@@ -41,8 +44,12 @@ def decoded(data, kind):
 
 class LaunchPreferencesTests(unittest.TestCase):
     def test_supported_encodings_and_boms_are_preserved(self):
-        boms = {"utf-8": b"", "utf-8-bom": b"\xef\xbb\xbf",
-                "utf-16-le": b"\xff\xfe", "utf-16-be": b"\xfe\xff"}
+        boms = {
+            "utf-8": b"",
+            "utf-8-bom": b"\xef\xbb\xbf",
+            "utf-16-le": b"\xff\xfe",
+            "utf-16-be": b"\xfe\xff",
+        }
         for kind, bom in boms.items():
             with self.subTest(encoding=kind):
                 source = encoded(BASE, kind)
@@ -55,14 +62,16 @@ class LaunchPreferencesTests(unittest.TestCase):
                 self.assertIn("PlayerName = Craig", text)
 
     def test_crlf_and_unrelated_settings_are_preserved(self):
-        text = ("; keep this comment\r\n"
-                "[User Settings]\r\n"
-                "PlayerName = Craig\r\n"
-                "LastScenarioName = RRT_Scenario_User_Old.xml\r\n"
-                "SkipOpeningMovies = 0\r\n"
-                "Quickstart = 1\r\n"
-                "[Graphics]\r\n"
-                "Quality = High\r\n")
+        text = (
+            "; keep this comment\r\n"
+            "[User Settings]\r\n"
+            "PlayerName = Craig\r\n"
+            "LastScenarioName = RRT_Scenario_User_Old.xml\r\n"
+            "SkipOpeningMovies = 0\r\n"
+            "Quickstart = 1\r\n"
+            "[Graphics]\r\n"
+            "Quality = High\r\n"
+        )
 
         result = prepare_settings(text.encode("utf-8"), (SCENARIO,)).decode("utf-8")
 
@@ -79,8 +88,10 @@ class LaunchPreferencesTests(unittest.TestCase):
         self.assertEqual(twice, once)
 
     def test_existing_scenario_is_retained_for_multi_scenario_package(self):
-        scenarios = ("UserMaps/Example/A/RRT_Scenario_User_Alpha.xml",
-                     "UserMaps/Example/B/RRT_Scenario_User_Beta.xml")
+        scenarios = (
+            "UserMaps/Example/A/RRT_Scenario_User_Alpha.xml",
+            "UserMaps/Example/B/RRT_Scenario_User_Beta.xml",
+        )
         text = BASE.replace("RRT_Scenario_User_Old.xml", "RRT_Scenario_User_BETA.XML")
 
         result = decoded(prepare_settings(text.encode("utf-8"), scenarios), "utf-8")
@@ -88,8 +99,10 @@ class LaunchPreferencesTests(unittest.TestCase):
         self.assertIn("LastScenarioName = rrt_scenario_user_beta.xml", result)
 
     def test_duplicate_basenames_are_deduplicated_for_basename_selector(self):
-        scenarios = ("UserMaps/Example/RRT_Scenario_User_A.xml",
-                     "CustomAssets/Overlay/RRT_Scenario_User_A.XML")
+        scenarios = (
+            "UserMaps/Example/RRT_Scenario_User_A.xml",
+            "CustomAssets/Overlay/RRT_Scenario_User_A.XML",
+        )
         text = BASE.replace("RRT_Scenario_User_Old.xml", "RRT_Scenario_User_A.xml")
 
         result = decoded(prepare_settings(text.encode("utf-8"), scenarios), "utf-8")

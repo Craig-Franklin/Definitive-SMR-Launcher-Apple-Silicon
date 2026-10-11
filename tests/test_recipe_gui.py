@@ -18,17 +18,32 @@ class RecipeDiscoveryTests(unittest.TestCase):
     def setUp(self):
         self.recipe_id = "synthetic-recipe-v1"
         self.recipe = recipe_service._IdentityRecipe(
-            self.recipe_id, "a" * 64, "b" * 64, "c" * 64,
-            "UserMaps/Synthetic/RRT_Scenario.xml", "d" * 64,
-            "UserMaps/Synthetic/RRT_Industries.xml", "e" * 64, "f" * 64,
-            "1" * 64, "2" * 64, (("Old Mill", 0, "Built-in Factory"),),
+            self.recipe_id,
+            "a" * 64,
+            "b" * 64,
+            "c" * 64,
+            "UserMaps/Synthetic/RRT_Scenario.xml",
+            "d" * 64,
+            "UserMaps/Synthetic/RRT_Industries.xml",
+            "e" * 64,
+            "f" * 64,
+            "1" * 64,
+            "2" * 64,
+            (("Old Mill", 0, "Built-in Factory"),),
         )
-        payload = dict(schema=1, recipe="original", archive=self.recipe.archive_sha256,
-                       game=self.recipe.game_sha256, assets=self.recipe.assets_sha256)
-        self.original_variant = sha(json.dumps(payload, sort_keys=True,
-                                               separators=(",", ":")).encode())
+        payload = dict(
+            schema=1,
+            recipe="original",
+            archive=self.recipe.archive_sha256,
+            game=self.recipe.game_sha256,
+            assets=self.recipe.assets_sha256,
+        )
+        self.original_variant = sha(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        )
         self.choice = recipe_service.RecipeChoice(
-            self.recipe_id, "Synthetic compatibility v1",
+            self.recipe_id,
+            "Synthetic compatibility v1",
             "Old Mill becomes Built-in Factory. Experimental; later gameplay still needs testing.",
         )
         self.record = SimpleNamespace(
@@ -46,17 +61,22 @@ class RecipeDiscoveryTests(unittest.TestCase):
         self.app.catalogue.return_value = (self.record,) if catalogue is None else catalogue
         if game is not None:
             self.app.installation.executable_sha256 = game
-        with patch.object(recipe_service, "_RECIPES", {self.recipe_id: self.recipe}), \
-             patch.object(recipe_service, "_CHOICES", {self.recipe_id: self.choice}):
+        with (
+            patch.object(recipe_service, "_RECIPES", {self.recipe_id: self.recipe}),
+            patch.object(recipe_service, "_CHOICES", {self.recipe_id: self.choice}),
+        ):
             return LauncherApplication.compatibility_recipes(
-                self.app, self.record if record is None else record)
+                self.app, self.record if record is None else record
+            )
 
     def test_only_current_exact_original_matching_archive_game_and_scenario_is_offered(self):
         self.assertEqual(self.choices(), (self.choice,))
 
         derivative = SimpleNamespace(**{**vars(self.record), "variant_id": "9" * 64})
         wrong_game = SimpleNamespace(**{**vars(self.record), "game_executable_sha256": "8" * 64})
-        wrong_scenario = SimpleNamespace(**{**vars(self.record), "scenarios": ("UserMaps/Elsewhere.xml",)})
+        wrong_scenario = SimpleNamespace(
+            **{**vars(self.record), "scenarios": ("UserMaps/Elsewhere.xml",)}
+        )
         stale = SimpleNamespace(**{**vars(self.record), "stale_generation": 1})
         for label, record, catalogue, game in (
             ("derivative", derivative, (derivative,), self.recipe.game_sha256),
@@ -72,8 +92,12 @@ class RecipeDiscoveryTests(unittest.TestCase):
 class RecipeGuiTests(unittest.TestCase):
     def test_chooser_starts_on_first_title_and_create_uses_selected_recipe(self):
         choices = (
-            recipe_service.RecipeChoice("recipe-one", "First reviewed edition", "First alias details."),
-            recipe_service.RecipeChoice("recipe-two", "Second reviewed edition", "Second alias details."),
+            recipe_service.RecipeChoice(
+                "recipe-one", "First reviewed edition", "First alias details."
+            ),
+            recipe_service.RecipeChoice(
+                "recipe-two", "Second reviewed edition", "Second alias details."
+            ),
         )
         window = LauncherWindow.__new__(LauncherWindow)
         window.app = Mock()
@@ -87,8 +111,11 @@ class RecipeGuiTests(unittest.TestCase):
                 chooser_index[0] = index
             return chooser_index[0]
 
-        with patch("smr_launcher.gui.ttk") as ttk, patch("smr_launcher.gui.tk") as tk, \
-             patch("smr_launcher.gui.tr", side_effect=lambda value: value):
+        with (
+            patch("smr_launcher.gui.ttk") as ttk,
+            patch("smr_launcher.gui.tk") as tk,
+            patch("smr_launcher.gui.tr", side_effect=lambda value: value),
+        ):
             chooser = ttk.Combobox.return_value
             chooser.current.side_effect = current
             window._compatibility_tab(Mock(), object(), Mock())
@@ -108,19 +135,22 @@ class RecipeGuiTests(unittest.TestCase):
             self.assertIn("Second alias details.", insert.call_args.args[1])
 
             create_button = next(
-                call for call in ttk.Button.call_args_list
+                call
+                for call in ttk.Button.call_args_list
                 if call.kwargs.get("text") == "Create Compatibility Edition"
             )
             create_button.kwargs["command"]()
 
         _label, operation, _finished = window._submit.call_args.args
         operation()
-        window.app.create_recipe_edition.assert_called_once_with(window.app.compatibility_recipes.call_args.args[0],
-                                                                 "recipe-two")
+        window.app.create_recipe_edition.assert_called_once_with(
+            window.app.compatibility_recipes.call_args.args[0], "recipe-two"
+        )
 
     def test_compatibility_tab_discloses_aliases_and_remaining_test_limits(self):
         choice = recipe_service.RecipeChoice(
-            "synthetic-recipe-v1", "Synthetic compatibility v1",
+            "synthetic-recipe-v1",
+            "Synthetic compatibility v1",
             "Old Mill becomes Built-in Factory. Models and production stay in place. "
             "Trains and extended play still need testing. This edition remains experimental.",
         )
@@ -128,8 +158,11 @@ class RecipeGuiTests(unittest.TestCase):
         window.app = Mock()
         window.app.compatibility_recipes.return_value = (choice,)
         record, details = object(), Mock()
-        with patch("smr_launcher.gui.ttk") as ttk, patch("smr_launcher.gui.tk") as tk, \
-             patch("smr_launcher.gui.tr", side_effect=lambda s: s):
+        with (
+            patch("smr_launcher.gui.ttk") as ttk,
+            patch("smr_launcher.gui.tk") as tk,
+            patch("smr_launcher.gui.tr", side_effect=lambda s: s),
+        ):
             ttk.Combobox.return_value.current.return_value = 0
             window._compatibility_tab(Mock(), record, details)
 
@@ -193,8 +226,10 @@ class RecipeGuiTests(unittest.TestCase):
             def start(self):
                 self.target()
 
-        with patch("smr_launcher.gui.Thread", ImmediateThread), \
-             patch("smr_launcher.gui.messagebox.showerror") as showerror:
+        with (
+            patch("smr_launcher.gui.Thread", ImmediateThread),
+            patch("smr_launcher.gui.messagebox.showerror") as showerror,
+        ):
             window._create_recipe(record, "synthetic-recipe-v1", details)
             self.assertTrue(window.busy)
             window._poll()

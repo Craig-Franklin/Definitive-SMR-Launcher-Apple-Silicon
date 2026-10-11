@@ -3,6 +3,7 @@
 An open is a confirmed process incarnation; a game can span several opens.
 GitHub snapshots and fix tests are independent of completion and verification.
 """
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -25,26 +26,77 @@ REPOSITORY = "Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon"
 ISSUE_PREFIX = "https://github.com/" + REPOSITORY + "/issues/"
 MAX_BYTES, MAX_EVENTS = 16 * 1024 * 1024, 10000
 IDENTITIES = ("archive_sha256", "variant_id", "game_executable_sha256")
-LABELS = dict(launch_attempted="Launch attempted", process_confirmed="Process confirmed",
-              game_started="New game started", game_resumed="Existing game resumed",
-              map_loaded="Map loaded", playable="Playable", save_made="Save made",
-              save_reopened="Exact save reopened", continued_play="Continued play",
-              retired="Retired", goals_met="All scenario goals met", quit="Quit confirmed",
-              crash_load="Crashed during load", crash_play="Crashed during play",
-              crash_unknown="Crash · phase unknown", resource_stop="Resource stop",
-              cancelled="Cancelled", unknown_exit="Outcome unknown",
-              issue_link="Issue linked", issue_state="Issue status checked",
-              fix_proposed="Fix proposed", fix_implemented="Fix implemented",
-              fix_test_passed="Fix test passed", fix_test_failed="Fix test failed",
-              prompt_offered="Checkpoint prompt offered")
-CHECKPOINTS = ("map_loaded", "playable", "save_made", "save_reopened", "continued_play",
-               "retired", "goals_met", "quit", "crash_load", "crash_play", "crash_unknown",
-               "resource_stop", "cancelled")
-SUCCESS = ("map_loaded", "playable", "save_made", "save_reopened", "continued_play", "retired", "goals_met")
+LABELS = dict(
+    launch_attempted="Launch attempted",
+    process_confirmed="Process confirmed",
+    game_started="New game started",
+    game_resumed="Existing game resumed",
+    map_loaded="Map loaded",
+    playable="Playable",
+    save_made="Save made",
+    save_reopened="Exact save reopened",
+    continued_play="Continued play",
+    retired="Retired",
+    goals_met="All scenario goals met",
+    quit="Quit confirmed",
+    crash_load="Crashed during load",
+    crash_play="Crashed during play",
+    crash_unknown="Crash · phase unknown",
+    resource_stop="Resource stop",
+    cancelled="Cancelled",
+    unknown_exit="Outcome unknown",
+    issue_link="Issue linked",
+    issue_state="Issue status checked",
+    fix_proposed="Fix proposed",
+    fix_implemented="Fix implemented",
+    fix_test_passed="Fix test passed",
+    fix_test_failed="Fix test failed",
+    prompt_offered="Checkpoint prompt offered",
+)
+CHECKPOINTS = (
+    "map_loaded",
+    "playable",
+    "save_made",
+    "save_reopened",
+    "continued_play",
+    "retired",
+    "goals_met",
+    "quit",
+    "crash_load",
+    "crash_play",
+    "crash_unknown",
+    "resource_stop",
+    "cancelled",
+)
+SUCCESS = (
+    "map_loaded",
+    "playable",
+    "save_made",
+    "save_reopened",
+    "continued_play",
+    "retired",
+    "goals_met",
+)
 FAILURES = ("crash_load", "crash_play", "crash_unknown", "resource_stop")
-FIELDS = {"schema", "event_id", "at", "kind", "source", *IDENTITIES, "scenario",
-          "attempt_id", "game_id", "save_id", "incident_id", "issue_url", "issue_state",
-          "fix_id", "target_id", "checkpoint", "scope"}
+FIELDS = {
+    "schema",
+    "event_id",
+    "at",
+    "kind",
+    "source",
+    *IDENTITIES,
+    "scenario",
+    "attempt_id",
+    "game_id",
+    "save_id",
+    "incident_id",
+    "issue_url",
+    "issue_state",
+    "fix_id",
+    "target_id",
+    "checkpoint",
+    "scope",
+}
 
 
 class HistoryError(ValueError):
@@ -70,14 +122,20 @@ def instant(value):
 
 
 def issue_number(url):
-    if not isinstance(url, str) or not re.fullmatch(re.escape(ISSUE_PREFIX) + r"[1-9][0-9]{0,9}", url):
+    if not isinstance(url, str) or not re.fullmatch(
+        re.escape(ISSUE_PREFIX) + r"[1-9][0-9]{0,9}", url
+    ):
         raise HistoryError("Use an exact issue URL in the personal launcher repository")
     return int(url.rsplit("/", 1)[1])
 
 
 def context(record, game_sha256, scenario=""):
-    return dict(archive_sha256=record.archive_sha256, variant_id=record.variant_id,
-                game_executable_sha256=game_sha256, scenario=scenario)
+    return dict(
+        archive_sha256=record.archive_sha256,
+        variant_id=record.variant_id,
+        game_executable_sha256=game_sha256,
+        scenario=scenario,
+    )
 
 
 def same_map(a, b):
@@ -89,26 +147,58 @@ def same_scope(a, b):
 
 
 def validate(e):
-    if not isinstance(e, dict) or set(e) != FIELDS or type(e["schema"]) is not int or e["schema"] != 1:
+    if (
+        not isinstance(e, dict)
+        or set(e) != FIELDS
+        or type(e["schema"]) is not int
+        or e["schema"] != 1
+    ):
         raise HistoryError("Invalid history schema")
-    for key in (*IDENTITIES, "event_id", "attempt_id", "game_id", "save_id", "incident_id", "fix_id", "target_id"):
-        if not isinstance(e[key], str) or (not e[key] and key in (*IDENTITIES, "event_id")) or (e[key] and not re.fullmatch("[0-9a-f]{64}", e[key])):
+    for key in (
+        *IDENTITIES,
+        "event_id",
+        "attempt_id",
+        "game_id",
+        "save_id",
+        "incident_id",
+        "fix_id",
+        "target_id",
+    ):
+        if (
+            not isinstance(e[key], str)
+            or (not e[key] and key in (*IDENTITIES, "event_id"))
+            or (e[key] and not re.fullmatch("[0-9a-f]{64}", e[key]))
+        ):
             raise HistoryError("History requires exact bounded identities")
     scenario = e["scenario"]
     if not isinstance(scenario, str) or len(scenario) > 500:
         raise HistoryError("Invalid history scenario")
     if scenario:
         p = PurePosixPath(scenario)
-        if p.is_absolute() or str(p) != scenario or any(x in (".", "..") for x in p.parts) or "\\" in scenario or any(ord(c) < 32 for c in scenario):
+        if (
+            p.is_absolute()
+            or str(p) != scenario
+            or any(x in (".", "..") for x in p.parts)
+            or "\\" in scenario
+            or any(ord(c) < 32 for c in scenario)
+        ):
             raise HistoryError("Scenario must be a plain relative path")
     instant(e["at"])
-    if any(not isinstance(e[k], str) for k in ("kind", "source", "issue_url", "issue_state", "checkpoint", "scope")):
+    if any(
+        not isinstance(e[k], str)
+        for k in ("kind", "source", "issue_url", "issue_state", "checkpoint", "scope")
+    ):
         raise HistoryError("Invalid history text field")
     if e["kind"] not in LABELS or e["source"] not in ("observed", "player_confirmed", "historical"):
         raise HistoryError("Invalid history fact")
     if e["issue_url"]:
         issue_number(e["issue_url"])
-    if e["scope"] not in ("exact", "related") or e["issue_state"] not in ("", "open", "closed", "unavailable"):
+    if e["scope"] not in ("exact", "related") or e["issue_state"] not in (
+        "",
+        "open",
+        "closed",
+        "unavailable",
+    ):
         raise HistoryError("Invalid issue scope or snapshot")
     if e["checkpoint"] and e["checkpoint"] not in SUCCESS:
         raise HistoryError("Invalid failed checkpoint")
@@ -116,9 +206,16 @@ def validate(e):
         raise HistoryError("Issue URL required")
     if e["kind"] == "issue_state" and not e["issue_state"]:
         raise HistoryError("Issue snapshot required")
-    if e["kind"] in CHECKPOINTS + ("process_confirmed", "game_started", "game_resumed", "unknown_exit", "prompt_offered") and not e["attempt_id"]:
+    if (
+        e["kind"]
+        in CHECKPOINTS
+        + ("process_confirmed", "game_started", "game_resumed", "unknown_exit", "prompt_offered")
+        and not e["attempt_id"]
+    ):
         raise HistoryError("An exact open is required")
-    if e["kind"] in ("game_started", "game_resumed", "retired", "goals_met") and (not e["game_id"] or not scenario):
+    if e["kind"] in ("game_started", "game_resumed", "retired", "goals_met") and (
+        not e["game_id"] or not scenario
+    ):
         raise HistoryError("An exact game and scenario are required")
     if e["kind"] in ("save_reopened", "continued_play") and not e["save_id"]:
         raise HistoryError("Exact save identity required")
@@ -126,71 +223,162 @@ def validate(e):
         raise HistoryError("Failure identity required")
     if e["kind"].startswith("fix_") and (not scenario or not e["fix_id"]):
         raise HistoryError("Fixes require an exact scenario and fix identity")
-    if e["kind"] in ("fix_test_passed", "fix_test_failed") and (not e["target_id"] or not e["checkpoint"] or not e["attempt_id"]):
+    if e["kind"] in ("fix_test_passed", "fix_test_failed") and (
+        not e["target_id"] or not e["checkpoint"] or not e["attempt_id"]
+    ):
         raise HistoryError("Fix test requires the failure, checkpoint and observed open")
 
 
 def validate_relation(e, previous):
     """Reject invented games, cross-scope tests and unbound completion."""
     kind = e["kind"]
-    needs_open = kind in CHECKPOINTS + ("game_started", "game_resumed", "fix_test_passed", "fix_test_failed")
+    needs_open = kind in CHECKPOINTS + (
+        "game_started",
+        "game_resumed",
+        "fix_test_passed",
+        "fix_test_failed",
+    )
     if isinstance(previous, RelationIndex):
         confirmed = previous.confirmed.get((tuple(e[k] for k in IDENTITIES), e["attempt_id"]))
         attempted = (tuple(e[k] for k in IDENTITIES), e["attempt_id"]) in previous.attempted
     else:
-        confirmed = next((r for r in previous if same_map(e, r) and r["kind"] == "process_confirmed" and r["attempt_id"] == e["attempt_id"]), None)
-        attempted = any(same_map(e, r) and r["kind"] == "launch_attempted" and r["attempt_id"] == e["attempt_id"] for r in previous)
+        confirmed = next(
+            (
+                r
+                for r in previous
+                if same_map(e, r)
+                and r["kind"] == "process_confirmed"
+                and r["attempt_id"] == e["attempt_id"]
+            ),
+            None,
+        )
+        attempted = any(
+            same_map(e, r)
+            and r["kind"] == "launch_attempted"
+            and r["attempt_id"] == e["attempt_id"]
+            for r in previous
+        )
     if needs_open:
         if not confirmed:
             # Imported failure facts can be valid without a reconstructable open.
-            if not ((kind in FAILURES and e["source"] in ("observed", "historical")) or (kind == "cancelled" and attempted)):
+            if not (
+                (kind in FAILURES and e["source"] in ("observed", "historical"))
+                or (kind == "cancelled" and attempted)
+            ):
                 raise HistoryError("Checkpoint has no confirmed process")
         if confirmed and instant(e["at"]) < instant(confirmed["at"]):
             raise HistoryError("Checkpoint predates its confirmed process")
     if kind.startswith("fix_"):
-        rows = previous.maps.get(tuple(e[k] for k in IDENTITIES), []) if isinstance(previous, RelationIndex) else previous
+        rows = (
+            previous.maps.get(tuple(e[k] for k in IDENTITIES), [])
+            if isinstance(previous, RelationIndex)
+            else previous
+        )
         versions = [r for r in rows if r["fix_id"] == e["fix_id"]]
         if any(not same_scope(e, r) for r in versions):
             raise HistoryError("Fix identity belongs to another scenario")
-        if kind in ("fix_proposed", "fix_implemented") and any(r["kind"] == "fix_implemented" for r in versions):
-            raise HistoryError("This fix is already implemented; use a new fix identity for a changed fix")
+        if kind in ("fix_proposed", "fix_implemented") and any(
+            r["kind"] == "fix_implemented" for r in versions
+        ):
+            raise HistoryError(
+                "This fix is already implemented; use a new fix identity for a changed fix"
+            )
     if kind.startswith("fix_") and e["issue_url"]:
-        rows = previous.maps.get(tuple(e[k] for k in IDENTITIES), []) if isinstance(previous, RelationIndex) else previous
-        if not any(r["kind"] == "issue_link" and same_scope(e, r) and r["scope"] == "exact" and r["issue_url"] == e["issue_url"] for r in rows):
+        rows = (
+            previous.maps.get(tuple(e[k] for k in IDENTITIES), [])
+            if isinstance(previous, RelationIndex)
+            else previous
+        )
+        if not any(
+            r["kind"] == "issue_link"
+            and same_scope(e, r)
+            and r["scope"] == "exact"
+            and r["issue_url"] == e["issue_url"]
+            for r in rows
+        ):
             raise HistoryError("Fix linkage requires an exact-scope linked issue")
-    if kind not in ("game_started", "game_resumed", "retired", "goals_met", "continued_play", "save_reopened", "fix_test_passed", "fix_test_failed"):
+    if kind not in (
+        "game_started",
+        "game_resumed",
+        "retired",
+        "goals_met",
+        "continued_play",
+        "save_reopened",
+        "fix_test_passed",
+        "fix_test_failed",
+    ):
         return
-    rows = previous.maps.get(tuple(e[k] for k in IDENTITIES), []) if isinstance(previous, RelationIndex) else [r for r in previous if same_map(e, r)]
+    rows = (
+        previous.maps.get(tuple(e[k] for k in IDENTITIES), [])
+        if isinstance(previous, RelationIndex)
+        else [r for r in previous if same_map(e, r)]
+    )
     if kind == "game_resumed":
-        if not any(r["kind"] == "game_started" and r["game_id"] == e["game_id"] and same_scope(e, r) for r in rows):
+        if not any(
+            r["kind"] == "game_started" and r["game_id"] == e["game_id"] and same_scope(e, r)
+            for r in rows
+        ):
             raise HistoryError("Choose a known game from this exact edition/build/scenario")
-    if kind == "game_started" and any(r["kind"] == kind and r["game_id"] == e["game_id"] for r in rows):
+    if kind == "game_started" and any(
+        r["kind"] == kind and r["game_id"] == e["game_id"] for r in rows
+    ):
         raise HistoryError("Game identity already started")
     if kind in ("retired", "goals_met"):
-        if not any(r["kind"] in ("game_started", "game_resumed") and r["game_id"] == e["game_id"] and r["attempt_id"] == e["attempt_id"] and same_scope(e, r) for r in rows):
+        if not any(
+            r["kind"] in ("game_started", "game_resumed")
+            and r["game_id"] == e["game_id"]
+            and r["attempt_id"] == e["attempt_id"]
+            and same_scope(e, r)
+            for r in rows
+        ):
             raise HistoryError("Bind this open to a new or resumed game before completion")
-    if kind == "continued_play" and not any(r["kind"] == "save_reopened" and r["save_id"] == e["save_id"] and r["attempt_id"] == e["attempt_id"] and same_scope(e, r) for r in rows):
+    if kind == "continued_play" and not any(
+        r["kind"] == "save_reopened"
+        and r["save_id"] == e["save_id"]
+        and r["attempt_id"] == e["attempt_id"]
+        and same_scope(e, r)
+        for r in rows
+    ):
         raise HistoryError("Confirm this exact save reopened before continued play")
-    if kind == "save_reopened" and not any(r["kind"] == "save_made" and r["save_id"] == e["save_id"] and same_scope(e, r) for r in rows):
+    if kind == "save_reopened" and not any(
+        r["kind"] == "save_made" and r["save_id"] == e["save_id"] and same_scope(e, r) for r in rows
+    ):
         raise HistoryError("Record this exact save before confirming it reopened")
     if kind in ("fix_test_passed", "fix_test_failed"):
-        target = next((r for r in rows if r["event_id"] == e["target_id"] and r["kind"] in FAILURES), None)
-        implemented = [r for r in rows if r["kind"] == "fix_implemented" and r["fix_id"] == e["fix_id"] and same_scope(e, r)]
+        target = next(
+            (r for r in rows if r["event_id"] == e["target_id"] and r["kind"] in FAILURES), None
+        )
+        implemented = [
+            r
+            for r in rows
+            if r["kind"] == "fix_implemented" and r["fix_id"] == e["fix_id"] and same_scope(e, r)
+        ]
         if not target or not same_scope(e, target) or not target["scenario"] or not implemented:
-            raise HistoryError("Test must bind an implemented fix and an attributed failure in this exact scope")
+            raise HistoryError(
+                "Test must bind an implemented fix and an attributed failure in this exact scope"
+            )
         if target["checkpoint"] != e["checkpoint"]:
             raise HistoryError("Test must pass the explicitly recorded failed checkpoint")
         boundary = max(instant(target["at"]), max(instant(r["at"]) for r in implemented))
         if instant(e["at"]) < boundary:
             raise HistoryError("Test predates the failure or implementation")
         if instant(confirmed["at"]) < boundary:
-            raise HistoryError("Use a newly confirmed open after the failure and fix implementation")
-        if kind == "fix_test_passed" and not any(r["kind"] == e["checkpoint"] and r["attempt_id"] == e["attempt_id"] and same_scope(e, r) and boundary <= instant(r["at"]) <= instant(e["at"]) for r in rows):
+            raise HistoryError(
+                "Use a newly confirmed open after the failure and fix implementation"
+            )
+        if kind == "fix_test_passed" and not any(
+            r["kind"] == e["checkpoint"]
+            and r["attempt_id"] == e["attempt_id"]
+            and same_scope(e, r)
+            and boundary <= instant(r["at"]) <= instant(e["at"])
+            for r in rows
+        ):
             raise HistoryError("Record the tested checkpoint after fix implementation")
 
 
 class RelationIndex:
     """Constant-time process lookup while validating a bounded ledger."""
+
     def __init__(self, rows=()):
         self.maps, self.confirmed, self.attempted = {}, {}, set()
         for e in rows:
@@ -244,7 +432,7 @@ class PlayHistoryStore:
         os.lseek(fd, 0, os.SEEK_SET)
         data = bytearray()
         while len(data) < size:
-            piece = os.read(fd, min(65536, size-len(data)))
+            piece = os.read(fd, min(65536, size - len(data)))
             if not piece:
                 raise HistoryError("Incomplete history read")
             data.extend(piece)
@@ -274,8 +462,15 @@ class PlayHistoryStore:
     @staticmethod
     def event(ctx, kind, *, event_id=None, at=None, source="player_confirmed", **fields):
         e = {key: "" for key in FIELDS}
-        e.update(schema=1, event_id=event_id or digest(uuid.uuid4().hex), at=at or utcnow(),
-                 kind=kind, source=source, scope="exact", **ctx)
+        e.update(
+            schema=1,
+            event_id=event_id or digest(uuid.uuid4().hex),
+            at=at or utcnow(),
+            kind=kind,
+            source=source,
+            scope="exact",
+            **ctx,
+        )
         if set(fields) - FIELDS or set(ctx) - {*IDENTITIES, "scenario"}:
             raise HistoryError("Unrecognized history field")
         e.update(fields)
@@ -336,18 +531,37 @@ class PlayHistoryStore:
         ctx = {**{k: ctx[k] for k in IDENTITIES}, "scenario": ""}
         process = session.get("process")
         if process:
-            if (type(process.get("pid")) is not int or process["pid"] <= 0 or
-                    type(process.get("birth_us")) is not int or process["birth_us"] <= 0 or
-                    process.get("executable") != session.get("executable")):
+            if (
+                type(process.get("pid")) is not int
+                or process["pid"] <= 0
+                or type(process.get("birth_us")) is not int
+                or process["birth_us"] <= 0
+                or process.get("executable") != session.get("executable")
+            ):
                 raise HistoryError("Unbound process history")
             identity = digest("process", ctx["game_executable_sha256"], process)
-            if abs(instant(session["started_at"]).timestamp() - process["birth_us"] / 1000000) > 0.001:
+            if (
+                abs(instant(session["started_at"]).timestamp() - process["birth_us"] / 1000000)
+                > 0.001
+            ):
                 raise HistoryError("Process start timestamp does not match its incarnation")
-            return PlayHistoryStore.event(ctx, "process_confirmed", event_id=digest(identity, "confirmed"),
-                             attempt_id=identity, at=session["started_at"], source="observed")
+            return PlayHistoryStore.event(
+                ctx,
+                "process_confirmed",
+                event_id=digest(identity, "confirmed"),
+                attempt_id=identity,
+                at=session["started_at"],
+                source="observed",
+            )
         identity = digest("launch", ctx, session["started_at"])
-        return PlayHistoryStore.event(ctx, "launch_attempted", event_id=identity, attempt_id=identity,
-                         at=session["started_at"], source="observed")
+        return PlayHistoryStore.event(
+            ctx,
+            "launch_attempted",
+            event_id=identity,
+            attempt_id=identity,
+            at=session["started_at"],
+            source="observed",
+        )
 
     def observe_session(self, session):
         event = self.session_event(session)
@@ -360,9 +574,15 @@ class PlayHistoryStore:
         ctx = {**{k: value[k] for k in IDENTITIES}, "scenario": ""}
         kind = "crash_unknown" if value["kind"] == "crash" else "resource_stop"
         identity = digest("incident", value["incident_id"])
-        return PlayHistoryStore.event(ctx, kind, event_id=identity, incident_id=value["incident_id"],
-                         attempt_id=digest("unbound", value["incident_id"]),
-                         at=value["occurred_at"], source="historical")
+        return PlayHistoryStore.event(
+            ctx,
+            kind,
+            event_id=identity,
+            incident_id=value["incident_id"],
+            attempt_id=digest("unbound", value["incident_id"]),
+            at=value["occurred_at"],
+            source="historical",
+        )
 
     def import_issue(self, value):
         event = self.issue_event(value)
@@ -371,16 +591,26 @@ class PlayHistoryStore:
 
     def link(self, ctx, url, *, scope="exact", source="player_confirmed"):
         issue_number(url)
-        return self.once(ctx, "issue_link", event_id=digest("link", ctx, url, scope),
-                         issue_url=url, scope=scope, source=source)
+        return self.once(
+            ctx,
+            "issue_link",
+            event_id=digest("link", ctx, url, scope),
+            issue_url=url,
+            scope=scope,
+            source=source,
+        )
 
     def refresh_issues(self, events, *, runner=None, at=None):
         """Explicit bounded GETs only; no game facts or private identities sent."""
         from .crash_reporting import bounded_command_runner
+
         runner = runner or bounded_command_runner
         checked = at or utcnow()
-        links = {(tuple(e[k] for k in (*IDENTITIES, "scenario")), e["issue_url"], e["scope"]): e
-                 for e in events if e["kind"] == "issue_link"}
+        links = {
+            (tuple(e[k] for k in (*IDENTITIES, "scenario")), e["issue_url"], e["scope"]): e
+            for e in events
+            if e["kind"] == "issue_link"
+        }
         if len({e["issue_url"] for e in links.values()}) > 32:
             raise HistoryError("Refresh at most 32 linked issues at a time")
         states = {}
@@ -388,12 +618,32 @@ class PlayHistoryStore:
             number = issue_number(url)
             state = "unavailable"
             try:
-                response = runner(("gh", "api", "--hostname", "github.com", "--method", "GET",
-                                   f"repos/{REPOSITORY}/issues/{number}"),
-                                  stdin=None, timeout=10.0, max_output_bytes=262144)
-                if response.returncode == 0 and type(response.stdout) is bytes and len(response.stdout) <= 262144:
+                response = runner(
+                    (
+                        "gh",
+                        "api",
+                        "--hostname",
+                        "github.com",
+                        "--method",
+                        "GET",
+                        f"repos/{REPOSITORY}/issues/{number}",
+                    ),
+                    stdin=None,
+                    timeout=10.0,
+                    max_output_bytes=262144,
+                )
+                if (
+                    response.returncode == 0
+                    and type(response.stdout) is bytes
+                    and len(response.stdout) <= 262144
+                ):
                     value = decode(response.stdout)
-                    if value.get("html_url") == url and value.get("number") == number and value.get("state") in ("open", "closed") and "pull_request" not in value:
+                    if (
+                        value.get("html_url") == url
+                        and value.get("number") == number
+                        and value.get("state") in ("open", "closed")
+                        and "pull_request" not in value
+                    ):
                         state = value["state"]
             except (OSError, ValueError, TypeError, AttributeError, subprocess.TimeoutExpired):
                 pass
@@ -401,8 +651,17 @@ class PlayHistoryStore:
         snapshots = []
         for e in links.values():
             ctx = {k: e[k] for k in (*IDENTITIES, "scenario")}
-            snapshots.append(self.event(ctx, "issue_state", at=checked, source="observed",
-                issue_url=e["issue_url"], issue_state=states[e["issue_url"]], scope=e["scope"]))
+            snapshots.append(
+                self.event(
+                    ctx,
+                    "issue_state",
+                    at=checked,
+                    source="observed",
+                    issue_url=e["issue_url"],
+                    issue_state=states[e["issue_url"]],
+                    scope=e["scope"],
+                )
+            )
         self.append(*snapshots)
         return states
 
@@ -430,7 +689,14 @@ def issue_readback(events, now=None):
         if e["kind"] == "issue_link":
             links[(e["issue_url"], e["scenario"], e["scope"])] = e
     for (url, scenario, scope), link in links.items():
-        snapshots = [e for e in events if e["kind"] == "issue_state" and e["issue_url"] == url and e["scenario"] == scenario and e["scope"] == scope]
+        snapshots = [
+            e
+            for e in events
+            if e["kind"] == "issue_state"
+            and e["issue_url"] == url
+            and e["scenario"] == scenario
+            and e["scope"] == scope
+        ]
         known = [e for e in snapshots if e["issue_state"] in ("open", "closed")]
         label = known[-1]["issue_state"].capitalize() if known else "Unknown"
         if not snapshots:
@@ -439,9 +705,18 @@ def issue_readback(events, now=None):
             label += " · unavailable"
         elif now - instant(snapshots[-1]["at"]) > timedelta(hours=24):
             label += " · stale"
-        result.append(dict(url=url, scenario=scenario, scope=scope, label=label,
-                           checked_at=known[-1]["at"] if known else ""))
-    return tuple(sorted(result, key=lambda item: (item["scope"] != "exact", item["scenario"], item["url"])))
+        result.append(
+            dict(
+                url=url,
+                scenario=scenario,
+                scope=scope,
+                label=label,
+                checked_at=known[-1]["at"] if known else "",
+            )
+        )
+    return tuple(
+        sorted(result, key=lambda item: (item["scope"] != "exact", item["scenario"], item["url"]))
+    )
 
 
 def summarize(events, ctx, *, now=None):
@@ -457,13 +732,23 @@ def summarize(events, ctx, *, now=None):
         if e["kind"] in ("fix_test_passed", "fix_test_failed"):
             target = by_id.get(e["target_id"])
             if target:
-                tests_by_incident[(target["incident_id"], target["scenario"], target["checkpoint"])] = e
-    unresolved = [e for e in failures.values() if tests_by_incident.get(
-        (e["incident_id"], e["scenario"], e["checkpoint"]), {}).get("kind") != "fix_test_passed"]
+                tests_by_incident[
+                    (target["incident_id"], target["scenario"], target["checkpoint"])
+                ] = e
+    unresolved = [
+        e
+        for e in failures.values()
+        if tests_by_incident.get((e["incident_id"], e["scenario"], e["checkpoint"]), {}).get("kind")
+        != "fix_test_passed"
+    ]
     opens = {e["attempt_id"] for e in rows if e["kind"] == "process_confirmed"}
     started = {e["game_id"] for e in rows if e["kind"] == "game_started"}
     completed = {e["game_id"] for e in rows if e["kind"] in ("retired", "goals_met")}
-    checkpoints = [e for e in rows if e["kind"] in CHECKPOINTS + ("process_confirmed", "launch_attempted", "unknown_exit")]
+    checkpoints = [
+        e
+        for e in rows
+        if e["kind"] in CHECKPOINTS + ("process_confirmed", "launch_attempted", "unknown_exit")
+    ]
     latest = max(checkpoints, key=lambda e: instant(e["at"]), default=None)
     light, label = "grey", "Not completed" if opens else "Never opened"
     if completed:
@@ -473,34 +758,70 @@ def summarize(events, ctx, *, now=None):
     if not opens and latest and latest["kind"] == "launch_attempted":
         label = "Start unconfirmed"
     if unresolved:
+
         def recovered(failure):
-            return any(e["kind"] in SUCCESS and instant(e["at"]) > instant(failure["at"]) and
-                       (not failure["scenario"] or e["scenario"] == failure["scenario"]) for e in rows)
+            return any(
+                e["kind"] in SUCCESS
+                and instant(e["at"]) > instant(failure["at"])
+                and (not failure["scenario"] or e["scenario"] == failure["scenario"])
+                for e in rows
+            )
+
         red = [e for e in unresolved if e["kind"] != "resource_stop" and not recovered(e)]
         failure = max(red or unresolved, key=lambda e: instant(e["at"]))
         light = "red" if red else "amber"
-        label = "Past crash" if recovered(failure) and failure["kind"] != "resource_stop" else LABELS[failure["kind"]]
+        label = (
+            "Past crash"
+            if recovered(failure) and failure["kind"] != "resource_stop"
+            else LABELS[failure["kind"]]
+        )
     issues = issue_readback(rows, now)
     issue = "No linked issue"
     if issues:
         first = issues[0]
-        issue = ("Related " if first["scope"] == "related" else "") + f"#{issue_number(first['url'])} · {first['label']}"
+        issue = (
+            "Related " if first["scope"] == "related" else ""
+        ) + f"#{issue_number(first['url'])} · {first['label']}"
         if len(issues) > 1:
-            issue += f" · +{len(issues)-1}"
+            issue += f" · +{len(issues) - 1}"
     fixes = {}
     for e in rows:
         if e["kind"] in ("fix_proposed", "fix_implemented"):
             fixes[e["fix_id"]] = e
-    fix = "No fix recorded" if not fixes else "Implemented" if all(e["kind"] == "fix_implemented" for e in fixes.values()) else "Proposed / mixed" if len(fixes) > 1 else "Proposed"
+    fix = (
+        "No fix recorded"
+        if not fixes
+        else "Implemented"
+        if all(e["kind"] == "fix_implemented" for e in fixes.values())
+        else "Proposed / mixed"
+        if len(fixes) > 1
+        else "Proposed"
+    )
     tests = [e for e in rows if e["kind"] in ("fix_test_passed", "fix_test_failed")]
     test = "Not tested"
     if tests:
         outcomes = {(e["fix_id"], by_id[e["target_id"]]["incident_id"]): e["kind"] for e in tests}
         tested_fixes = {e["fix_id"] for e in tests}
-        test = "Failed" if "fix_test_failed" in outcomes.values() else "Passed" if len(tested_fixes) == len(fixes) and not unresolved else "Partly tested"
+        test = (
+            "Failed"
+            if "fix_test_failed" in outcomes.values()
+            else "Passed"
+            if len(tested_fixes) == len(fixes) and not unresolved
+            else "Partly tested"
+        )
     last = LABELS[latest["kind"]] if latest else "None recorded"
     if latest and latest["scenario"]:
         last += " · " + PurePosixPath(latest["scenario"]).stem
-    return HistorySummary(light, label, len(opens), len(started), len(completed),
-                          sum(e["kind"].startswith("crash_") for e in failures.values()),
-                          last, issue, fix, test, rows)
+    return HistorySummary(
+        light,
+        label,
+        len(opens),
+        len(started),
+        len(completed),
+        sum(e["kind"].startswith("crash_") for e in failures.values()),
+        last,
+        issue,
+        fix,
+        test,
+        rows,
+    )

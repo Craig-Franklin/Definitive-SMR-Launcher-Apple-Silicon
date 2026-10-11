@@ -1,4 +1,5 @@
 """Version and publish one notarized Mac release for an exact main-branch run."""
+
 from __future__ import annotations
 
 import hashlib
@@ -35,8 +36,9 @@ def validate_origin(url: str) -> None:
 
 
 def api(path: str, *, optional: bool = False):
-    result = subprocess.run(["gh", "api", f"repos/{REPO}/{path}".rstrip("/")],
-                            capture_output=True, text=True)
+    result = subprocess.run(
+        ["gh", "api", f"repos/{REPO}/{path}".rstrip("/")], capture_output=True, text=True
+    )
     if result.returncode:
         if optional and "HTTP 404" in result.stderr:
             return None
@@ -46,18 +48,25 @@ def api(path: str, *, optional: bool = False):
 
 def guard() -> str:
     """Recheck identity, source and remotes before each GitHub mutation."""
-    if (os.environ.get("GITHUB_REPOSITORY") != REPO
-            or os.environ.get("GITHUB_EVENT_NAME") != "push"
-            or os.environ.get("GITHUB_REF") != "refs/heads/main"):
+    if (
+        os.environ.get("GITHUB_REPOSITORY") != REPO
+        or os.environ.get("GITHUB_EVENT_NAME") != "push"
+        or os.environ.get("GITHUB_REF") != "refs/heads/main"
+    ):
         raise RuntimeError("Releases require a main push in the personal fork")
     if output("git", "remote") != "origin":
         raise RuntimeError("Unexpected CI checkout remotes")
     for flags in ((), ("--push",)):
         validate_origin(output("git", "remote", "get-url", *flags, "origin"))
     repo = api("")
-    if (repo["id"], repo["full_name"], repo["html_url"],
-            repo["owner"]["login"], repo["owner"]["type"], repo["parent"]["id"]) != (
-            REPO_ID, REPO, f"https://github.com/{REPO}", "Craig-Franklin", "User", 950948787):
+    if (
+        repo["id"],
+        repo["full_name"],
+        repo["html_url"],
+        repo["owner"]["login"],
+        repo["owner"]["type"],
+        repo["parent"]["id"],
+    ) != (REPO_ID, REPO, f"https://github.com/{REPO}", "Craig-Franklin", "User", 950948787):
         raise RuntimeError("Repository identity differs from the personal fork")
     sha = os.environ["GITHUB_SHA"]
     if output("git", "rev-parse", "HEAD") != sha:
@@ -95,8 +104,9 @@ def release_asset_names(version: str, *, include_dmg: bool = True) -> list[str]:
     return [name for archive in archives for name in (archive, archive + ".sha256")]
 
 
-def validate_assets(release: dict, version: str, digests: dict[str, str] | None = None,
-                    *, require_dmg: bool = False) -> None:
+def validate_assets(
+    release: dict, version: str, digests: dict[str, str] | None = None, *, require_dmg: bool = False
+) -> None:
     assets = release["assets"]
     names = sorted(a["name"] for a in assets)
     has_dmg = any(name.endswith(".dmg") for name in names)
@@ -119,8 +129,18 @@ def validate_checksum(version: str, release: dict) -> None:
         name = asset["name"]
         if not name.endswith((".zip", ".dmg")):
             continue
-        checksum = output("gh", "release", "download", "v" + version, "--repo", REPO,
-                          "--pattern", name + ".sha256", "--output", "-")
+        checksum = output(
+            "gh",
+            "release",
+            "download",
+            "v" + version,
+            "--repo",
+            REPO,
+            "--pattern",
+            name + ".sha256",
+            "--output",
+            "-",
+        )
         if checksum != f"{asset['digest'][7:]}  {name}":
             raise RuntimeError("Published checksum differs from GitHub archive identity")
 
@@ -217,8 +237,9 @@ def release_history() -> tuple[list[ReleasePoint], dict[str, str | None]]:
 
 
 def is_ancestor(ancestor: str, descendant: str) -> bool:
-    result = subprocess.run(["git", "merge-base", "--is-ancestor", ancestor, descendant],
-                            capture_output=True)
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, descendant], capture_output=True
+    )
     if result.returncode not in (0, 1):
         raise RuntimeError("Could not establish release commit ancestry")
     return result.returncode == 0
@@ -232,9 +253,12 @@ def commits_since(base: str, head: str) -> tuple[Commit, ...]:
     commits = []
     for sha in shas:
         parents = output("git", "rev-list", "--parents", "-n", "1", sha, "--").split()[1:]
-        impact = changed_impact(parents[0] if parents else "", sha,
-                                read=lambda *args: output("git", *args))
-        commits.append(Commit(sha, output("git", "show", "-s", "--format=%B", sha, "--"), impact.app))
+        impact = changed_impact(
+            parents[0] if parents else "", sha, read=lambda *args: output("git", *args)
+        )
+        commits.append(
+            Commit(sha, output("git", "show", "-s", "--format=%B", sha, "--"), impact.app)
+        )
     return tuple(commits)
 
 
@@ -247,7 +271,9 @@ def prepare(*, write_files: bool = True) -> None:
     subprocess.run(["git", "fetch", "origin", "--tags"], check=True)
     published, reservations = release_history()
     base = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
-    plan = plan_release(sha, published, reservations, commits_since, is_ancestor, initial_version=base)
+    plan = plan_release(
+        sha, published, reservations, commits_since, is_ancestor, initial_version=base
+    )
     version = plan.version
     tag = "v" + version if version else ""
     notes_file = ""
@@ -262,21 +288,27 @@ def prepare(*, write_files: bool = True) -> None:
         if target is not None and target != sha:
             raise RuntimeError("Version tag already belongs to another source commit")
         latest = api("releases/latest", optional=True)
-        if latest is not None and version_tuple(version) <= version_tuple(latest["tag_name"].removeprefix("v")):
+        if latest is not None and version_tuple(version) <= version_tuple(
+            latest["tag_name"].removeprefix("v")
+        ):
             latest_sha = tag_target(latest["tag_name"])
             if latest_sha is None or not is_ancestor(sha, latest_sha):
                 raise RuntimeError("New source would regress the published release version")
         if write_files:
             notes = _notes_path(sha)
-            notes.write_text(release_notes(plan, REPO, sha, os.environ["GITHUB_RUN_ID"]), encoding="utf-8")
+            notes.write_text(
+                release_notes(plan, REPO, sha, os.environ["GITHUB_RUN_ID"]), encoding="utf-8"
+            )
             notes_file = str(notes)
             stamp_version(Path.cwd(), version)
     with open(os.environ["GITHUB_OUTPUT"], "a") as stream:
-        stream.write(f"release_required={str(plan.required).lower()}\n"
-                     f"skip_reason={'' if plan.required else plan.reason}\n"
-                     f"version={version}\ntag={tag}\npublished={str(plan.published).lower()}\n"
-                     f"notes_file={notes_file}\n"
-                     f"previous_tag={'v' + plan.previous_version if plan.previous_sha else ''}\n")
+        stream.write(
+            f"release_required={str(plan.required).lower()}\n"
+            f"skip_reason={'' if plan.required else plan.reason}\n"
+            f"version={version}\ntag={tag}\npublished={str(plan.published).lower()}\n"
+            f"notes_file={notes_file}\n"
+            f"previous_tag={'v' + plan.previous_version if plan.previous_sha else ''}\n"
+        )
     print((tag + ": " if tag else "Release skipped: ") + plan.reason)
 
 
@@ -301,9 +333,21 @@ def publish() -> None:
     target = tag_target(tag)
     if target is None:
         guard()
-        subprocess.run(["gh", "api", f"repos/{REPO}/git/refs", "--method", "POST",
-                        "-f", "ref=refs/tags/" + tag, "-f", "sha=" + sha], check=True,
-                       stdout=subprocess.DEVNULL)
+        subprocess.run(
+            [
+                "gh",
+                "api",
+                f"repos/{REPO}/git/refs",
+                "--method",
+                "POST",
+                "-f",
+                "ref=refs/tags/" + tag,
+                "-f",
+                "sha=" + sha,
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
     elif target != sha:
         raise RuntimeError("Existing tag belongs to another source commit")
     release = release_for_tag(tag, optional=True)
@@ -311,21 +355,51 @@ def publish() -> None:
         raise RuntimeError("Refusing to replace an already published release")
     guard()
     if release is None:
-        subprocess.run(["gh", "release", "create", tag, *names,
-                        "--repo", REPO, "--verify-tag", "--draft", "--title", tag,
-                        "--notes-file", str(notes)], check=True)
+        subprocess.run(
+            [
+                "gh",
+                "release",
+                "create",
+                tag,
+                *names,
+                "--repo",
+                REPO,
+                "--verify-tag",
+                "--draft",
+                "--title",
+                tag,
+                "--notes-file",
+                str(notes),
+            ],
+            check=True,
+        )
     else:
         # Only retry this run's private draft; published artifacts are immutable.
-        subprocess.run(["gh", "release", "upload", tag, *names,
-                        "--repo", REPO, "--clobber"], check=True)
+        subprocess.run(
+            ["gh", "release", "upload", tag, *names, "--repo", REPO, "--clobber"], check=True
+        )
     draft = release_for_tag(tag)
     validate_assets(draft, version, digests, require_dmg=True)
     validate_checksum(version, draft)
     latest = api("releases/latest", optional=True)
-    make_latest = latest is None or version_tuple(version) > version_tuple(latest["tag_name"].removeprefix("v"))
+    make_latest = latest is None or version_tuple(version) > version_tuple(
+        latest["tag_name"].removeprefix("v")
+    )
     guard()
-    subprocess.run(["gh", "release", "edit", tag, "--repo", REPO, "--draft=false",
-                    "--prerelease=false", "--latest=" + str(make_latest).lower()], check=True)
+    subprocess.run(
+        [
+            "gh",
+            "release",
+            "edit",
+            tag,
+            "--repo",
+            REPO,
+            "--draft=false",
+            "--prerelease=false",
+            "--latest=" + str(make_latest).lower(),
+        ],
+        check=True,
+    )
     published = release_for_tag(tag)
     if published["draft"] or published["prerelease"] or tag_target(tag) != sha:
         raise RuntimeError("Published release identity failed readback")
@@ -334,4 +408,6 @@ def publish() -> None:
 
 
 if __name__ == "__main__":
-    {"plan": lambda: prepare(write_files=False), "prepare": prepare, "publish": publish}[sys.argv[1]]()
+    {"plan": lambda: prepare(write_files=False), "prepare": prepare, "publish": publish}[
+        sys.argv[1]
+    ]()

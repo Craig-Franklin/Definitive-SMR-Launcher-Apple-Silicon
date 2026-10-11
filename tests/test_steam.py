@@ -1,4 +1,5 @@
 """Steam binding fixtures use only synthetic files and manifests."""
+
 from pathlib import Path
 import plistlib
 import sys
@@ -21,17 +22,27 @@ class SteamDiscoveryTests(unittest.TestCase):
         executable = self.game / "Contents/MacOS/Sid Meiers Railroads"
         executable.parent.mkdir(parents=True)
         executable.write_bytes(b"synthetic Mac game executable")
-        (self.game / "Contents/Info.plist").write_bytes(plistlib.dumps({
-            "CFBundleIdentifier": "com.feralinteractive.railroads",
-            "CFBundleVersion": "synthetic-version",
-        }))
-        profile = self.home / "Library/Application Support/Feral Interactive/Sid Meier's Railroads!/VFS/User/AppData/Roaming/My Games/WinDeveloper"
+        (self.game / "Contents/Info.plist").write_bytes(
+            plistlib.dumps(
+                {
+                    "CFBundleIdentifier": "com.feralinteractive.railroads",
+                    "CFBundleVersion": "synthetic-version",
+                }
+            )
+        )
+        profile = (
+            self.home
+            / "Library/Application Support/Feral Interactive/Sid Meier's Railroads!/VFS/User/AppData/Roaming/My Games/WinDeveloper"
+        )
         profile.mkdir(parents=True)
 
     def manifest(self, beta: str = "", state: str = "4") -> None:
         self.steamapps.joinpath("appmanifest_7600.acf").write_text(
-            '"AppState"\n{\n"appid" "7600"\n"StateFlags" "' + state + '"\n"buildid" "synthetic-build"\n'
-            + (f'"BetaKey" "{beta}"\n' if beta else "") + '}\n',
+            '"AppState"\n{\n"appid" "7600"\n"StateFlags" "'
+            + state
+            + '"\n"buildid" "synthetic-build"\n'
+            + (f'"BetaKey" "{beta}"\n' if beta else "")
+            + "}\n",
             encoding="utf-8",
         )
 

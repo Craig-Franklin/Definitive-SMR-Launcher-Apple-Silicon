@@ -1,4 +1,5 @@
 """Synthetic cache trust boundaries and last-good preservation."""
+
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -26,14 +27,20 @@ class CatalogueCacheTests(TestCase):
 
     def test_invalid_schema_source_fields_dates_duplicate_names_and_bytes_rejected(self):
         good = json.loads(self.path.read_bytes())
-        cases = [dict(good, schema=True), dict(good, schema=2), dict(good, source="https://foreign.invalid"),
-                 dict(good, fetched_at="2026-01-01"), dict(good, fetched_at="9999-01-01T00:00:00+00:00"),
-                 dict(good, maps="bad"), dict(good, extra=True),
-                 dict(good, maps=[dict(good["maps"][0], name="../Map.7z")]),
-                 dict(good, maps=[dict(good["maps"][0], size=True)]),
-                 dict(good, maps=[dict(good["maps"][0], sha1="bad")]),
-                 dict(good, maps=[dict(good["maps"][0], archive_modified="tomorrow")]),
-                 dict(good, maps=good["maps"] * 2)]
+        cases = [
+            dict(good, schema=True),
+            dict(good, schema=2),
+            dict(good, source="https://foreign.invalid"),
+            dict(good, fetched_at="2026-01-01"),
+            dict(good, fetched_at="9999-01-01T00:00:00+00:00"),
+            dict(good, maps="bad"),
+            dict(good, extra=True),
+            dict(good, maps=[dict(good["maps"][0], name="../Map.7z")]),
+            dict(good, maps=[dict(good["maps"][0], size=True)]),
+            dict(good, maps=[dict(good["maps"][0], sha1="bad")]),
+            dict(good, maps=[dict(good["maps"][0], archive_modified="tomorrow")]),
+            dict(good, maps=good["maps"] * 2),
+        ]
         for document in cases:
             with self.subTest(document=document):
                 self.path.write_text(json.dumps(document))
@@ -54,7 +61,13 @@ class CatalogueCacheTests(TestCase):
         ancestor.symlink_to(self.path.parent, target_is_directory=True)
         fifo = self.root / "fifo"
         os.mkfifo(fifo)
-        for path in (leaf, ancestor / self.path.name, fifo, self.root, self.path.parent / ".." / "private" / self.path.name):
+        for path in (
+            leaf,
+            ancestor / self.path.name,
+            fifo,
+            self.root,
+            self.path.parent / ".." / "private" / self.path.name,
+        ):
             with self.subTest(path=path):
                 self.assertIsNone(c.read_cached_catalogue(path))
                 with self.assertRaises((OSError, ValueError)):
@@ -75,11 +88,13 @@ class CatalogueCacheTests(TestCase):
         newer = (c.RemoteMap("Beta.7z", 5, "b" * 40),)
         fsync = c.os.fsync
         calls = []
+
         def fail_after_rename(fd):
             calls.append(fd)
             if len(calls) == 2:
                 raise OSError("synthetic directory sync failure after replace")
             fsync(fd)
+
         with patch.object(c.os, "fsync", side_effect=fail_after_rename):
             with self.assertRaises(OSError):
                 c.write_cached_catalogue(self.path, newer)

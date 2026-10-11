@@ -1,4 +1,5 @@
 """Local application workflow around the verified profile and package services."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -17,14 +18,37 @@ import subprocess
 import tempfile
 import uuid
 
-from .activation import FilesystemProfiles, MARKER, ORIGINAL, _assert_no_symlink_ancestor, _assert_regular_tree, _atomic_json, _canonical_directory_path, _fsync_dir
+from .activation import (
+    FilesystemProfiles,
+    MARKER,
+    ORIGINAL,
+    _assert_no_symlink_ancestor,
+    _assert_regular_tree,
+    _atomic_json,
+    _canonical_directory_path,
+    _fsync_dir,
+)
 from .extraction import _freeze_tree, _publish_exclusive, _unfreeze_directories, extract_package
 from .packages import _digest, inspect_package
 from .steam import SteamInstallation
 from .variants import _tree_manifest, prepare_original_variant, assets_manifest_hash
-from .verification import GameplayVerification, VerificationStore, VerificationSummary, reduce_verification
-from .scenario_evidence import (EvidenceStore, EvidenceRecord, EvidenceError, bind_inventory,
-                               build_record, scenario_key, read_bytes, MAX_RECEIPT_BYTES, engine_context)
+from .verification import (
+    GameplayVerification,
+    VerificationStore,
+    VerificationSummary,
+    reduce_verification,
+)
+from .scenario_evidence import (
+    EvidenceStore,
+    EvidenceRecord,
+    EvidenceError,
+    bind_inventory,
+    build_record,
+    scenario_key,
+    read_bytes,
+    MAX_RECEIPT_BYTES,
+    engine_context,
+)
 from .collection import RemoteMap
 from .map_metadata import MapMetadata, read_map_metadata
 from . import removal
@@ -59,30 +83,43 @@ class MapRecord:
     @classmethod
     def from_json(cls, value: dict) -> "MapRecord":
         return cls(
-            value["name"], value["archive_sha256"], value["variant_id"],
-            value["profile_id"], tuple(value["scenarios"]),
-            value["prepared_directory"], value["game_executable_sha256"],
+            value["name"],
+            value["archive_sha256"],
+            value["variant_id"],
+            value["profile_id"],
+            tuple(value["scenarios"]),
+            value["prepared_directory"],
+            value["game_executable_sha256"],
             value.get("imported_directory", ""),
-            value.get("archive_filename", ""), value.get("source_url", ""),
+            value.get("archive_filename", ""),
+            value.get("source_url", ""),
             value.get("source_label", "Local archive · origin not recorded"),
-            value.get("archive_modified", ""), value.get("imported_at", ""),
+            value.get("archive_modified", ""),
+            value.get("imported_at", ""),
             value.get("archive_sha1", ""),
             value.get("recipe_receipt_sha256", ""),
         )
 
     def as_json(self) -> dict:
-        result = dict(name=self.name, archive_sha256=self.archive_sha256,
-                    variant_id=self.variant_id, profile_id=self.profile_id,
-                    scenarios=list(self.scenarios), prepared_directory=self.prepared_directory,
-                    game_executable_sha256=self.game_executable_sha256,
-                    imported_directory=self.imported_directory,
-                    archive_filename=self.archive_filename, source_url=self.source_url,
-                    source_label=self.source_label, archive_modified=self.archive_modified,
-                    imported_at=self.imported_at, archive_sha1=self.archive_sha1)
+        result = dict(
+            name=self.name,
+            archive_sha256=self.archive_sha256,
+            variant_id=self.variant_id,
+            profile_id=self.profile_id,
+            scenarios=list(self.scenarios),
+            prepared_directory=self.prepared_directory,
+            game_executable_sha256=self.game_executable_sha256,
+            imported_directory=self.imported_directory,
+            archive_filename=self.archive_filename,
+            source_url=self.source_url,
+            source_label=self.source_label,
+            archive_modified=self.archive_modified,
+            imported_at=self.imported_at,
+            archive_sha1=self.archive_sha1,
+        )
         if self.recipe_receipt_sha256:
             result["recipe_receipt_sha256"] = self.recipe_receipt_sha256
         return result
-
 
 
 class LauncherApplication:
@@ -103,12 +140,16 @@ class LauncherApplication:
         self._resource_hash_cache = ContentHashCache()
         self.installation_binding = self.library / "installation-binding.json"
         self.profiles = FilesystemProfiles(
-            installation.profile_root, self.managed,
-            ("CustomAssets", "UserMaps"), installation.game_running,
+            installation.profile_root,
+            self.managed,
+            ("CustomAssets", "UserMaps"),
+            installation.game_running,
         )
 
     @classmethod
-    def discover(cls, home: Optional[Path] = None, steamapps_root: Optional[Path] = None) -> "LauncherApplication":
+    def discover(
+        cls, home: Optional[Path] = None, steamapps_root: Optional[Path] = None
+    ) -> "LauncherApplication":
         home = Path.home() if home is None else Path(home)
         library = home / "Library/Application Support/Definitive SMR Launcher Apple Silicon"
         config = library / "installation.json"
@@ -121,13 +162,18 @@ class LauncherApplication:
         return cls(installation, library)
 
     @classmethod
-    def choose_steam_library(cls, steamapps_root: Path, home: Optional[Path] = None) -> "LauncherApplication":
+    def choose_steam_library(
+        cls, steamapps_root: Path, home: Optional[Path] = None
+    ) -> "LauncherApplication":
         home = Path.home() if home is None else Path(home)
         app = cls.discover(home, steamapps_root)
         with app._locked():
             if app.installation_binding.exists() or app.profiles.state_file.exists():
                 app._verify_installation_binding()
-            _atomic_json(app.library / "installation.json", dict(schema=1, steamapps_root=str(app.installation.steamapps_root)))
+            _atomic_json(
+                app.library / "installation.json",
+                dict(schema=1, steamapps_root=str(app.installation.steamapps_root)),
+            )
         return app
 
     @contextmanager
@@ -137,9 +183,16 @@ class LauncherApplication:
         call = (lambda name, fn, *args: fn(*args)) if observed_io is None else observed_io.call
         pending = self.library / "removal.json"
         if observed_io is not None and (pending.exists() or pending.is_symlink()):
-            raise ApplicationError("Pending removal requires its owner; observed runner refuses recovery")
-        fd = call("application.lock_open", os.open, self.library / ".application.lock",
-                  os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+            raise ApplicationError(
+                "Pending removal requires its owner; observed runner refuses recovery"
+            )
+        fd = call(
+            "application.lock_open",
+            os.open,
+            self.library / ".application.lock",
+            os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
         try:
             call("application.lock_acquire", fcntl.flock, fd, fcntl.LOCK_EX)
             if observed_io is None:
@@ -156,21 +209,30 @@ class LauncherApplication:
 
     def _installation_identity(self) -> dict:
         game = self.installation
-        return dict(schema=1, appid=game.appid, steam_buildid=game.steam_buildid,
-                    bundle_id=game.bundle_id, bundle_version=game.bundle_version,
-                    executable_sha256=game.executable_sha256,
-                    steamapps_root=str(game.steamapps_root))
+        return dict(
+            schema=1,
+            appid=game.appid,
+            steam_buildid=game.steam_buildid,
+            bundle_id=game.bundle_id,
+            bundle_version=game.bundle_version,
+            executable_sha256=game.executable_sha256,
+            steamapps_root=str(game.steamapps_root),
+        )
 
     def _verify_installation_binding(self) -> None:
         _assert_no_symlink_ancestor(self.installation_binding)
         if not self.installation_binding.is_file():
-            raise ApplicationError("Enrolled game build record is missing; profiles retained for inspection")
+            raise ApplicationError(
+                "Enrolled game build record is missing; profiles retained for inspection"
+            )
         try:
             actual = json.loads(self.installation_binding.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             raise ApplicationError("Enrolled game build record cannot be read") from exc
         if actual != self._installation_identity():
-            raise ApplicationError("Steam game build or library changed; existing map profiles need revalidation")
+            raise ApplicationError(
+                "Steam game build or library changed; existing map profiles need revalidation"
+            )
 
     def _stopped(self) -> None:
         self.installation.check_current()
@@ -187,7 +249,9 @@ class LauncherApplication:
                 raise ApplicationError("The game profile is missing " + name)
         for name in ("CustomAssets", "UserMaps"):
             if any((self.installation.profile_root / name).iterdir()):
-                raise ApplicationError("Remove custom content from the fresh game before initial setup")
+                raise ApplicationError(
+                    "Remove custom content from the fresh game before initial setup"
+                )
 
     def _copy_baseline(self) -> None:
         if self.baseline.exists():
@@ -206,7 +270,12 @@ class LauncherApplication:
         self.library.mkdir(parents=True, exist_ok=True)
         stage = Path(tempfile.mkdtemp(prefix=".baseline-", dir=self.library))
         try:
-            shutil.copytree(self.installation.profile_root, stage, dirs_exist_ok=True, copy_function=shutil.copy2)
+            shutil.copytree(
+                self.installation.profile_root,
+                stage,
+                dirs_exist_ok=True,
+                copy_function=shutil.copy2,
+            )
             if _tree_manifest(stage) != _tree_manifest(self.installation.profile_root):
                 raise ApplicationError("Clean baseline changed during the independent copy")
             _freeze_tree(stage)
@@ -267,27 +336,42 @@ class LauncherApplication:
             stage.unlink(missing_ok=True)
             _fsync_dir(self.originals)
 
-    def import_archive(self, source: Path, *, original_filename: Optional[str] = None,
-                       remote: Optional[RemoteMap] = None) -> MapRecord:
+    def import_archive(
+        self,
+        source: Path,
+        *,
+        original_filename: Optional[str] = None,
+        remote: Optional[RemoteMap] = None,
+    ) -> MapRecord:
         with self._locked():
             self._stopped()
             self.profiles.recover()
             source = Path(source).expanduser()
             if original_filename is not None:
-                if (not original_filename.lower().endswith(".7z")
-                        or len(original_filename) > 255
-                        or any(char in original_filename for char in ("/", "\\", ":"))
-                        or any(ord(char) < 32 or ord(char) == 127 for char in original_filename)):
+                if (
+                    not original_filename.lower().endswith(".7z")
+                    or len(original_filename) > 255
+                    or any(char in original_filename for char in ("/", "\\", ":"))
+                    or any(ord(char) < 32 or ord(char) == 127 for char in original_filename)
+                ):
                     raise ApplicationError("Original archive name is unsafe")
             display_name = original_filename[:-3] if original_filename is not None else source.stem
             inspection = inspect_package(source)
             if remote is not None:
-                if original_filename != remote.name or not self._matches_remote(source.resolve(strict=True), remote):
+                if original_filename != remote.name or not self._matches_remote(
+                    source.resolve(strict=True), remote
+                ):
                     raise ApplicationError("Archive does not match its collection source")
-            existing = next((item for item in self.catalogue()
-                             if item.archive_sha256 == inspection.source_sha256
-                             and item.game_executable_sha256 == self.installation.executable_sha256
-                             and self._is_original_variant(item)), None)
+            existing = next(
+                (
+                    item
+                    for item in self.catalogue()
+                    if item.archive_sha256 == inspection.source_sha256
+                    and item.game_executable_sha256 == self.installation.executable_sha256
+                    and self._is_original_variant(item)
+                ),
+                None,
+            )
             if existing is not None:
                 return self._record_source(existing, remote) if remote else existing
             archive = self._preserve_archive(source, inspection.source_sha256)
@@ -298,26 +382,42 @@ class LauncherApplication:
             prepared_name = uuid.uuid4().hex
             prepared_path = self.prepared / prepared_name
             variant = prepare_original_variant(
-                self.baseline, imported, prepared_path,
-                inspection.source_sha256, self.installation.executable_sha256,
+                self.baseline,
+                imported,
+                prepared_path,
+                inspection.source_sha256,
+                self.installation.executable_sha256,
             )
             self._prepare_icon(imported, variant.variant_id)
-            profile_id = self.profiles.register_variant(variant.variant_id, prepared_path,
-                saved_games=removal.retained_saves(self, variant.variant_id))
-            record = MapRecord(display_name, inspection.source_sha256, variant.variant_id,
-                               profile_id, inspection.scenarios, prepared_name,
-                               self.installation.executable_sha256, imported.name,
-                               original_filename or source.name,
-                               remote.source_url if remote else "",
-                               "Internet Archive · verified archive" if remote else "Local archive",
-                               remote.archive_modified if remote else "",
-                               datetime.now(timezone.utc).isoformat(), remote.sha1 if remote else "")
+            profile_id = self.profiles.register_variant(
+                variant.variant_id,
+                prepared_path,
+                saved_games=removal.retained_saves(self, variant.variant_id),
+            )
+            record = MapRecord(
+                display_name,
+                inspection.source_sha256,
+                variant.variant_id,
+                profile_id,
+                inspection.scenarios,
+                prepared_name,
+                self.installation.executable_sha256,
+                imported.name,
+                original_filename or source.name,
+                remote.source_url if remote else "",
+                "Internet Archive · verified archive" if remote else "Local archive",
+                remote.archive_modified if remote else "",
+                datetime.now(timezone.utc).isoformat(),
+                remote.sha1 if remote else "",
+            )
             records = list(self.catalogue())
             if any(item.variant_id == record.variant_id for item in records):
                 raise ApplicationError("Prepared variant identity already exists in the catalogue")
             self._write_import_checks(record)
             records.append(record)
-            _atomic_json(self.catalogue_file, dict(schema=1, maps=[item.as_json() for item in records]))
+            _atomic_json(
+                self.catalogue_file, dict(schema=1, maps=[item.as_json() for item in records])
+            )
             return record
 
     def _prepared_root(self, record: MapRecord) -> Path:
@@ -325,25 +425,49 @@ class LauncherApplication:
 
     def _is_original_variant(self, record: MapRecord) -> bool:
         # Editions share an archive; reimport must select the exact original.
-        identity = dict(schema=1, recipe="original", archive=record.archive_sha256,
-                        game=record.game_executable_sha256,
-                        assets=assets_manifest_hash(self._prepared_root(record)))
-        return hashlib.sha256(json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()).hexdigest() == record.variant_id
+        identity = dict(
+            schema=1,
+            recipe="original",
+            archive=record.archive_sha256,
+            game=record.game_executable_sha256,
+            assets=assets_manifest_hash(self._prepared_root(record)),
+        )
+        return (
+            hashlib.sha256(
+                json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+            == record.variant_id
+        )
 
     def _write_import_checks(self, record: MapRecord) -> dict:
         root = self._prepared_root(record)
         _assert_regular_tree(root)
         executable = getattr(self.installation, "executable", None)
-        stock_roots = (executable.parents[1] / "Resources",
-                       executable.parents[3] / "SMRailroadsData/assets/xml") if executable else ()
-        stock = {p.name.casefold() for root in stock_roots for p in root.rglob("*")
-                 if p.suffix.casefold() == ".xml" and p.is_file()}
+        stock_roots = (
+            (
+                executable.parents[1] / "Resources",
+                executable.parents[3] / "SMRailroadsData/assets/xml",
+            )
+            if executable
+            else ()
+        )
+        stock = {
+            p.name.casefold()
+            for root in stock_roots
+            for p in root.rglob("*")
+            if p.suffix.casefold() == ".xml" and p.is_file()
+        }
         report = inspect_map(root, stock)
-        report.update(variant_id=record.variant_id, archive_sha256=record.archive_sha256,
-                      game_executable_sha256=record.game_executable_sha256,
-                      assets_sha256=self.profiles._asset_hash(root),
-                      checked_at=datetime.now(timezone.utc).isoformat())
-        path = removal._leaf(self.library / "import-checks", record.variant_id + ".json", r"[0-9a-f]{64}\.json")
+        report.update(
+            variant_id=record.variant_id,
+            archive_sha256=record.archive_sha256,
+            game_executable_sha256=record.game_executable_sha256,
+            assets_sha256=self.profiles._asset_hash(root),
+            checked_at=datetime.now(timezone.utc).isoformat(),
+        )
+        path = removal._leaf(
+            self.library / "import-checks", record.variant_id + ".json", r"[0-9a-f]{64}\.json"
+        )
         path.parent.mkdir(exist_ok=True)
         _atomic_json(path, report)
         return report
@@ -352,16 +476,22 @@ class LauncherApplication:
         with self._locked():
             if record not in self.catalogue():
                 raise ApplicationError("Map is no longer in this library")
-            path = removal._leaf(self.library / "import-checks", record.variant_id + ".json", r"[0-9a-f]{64}\.json")
+            path = removal._leaf(
+                self.library / "import-checks", record.variant_id + ".json", r"[0-9a-f]{64}\.json"
+            )
             if refresh:
                 self.installation.check_current()
                 return self._write_import_checks(record)
             if not path.exists():
                 return None
             report = json.loads(path.read_text())
-            if (report.get("schema") != 1 or report.get("variant_id") != record.variant_id
-                    or report.get("game_executable_sha256") != self.installation.executable_sha256
-                    or report.get("assets_sha256") != self.profiles._asset_hash(self._prepared_root(record))):
+            if (
+                report.get("schema") != 1
+                or report.get("variant_id") != record.variant_id
+                or report.get("game_executable_sha256") != self.installation.executable_sha256
+                or report.get("assets_sha256")
+                != self.profiles._asset_hash(self._prepared_root(record))
+            ):
                 return None
             return report
 
@@ -382,17 +512,30 @@ class LauncherApplication:
         return digest.hexdigest() == remote.sha1
 
     def _record_source(self, record: MapRecord, remote: RemoteMap) -> MapRecord:
-        updated = replace(record, archive_filename=remote.name, source_url=remote.source_url,
-                          source_label="Internet Archive · verified archive",
-                          archive_modified=remote.archive_modified, archive_sha1=remote.sha1)
-        records = [updated if item.variant_id == record.variant_id else item for item in self.catalogue()]
+        updated = replace(
+            record,
+            archive_filename=remote.name,
+            source_url=remote.source_url,
+            source_label="Internet Archive · verified archive",
+            archive_modified=remote.archive_modified,
+            archive_sha1=remote.sha1,
+        )
+        records = [
+            updated if item.variant_id == record.variant_id else item for item in self.catalogue()
+        ]
         _atomic_json(self.catalogue_file, dict(schema=1, maps=[item.as_json() for item in records]))
         return updated
 
     @staticmethod
     def _collection_archive_identity(info: os.stat_result) -> tuple:
-        return (info.st_dev, info.st_ino, info.st_mode, info.st_size,
-                info.st_mtime_ns, info.st_ctime_ns)
+        return (
+            info.st_dev,
+            info.st_ino,
+            info.st_mode,
+            info.st_size,
+            info.st_mtime_ns,
+            info.st_ctime_ns,
+        )
 
     @classmethod
     def _collection_archive_sha1(cls, path: Path, identity: tuple) -> str:
@@ -402,15 +545,19 @@ class LauncherApplication:
         fd = None
         try:
             for component in path.parts[1:-1]:
-                next_directory = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
-                                         dir_fd=directory)
+                next_directory = os.open(
+                    component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory
+                )
                 os.close(directory)
                 directory = next_directory
             fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
             with os.fdopen(fd, "rb") as stream:
                 fd = None
                 before = os.fstat(stream.fileno())
-                if not stat.S_ISREG(before.st_mode) or cls._collection_archive_identity(before) != identity:
+                if (
+                    not stat.S_ISREG(before.st_mode)
+                    or cls._collection_archive_identity(before) != identity
+                ):
                     raise ApplicationError("Preserved archive changed during source matching")
                 digest = hashlib.sha1()
                 for chunk in iter(lambda: stream.read(1 << 20), b""):
@@ -451,22 +598,34 @@ class LauncherApplication:
                     continue
                 identity = self._collection_archive_identity(info)
                 if archive not in inspected:
-                    inspected[archive] = (identity, self._collection_archive_sha1(archive, identity))
+                    inspected[archive] = (
+                        identity,
+                        self._collection_archive_sha1(archive, identity),
+                    )
                 observed, digest = inspected[archive]
                 if observed != identity:
                     raise ApplicationError("Preserved archive changed during source matching")
                 remote = candidates.get((info.st_size, digest))
                 if remote is not None:
-                    records[index] = replace(record, archive_filename=remote.name, source_url=remote.source_url,
-                                             source_label="Internet Archive · verified archive",
-                                             archive_modified=remote.archive_modified, archive_sha1=remote.sha1)
+                    records[index] = replace(
+                        record,
+                        archive_filename=remote.name,
+                        source_url=remote.source_url,
+                        source_label="Internet Archive · verified archive",
+                        archive_modified=remote.archive_modified,
+                        archive_sha1=remote.sha1,
+                    )
                     matched += 1
             if matched:
                 for archive, (identity, _) in inspected.items():
                     _assert_no_symlink_ancestor(archive)
                     if self._collection_archive_identity(archive.lstat()) != identity:
-                        raise ApplicationError("Preserved archive changed before source matching commit")
-                _atomic_json(self.catalogue_file, dict(schema=1, maps=[item.as_json() for item in records]))
+                        raise ApplicationError(
+                            "Preserved archive changed before source matching commit"
+                        )
+                _atomic_json(
+                    self.catalogue_file, dict(schema=1, maps=[item.as_json() for item in records])
+                )
         return matched
 
     def map_metadata(self, record: MapRecord) -> MapMetadata:
@@ -476,7 +635,9 @@ class LauncherApplication:
             return MapMetadata()
         return read_map_metadata(self.imports / directory / "mapInfo.txt")
 
-    def create_compatibility_edition(self, record: MapRecord, rules: tuple, *, label: str) -> MapRecord:
+    def create_compatibility_edition(
+        self, record: MapRecord, rules: tuple, *, label: str
+    ) -> MapRecord:
         """Build reviewed exact rules as an independent, explicitly labelled edition."""
         with self._locked():
             return self._create_compatibility_edition_locked(record, rules, label=label)
@@ -484,24 +645,28 @@ class LauncherApplication:
     def create_recipe_edition(self, record: MapRecord, recipe_id: str) -> MapRecord:
         """Compile a bundled reviewed recipe under one lock into separate saves."""
         from .recipe_service import resolve_bundled_recipe
+
         with self._locked():
             self._stopped()
             self.profiles.recover()
             if record not in self.catalogue() or not self._is_original_variant(record):
                 raise ApplicationError("Recipe compilation requires a current original map")
             rules, binding = resolve_bundled_recipe(self, record, recipe_id)
-            return self._create_compatibility_edition_locked(record, rules,
-                label=recipe_id, recipe_binding=binding)
+            return self._create_compatibility_edition_locked(
+                record, rules, label=recipe_id, recipe_binding=binding
+            )
 
     def compatibility_recipes(self, record: MapRecord) -> tuple:
         """Return menu candidates; creation performs the full input validation."""
         from .recipe_service import recipe_choices
+
         if record not in self.catalogue():
             return ()
         return recipe_choices(record, self.installation.executable_sha256)
 
-    def _create_compatibility_edition_locked(self, record: MapRecord, rules: tuple, *,
-                                              label: str, recipe_binding=None) -> MapRecord:
+    def _create_compatibility_edition_locked(
+        self, record: MapRecord, rules: tuple, *, label: str, recipe_binding=None
+    ) -> MapRecord:
         """Shared preparation transaction; caller must hold the application lock.
 
         Recipe callers must additionally establish applicability and effective
@@ -510,8 +675,13 @@ class LauncherApplication:
         from .rules import CompatibilityRule, RuleError, applicable_rules
         from .variants import prepare_compatibility_variant, prepare_recipe_variant
         from .recipe_identity import RecipePreparationBinding, map_file_context
-        if (not isinstance(label, str) or not label.strip() or len(label) > 120
-                or any(ord(c) < 32 or ord(c) == 127 for c in label)):
+
+        if (
+            not isinstance(label, str)
+            or not label.strip()
+            or len(label) > 120
+            or any(ord(c) < 32 or ord(c) == 127 for c in label)
+        ):
             raise ApplicationError("Compatibility edition needs a short descriptive label")
         rules = tuple(rules)
         if not rules or any(not isinstance(rule, CompatibilityRule) for rule in rules):
@@ -521,9 +691,11 @@ class LauncherApplication:
         self._stopped()
         self.profiles.recover()
         records = list(self.catalogue())
-        if (record not in records
-                or record.game_executable_sha256 != self.installation.executable_sha256
-                or not self._is_original_variant(record)):
+        if (
+            record not in records
+            or record.game_executable_sha256 != self.installation.executable_sha256
+            or not self._is_original_variant(record)
+        ):
             raise ApplicationError("Compatibility preparation requires a current original map")
         selected = applicable_rules(rules, record.archive_sha256, record.game_executable_sha256)
         if len(selected) != len(rules):
@@ -532,21 +704,42 @@ class LauncherApplication:
         _assert_regular_tree(imported)
         input_assets = assets_manifest_hash(imported)
         if input_assets != assets_manifest_hash(self._prepared_root(record)):
-            raise ApplicationError("Original import and prepared assets differ; retained for inspection")
+            raise ApplicationError(
+                "Original import and prepared assets differ; retained for inspection"
+            )
         prepared_name = uuid.uuid4().hex
         destination = self.prepared / prepared_name
         if recipe_binding is not None:
             if self._stock_file_context()["identity"] != recipe_binding.stock_files_sha256:
-                raise ApplicationError("Recipe stock resource context differs; revalidate preparation")
-            variant = prepare_recipe_variant(self.baseline, imported, destination,
-                record.archive_sha256, record.game_executable_sha256, selected, recipe_binding)
+                raise ApplicationError(
+                    "Recipe stock resource context differs; revalidate preparation"
+                )
+            variant = prepare_recipe_variant(
+                self.baseline,
+                imported,
+                destination,
+                record.archive_sha256,
+                record.game_executable_sha256,
+                selected,
+                recipe_binding,
+            )
             if self._stock_file_context()["identity"] != recipe_binding.stock_files_sha256:
-                raise ApplicationError("Recipe stock context changed during preparation; output retained")
+                raise ApplicationError(
+                    "Recipe stock context changed during preparation; output retained"
+                )
         else:
-            variant = prepare_compatibility_variant(self.baseline, imported, destination,
-                record.archive_sha256, record.game_executable_sha256, selected)
+            variant = prepare_compatibility_variant(
+                self.baseline,
+                imported,
+                destination,
+                record.archive_sha256,
+                record.game_executable_sha256,
+                selected,
+            )
         if assets_manifest_hash(imported) != input_assets:
-            raise ApplicationError("Original assets changed during preparation; output retained for inspection")
+            raise ApplicationError(
+                "Original assets changed during preparation; output retained for inspection"
+            )
         existing = next((item for item in records if item.variant_id == variant.variant_id), None)
         if existing is not None:
             if recipe_binding is not None:
@@ -554,23 +747,54 @@ class LauncherApplication:
             _unfreeze_directories(destination)
             shutil.rmtree(destination)
             return existing
-        profile_id = self.profiles.register_variant(variant.variant_id, destination,
-            saved_games=removal.retained_saves(self, variant.variant_id))
+        profile_id = self.profiles.register_variant(
+            variant.variant_id,
+            destination,
+            saved_games=removal.retained_saves(self, variant.variant_id),
+        )
         if recipe_binding is not None:
-            profile = (self.profiles.live if self.profiles._state()["active"] == profile_id
-                       else self.profiles._profile_path(profile_id))
-            if map_file_context(profile)["identity"] != variant.recipe_binding["output_files_sha256"]:
-                raise ApplicationError("Registered recipe resource metadata differs; output retained")
-        new = replace(record, name=record.name + " — Experimental " + label.strip(),
-            variant_id=variant.variant_id, profile_id=profile_id,
-            prepared_directory=prepared_name, imported_at=datetime.now(timezone.utc).isoformat())
+            profile = (
+                self.profiles.live
+                if self.profiles._state()["active"] == profile_id
+                else self.profiles._profile_path(profile_id)
+            )
+            if (
+                map_file_context(profile)["identity"]
+                != variant.recipe_binding["output_files_sha256"]
+            ):
+                raise ApplicationError(
+                    "Registered recipe resource metadata differs; output retained"
+                )
+        new = replace(
+            record,
+            name=record.name + " — Experimental " + label.strip(),
+            variant_id=variant.variant_id,
+            profile_id=profile_id,
+            prepared_directory=prepared_name,
+            imported_at=datetime.now(timezone.utc).isoformat(),
+        )
         # Store original metadata, hashes and rationale, never game/map bytes.
-        receipt = dict(schema=1, parent_variant=record.variant_id,
-            variant_id=variant.variant_id, assets_sha256=variant.assets_sha256,
-            archive_sha256=record.archive_sha256, game_executable_sha256=record.game_executable_sha256,
-            rules=[dict(id=rule.rule_id, version=rule.version, provenance=rule.provenance,
-                reason=rule.reason, files=[dict(path=p.path, before=p.before_sha256,
-                after=p.after_sha256) for p in rule.patches]) for rule in selected])
+        receipt = dict(
+            schema=1,
+            parent_variant=record.variant_id,
+            variant_id=variant.variant_id,
+            assets_sha256=variant.assets_sha256,
+            archive_sha256=record.archive_sha256,
+            game_executable_sha256=record.game_executable_sha256,
+            rules=[
+                dict(
+                    id=rule.rule_id,
+                    version=rule.version,
+                    provenance=rule.provenance,
+                    reason=rule.reason,
+                    files=[
+                        dict(path=p.path, before=p.before_sha256, after=p.after_sha256)
+                        for p in rule.patches
+                    ],
+                )
+                for rule in selected
+            ],
+        )
         if variant.recipe_binding is not None:
             receipt.update(schema=2, recipe_binding=variant.recipe_binding)
             new = replace(new, recipe_receipt_sha256=self._recipe_receipt_hash(receipt))
@@ -586,14 +810,23 @@ class LauncherApplication:
 
     @staticmethod
     def _recipe_receipt_hash(receipt: dict) -> str:
-        return hashlib.sha256(json.dumps(receipt, sort_keys=True, separators=(",", ":"),
-                                         ensure_ascii=True).encode("ascii")).hexdigest()
+        return hashlib.sha256(
+            json.dumps(receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+                "ascii"
+            )
+        ).hexdigest()
 
     def _stock_file_context(self) -> dict:
         from .recipe_identity import file_context
-        stock = self.installation.steamapps_root / "common/Sid Meier's Railroads/SMRailroadsData/assets"
-        return file_context({"installed_assets": stock}, required_roles=("installed_assets",),
-                            hash_cache=self._resource_hash_cache)
+
+        stock = (
+            self.installation.steamapps_root / "common/Sid Meier's Railroads/SMRailroadsData/assets"
+        )
+        return file_context(
+            {"installed_assets": stock},
+            required_roles=("installed_assets",),
+            hash_cache=self._resource_hash_cache,
+        )
 
     def _validate_recipe_context(self, record: MapRecord) -> None:
         """Reject missing/changed receipts or resource context before activation."""
@@ -601,6 +834,7 @@ class LauncherApplication:
             return
         from .recipe_identity import map_file_context
         from .resource_identity import ResourceFingerprintError
+
         path = self.library / "compatibility-preparations" / (record.variant_id + ".json")
         _assert_no_symlink_ancestor(path)
         try:
@@ -616,41 +850,69 @@ class LauncherApplication:
                         break
                     chunks.append(chunk)
                     size += len(chunk)
-                same = lambda st: (st.st_dev, st.st_ino, st.st_mode, st.st_size,
-                                   st.st_mtime_ns, st.st_ctime_ns)
-                if (size != before.st_size or same(before) != same(os.fstat(fd))
-                        or same(before) != same(path.lstat())):
+                same = lambda st: (
+                    st.st_dev,
+                    st.st_ino,
+                    st.st_mode,
+                    st.st_size,
+                    st.st_mtime_ns,
+                    st.st_ctime_ns,
+                )
+                if (
+                    size != before.st_size
+                    or same(before) != same(os.fstat(fd))
+                    or same(before) != same(path.lstat())
+                ):
                     raise ValueError("receipt changed while reading")
                 receipt = json.loads(b"".join(chunks))
             finally:
                 os.close(fd)
-            if (not isinstance(receipt, dict) or receipt.get("schema") != 2 or receipt.get("variant_id") != record.variant_id
-                    or receipt.get("archive_sha256") != record.archive_sha256
-                    or receipt.get("game_executable_sha256") != record.game_executable_sha256
-                    or self._recipe_receipt_hash(receipt) != record.recipe_receipt_sha256):
+            if (
+                not isinstance(receipt, dict)
+                or receipt.get("schema") != 2
+                or receipt.get("variant_id") != record.variant_id
+                or receipt.get("archive_sha256") != record.archive_sha256
+                or receipt.get("game_executable_sha256") != record.game_executable_sha256
+                or self._recipe_receipt_hash(receipt) != record.recipe_receipt_sha256
+            ):
                 raise ValueError("receipt binding differs")
             binding = receipt["recipe_binding"]
-            root = (self.profiles.live if self.profiles._state()["active"] == record.profile_id
-                    else self.profiles._profile_path(record.profile_id))
-            if (map_file_context(root, hash_cache=self._resource_hash_cache)["identity"] != binding["output_files_sha256"]
-                    or self._stock_file_context()["identity"] != binding["stock_files_sha256"]):
+            root = (
+                self.profiles.live
+                if self.profiles._state()["active"] == record.profile_id
+                else self.profiles._profile_path(record.profile_id)
+            )
+            if (
+                map_file_context(root, hash_cache=self._resource_hash_cache)["identity"]
+                != binding["output_files_sha256"]
+                or self._stock_file_context()["identity"] != binding["stock_files_sha256"]
+            ):
                 raise ValueError("resource context differs")
         except (OSError, ValueError, KeyError, TypeError, ResourceFingerprintError) as exc:
-            raise ApplicationError("Compiled map resources or receipt changed; revalidate this edition before playing") from exc
+            raise ApplicationError(
+                "Compiled map resources or receipt changed; revalidate this edition before playing"
+            ) from exc
 
     def create_edition(self, record: MapRecord, *, editor: bool, difficulty: bool) -> MapRecord:
         """Prepare and register an opt-in edition without activating it or copying saves."""
         from .editions import SUPPORTED_GAME
         from .variants import _prepare_variant
+
         if editor:
-            raise ApplicationError("Editor saving needs an isolated export workflow before it can be enabled safely")
+            raise ApplicationError(
+                "Editor saving needs an isolated export workflow before it can be enabled safely"
+            )
         if record.recipe_receipt_sha256:
-            raise ApplicationError("Options on a compiled map require a separately reviewed combined recipe")
+            raise ApplicationError(
+                "Options on a compiled map require a separately reviewed combined recipe"
+            )
         with self._locked():
             self._stopped()
             records = list(self.catalogue())
             if record not in records or record.game_executable_sha256 != SUPPORTED_GAME:
-                raise ApplicationError("Edition options require the inspected Steam Mac game build and a current library map")
+                raise ApplicationError(
+                    "Edition options require the inspected Steam Mac game build and a current library map"
+                )
             if Path(record.prepared_directory).name != record.prepared_directory:
                 raise ApplicationError("Invalid prepared profile path")
             source = self.prepared / record.prepared_directory
@@ -658,20 +920,39 @@ class LauncherApplication:
             prepared_name = uuid.uuid4().hex
             destination = self.prepared / prepared_name
             options = dict(editor=editor, difficulty=difficulty, parent=record.variant_id)
-            variant = _prepare_variant(source, source, destination, record.archive_sha256,
-                                       record.game_executable_sha256, (), options)
+            variant = _prepare_variant(
+                source,
+                source,
+                destination,
+                record.archive_sha256,
+                record.game_executable_sha256,
+                (),
+                options,
+            )
             existing = next((r for r in records if r.variant_id == variant.variant_id), None)
             if existing:
                 # Only this newly created independent output is removed.
                 _unfreeze_directories(destination)
                 shutil.rmtree(destination)
                 return existing
-            profile_id = self.profiles.register_variant(variant.variant_id, destination,
-                saved_games=removal.retained_saves(self, variant.variant_id))
-            label = " + ".join(name for name, enabled in (("Editor", editor), ("Custom difficulty", difficulty)) if enabled)
-            new = replace(record, name=record.name + " — Experimental " + label,
-                          variant_id=variant.variant_id, profile_id=profile_id,
-                          prepared_directory=prepared_name, imported_at=datetime.now(timezone.utc).isoformat())
+            profile_id = self.profiles.register_variant(
+                variant.variant_id,
+                destination,
+                saved_games=removal.retained_saves(self, variant.variant_id),
+            )
+            label = " + ".join(
+                name
+                for name, enabled in (("Editor", editor), ("Custom difficulty", difficulty))
+                if enabled
+            )
+            new = replace(
+                record,
+                name=record.name + " — Experimental " + label,
+                variant_id=variant.variant_id,
+                profile_id=profile_id,
+                prepared_directory=prepared_name,
+                imported_at=datetime.now(timezone.utc).isoformat(),
+            )
             self._write_import_checks(new)
             records.append(new)
             _atomic_json(self.catalogue_file, dict(schema=1, maps=[r.as_json() for r in records]))
@@ -691,8 +972,20 @@ class LauncherApplication:
         temporary = Path(name)
         try:
             result = subprocess.run(
-                ["/usr/bin/sips", "-s", "format", "png", "-Z", "360", str(source), "--out", str(temporary)],
-                capture_output=True, timeout=15, check=False,
+                [
+                    "/usr/bin/sips",
+                    "-s",
+                    "format",
+                    "png",
+                    "-Z",
+                    "360",
+                    str(source),
+                    "--out",
+                    str(temporary),
+                ],
+                capture_output=True,
+                timeout=15,
+                check=False,
             )
             if result.returncode or not temporary.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"):
                 return
@@ -707,7 +1000,9 @@ class LauncherApplication:
             _fsync_dir(self.icons)
 
     def map_icon(self, record: MapRecord) -> Optional[Path]:
-        if len(record.variant_id) != 64 or any(char not in "0123456789abcdef" for char in record.variant_id):
+        if len(record.variant_id) != 64 or any(
+            char not in "0123456789abcdef" for char in record.variant_id
+        ):
             return None
         path = self.icons / (record.variant_id + ".png")
         if any(part.is_symlink() for part in (path, *path.parents)):
@@ -717,17 +1012,26 @@ class LauncherApplication:
         return None
 
     def _resource_snapshot(self, profile: Path) -> dict:
-        stock = self.installation.steamapps_root / "common/Sid Meier's Railroads/SMRailroadsData/assets"
-        return fingerprint_resources({"installed_assets": stock,
-                                      "custom_assets": profile / "CustomAssets",
-                                      "user_maps": profile / "UserMaps"},
-                                     hash_cache=self._resource_hash_cache)
+        stock = (
+            self.installation.steamapps_root / "common/Sid Meier's Railroads/SMRailroadsData/assets"
+        )
+        return fingerprint_resources(
+            {
+                "installed_assets": stock,
+                "custom_assets": profile / "CustomAssets",
+                "user_maps": profile / "UserMaps",
+            },
+            hash_cache=self._resource_hash_cache,
+        )
 
     def _legacy_verification_for(self, record: MapRecord) -> Optional[GameplayVerification]:
         """Return gameplay evidence only for the current build and exact live assets."""
-        candidates = [item for item in self.verification_store.records()
-                      if (item.archive_sha256, item.game_executable_sha256, item.variant_id)
-                      == (record.archive_sha256, record.game_executable_sha256, record.variant_id)]
+        candidates = [
+            item
+            for item in self.verification_store.records()
+            if (item.archive_sha256, item.game_executable_sha256, item.variant_id)
+            == (record.archive_sha256, record.game_executable_sha256, record.variant_id)
+        ]
         if not candidates:
             return None
         with self._locked():
@@ -735,21 +1039,30 @@ class LauncherApplication:
             if self.profiles.journal.exists():
                 return None
             state = self.profiles._state()
-            root = (self.profiles.live if state["active"] == record.profile_id
-                    else self.profiles._profile_path(record.profile_id))
+            root = (
+                self.profiles.live
+                if state["active"] == record.profile_id
+                else self.profiles._profile_path(record.profile_id)
+            )
             marker = self.profiles._marker(root, record.profile_id)
             latest = self.verification_store.latest(
-                record.archive_sha256, self.installation.executable_sha256,
-                record.variant_id, marker["assets_sha256"])
+                record.archive_sha256,
+                self.installation.executable_sha256,
+                record.variant_id,
+                marker["assets_sha256"],
+            )
             if latest is None or not latest.resources_sha256:
                 # Preserve limited historical warnings without assigning scenarios.
                 # Resource metadata alone cannot establish named action coverage.
                 return latest
             current = self._resource_snapshot(root)
             return self.verification_store.latest(
-                record.archive_sha256, self.installation.executable_sha256,
-                record.variant_id, marker["assets_sha256"],
-                resources_sha256=current["identity"])
+                record.archive_sha256,
+                self.installation.executable_sha256,
+                record.variant_id,
+                marker["assets_sha256"],
+                resources_sha256=current["identity"],
+            )
 
     def bind_scenario_inventory(self, path: Path, expected_sha256: str) -> str:
         """Bind a coordinator-accepted immutable inventory without importing old facts."""
@@ -763,42 +1076,64 @@ class LauncherApplication:
         if self.profiles.journal.exists():
             raise EvidenceError("Profile recovery prevents current evidence claims")
         state = self.profiles._state()
-        root = (self.profiles.live if state["active"] == record.profile_id
-                else self.profiles._profile_path(record.profile_id))
+        root = (
+            self.profiles.live
+            if state["active"] == record.profile_id
+            else self.profiles._profile_path(record.profile_id)
+        )
         marker = self.profiles._marker(root, record.profile_id)
         resources = self._resource_snapshot(root)
         scenarios = []
         for name in record.scenarios:
             from .scenario_evidence import relative
+
             relative(name)
             content = read_bytes(root / name, MAX_RECEIPT_BYTES)
-            scenarios.append(scenario_key(record.archive_sha256, record.variant_id, name,
-                                         hashlib.sha256(content).hexdigest()))
-        context = engine_context(self.installation.executable_sha256, marker["assets_sha256"], resources, options)
+            scenarios.append(
+                scenario_key(
+                    record.archive_sha256,
+                    record.variant_id,
+                    name,
+                    hashlib.sha256(content).hexdigest(),
+                )
+            )
+        context = engine_context(
+            self.installation.executable_sha256, marker["assets_sha256"], resources, options
+        )
         return scenarios, context, resources, marker
 
-    def prepare_scenario_evidence_build(self, record: MapRecord, inventory_id: str,
-                                        *, options: dict) -> EvidenceRecord:
+    def prepare_scenario_evidence_build(
+        self, record: MapRecord, inventory_id: str, *, options: dict
+    ) -> EvidenceRecord:
         """Capture current exact inputs for a future explicit observation runner."""
         with self._locked():
             self._stopped()
             if record not in self.catalogue():
                 raise EvidenceError("Map is absent from catalogue")
             scenarios, context, resources, marker = self._scenario_context(record, options)
-            inventories = {r.id:r for r in self.scenario_evidence_store.records() if r.kind == "inventory"}
+            inventories = {
+                r.id: r for r in self.scenario_evidence_store.records() if r.kind == "inventory"
+            }
             if inventory_id not in inventories:
                 raise EvidenceError("Accepted inventory record is absent")
             inventory = inventories[inventory_id]
             if any(s not in inventory.payload["scenarios"] for s in scenarios):
                 raise EvidenceError("Current scenario bytes differ from accepted inventory")
-            build = build_record(inventory, record.archive_sha256, record.variant_id,
-                                 marker["assets_sha256"], resources,
-                                 context["game_sha256"], options)
+            build = build_record(
+                inventory,
+                record.archive_sha256,
+                record.variant_id,
+                marker["assets_sha256"],
+                resources,
+                context["game_sha256"],
+                options,
+            )
             self.scenario_evidence_store.append(build)
             return build
 
-    def record_scenario_action(self, observation: EvidenceRecord,
-                               interpretation: EvidenceRecord) -> str:
+    def record_scenario_action(
+        self, observation: EvidenceRecord, interpretation: EvidenceRecord
+    ) -> str:
         """Explicit offline runner entry point; observations cannot imply broad coverage."""
         if observation.kind != "observation":
             raise EvidenceError("An exact raw observation is required")
@@ -806,24 +1141,40 @@ class LauncherApplication:
         # them even if validation, analysis or the second append fails. Pending
         # raw facts conservatively block earlier passes in the shared reducer.
         self.scenario_evidence_store.append(observation)
-        if interpretation.kind != "interpretation" or interpretation.payload["observation"] != observation.id:
+        if (
+            interpretation.kind != "interpretation"
+            or interpretation.payload["observation"] != observation.id
+        ):
             raise EvidenceError("Interpretation must reference the recorded observation")
         self.scenario_evidence_store.append(interpretation)
         return observation.id
 
-    def scenario_status_for(self, record: MapRecord, *, options: Optional[dict] = None) -> VerificationSummary:
+    def scenario_status_for(
+        self, record: MapRecord, *, options: Optional[dict] = None
+    ) -> VerificationSummary:
         issues = MapIssueStore(self.library).for_map(record, self.installation.executable_sha256)
         records = self.scenario_evidence_store.records()
         legacy = self._legacy_verification_for(record)
-        historical = tuple(r for r in self.verification_store.records()
-                           if legacy is not None and r.archive_sha256 == legacy.archive_sha256
-                           and r.variant_id == legacy.variant_id
-                           and r.game_executable_sha256 == legacy.game_executable_sha256
-                           and r.assets_sha256 == legacy.assets_sha256
-                           and (not r.resources_sha256 or r.resources_sha256 == legacy.resources_sha256))
+        historical = tuple(
+            r
+            for r in self.verification_store.records()
+            if legacy is not None
+            and r.archive_sha256 == legacy.archive_sha256
+            and r.variant_id == legacy.variant_id
+            and r.game_executable_sha256 == legacy.game_executable_sha256
+            and r.assets_sha256 == legacy.assets_sha256
+            and (not r.resources_sha256 or r.resources_sha256 == legacy.resources_sha256)
+        )
         if not records:
-            scenarios = [dict(archive_sha256=record.archive_sha256, edition_id=record.variant_id,
-                              scenario_path=name, scenario_sha256="") for name in record.scenarios]
+            scenarios = [
+                dict(
+                    archive_sha256=record.archive_sha256,
+                    edition_id=record.variant_id,
+                    scenario_path=name,
+                    scenario_sha256="",
+                )
+                for name in record.scenarios
+            ]
             result = reduce_verification((), scenarios, {}, historical=historical)
         else:
             with self._locked():
@@ -833,16 +1184,28 @@ class LauncherApplication:
 
     def verification_for(self, record: MapRecord, *, options: Optional[dict] = None):
         """All views share scenario reduction; legacy results remain limited facts."""
-        if (MapIssueStore(self.library).for_map(record, self.installation.executable_sha256)
-                or self.scenario_evidence_store.path.exists() or self._legacy_verification_for(record) is not None):
+        if (
+            MapIssueStore(self.library).for_map(record, self.installation.executable_sha256)
+            or self.scenario_evidence_store.path.exists()
+            or self._legacy_verification_for(record) is not None
+        ):
             return self.scenario_status_for(record, options=options)
         return None
 
     def catalogue_verification(self, *, options: Optional[dict] = None) -> dict:
-        return {r.variant_id: self.scenario_status_for(r, options=options) for r in self.catalogue()}
+        return {
+            r.variant_id: self.scenario_status_for(r, options=options) for r in self.catalogue()
+        }
 
-    def record_gameplay(self, record: MapRecord, observed_at: str, reporter: str,
-                        checks: dict[str, bool], scope: str, issue: str = "") -> GameplayVerification:
+    def record_gameplay(
+        self,
+        record: MapRecord,
+        observed_at: str,
+        reporter: str,
+        checks: dict[str, bool],
+        scope: str,
+        issue: str = "",
+    ) -> GameplayVerification:
         """Record an externally observed stopped-game result for the active map."""
         with self._locked():
             self._stopped()
@@ -854,9 +1217,17 @@ class LauncherApplication:
             marker = self.profiles._marker(self.profiles.live, record.profile_id)
             resources = self._resource_snapshot(self.profiles.live)
             verification = GameplayVerification(
-                record.archive_sha256, self.installation.executable_sha256,
-                record.variant_id, marker["assets_sha256"], observed_at,
-                reporter, checks, scope, issue, resources["identity"])
+                record.archive_sha256,
+                self.installation.executable_sha256,
+                record.variant_id,
+                marker["assets_sha256"],
+                observed_at,
+                reporter,
+                checks,
+                scope,
+                issue,
+                resources["identity"],
+            )
             receipt = self.library / "verification-resources" / (resources["identity"] + ".json")
             _assert_no_symlink_ancestor(receipt)
             receipt.parent.mkdir(exist_ok=True, mode=0o700)
@@ -876,7 +1247,9 @@ class LauncherApplication:
         if record is None:
             raise ApplicationError("Choose an imported map")
         if record.game_executable_sha256 != self.installation.executable_sha256:
-            raise ApplicationError("This map was prepared for another game build; preserve its saves and revalidate")
+            raise ApplicationError(
+                "This map was prepared for another game build; preserve its saves and revalidate"
+            )
         self._validate_recipe_context(record)
 
     def activate(self, profile_id: str) -> str:
@@ -894,12 +1267,17 @@ class LauncherApplication:
             settings_before = settings_after = None
             if profile_id != ORIGINAL:
                 record = next(r for r in self.catalogue() if r.profile_id == profile_id)
-                root = (self.profiles.live if self.profiles._state()["active"] == profile_id
-                        else self.profiles._profile_path(profile_id))
+                root = (
+                    self.profiles.live
+                    if self.profiles._state()["active"] == profile_id
+                    else self.profiles._profile_path(profile_id)
+                )
                 for scenario in record.scenarios:
                     candidate = root / scenario
                     _assert_no_symlink_ancestor(candidate)
-                    if not candidate.is_file() or not candidate.resolve().is_relative_to(root.resolve()):
+                    if not candidate.is_file() or not candidate.resolve().is_relative_to(
+                        root.resolve()
+                    ):
                         raise ApplicationError("The selected map's scenario file needs inspection")
                 settings = root / "Settings.ini"
                 _assert_no_symlink_ancestor(settings)
@@ -918,10 +1296,14 @@ class LauncherApplication:
                     target = self.profiles.live / "Settings.ini"
                     _assert_no_symlink_ancestor(target)
                     if target.read_bytes() != settings_before:
-                        raise ApplicationError("Map settings changed before launch; retry after inspection")
+                        raise ApplicationError(
+                            "Map settings changed before launch; retry after inspection"
+                        )
                     temporary = None
                     try:
-                        with tempfile.NamedTemporaryFile(dir=target.parent, prefix=".launch-settings-", delete=False) as stream:
+                        with tempfile.NamedTemporaryFile(
+                            dir=target.parent, prefix=".launch-settings-", delete=False
+                        ) as stream:
                             temporary = Path(stream.name)
                             stream.write(settings_after)
                             stream.flush()

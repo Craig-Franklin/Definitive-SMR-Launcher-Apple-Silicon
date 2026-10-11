@@ -18,12 +18,23 @@ from typing import Optional
 
 SCHEMA = "conditional-industry-projection-v1"
 STRING_FIELDS = (
-    "szModel", "szSecondaryModel", "szGrowKFM", "szTerrainmap",
-    "szSoundScape", "szAuctionImage", "szReportImage",
+    "szModel",
+    "szSecondaryModel",
+    "szGrowKFM",
+    "szTerrainmap",
+    "szSoundScape",
+    "szAuctionImage",
+    "szReportImage",
 )
 UNKNOWNS = (
-    "U_XML", "U_STRINGS", "U_NUMERIC", "U_DEFAULT_LISTS", "U_LOCALE",
-    "U_CONTAINERS", "U_PROVIDER", "U_RUNTIME",
+    "U_XML",
+    "U_STRINGS",
+    "U_NUMERIC",
+    "U_DEFAULT_LISTS",
+    "U_LOCALE",
+    "U_CONTAINERS",
+    "U_PROVIDER",
+    "U_RUNTIME",
 )
 
 
@@ -116,6 +127,7 @@ class ByteReader:
     bytes (including malformed bytes) or None: supplied validity is a condition,
     distinct from the independent parser's rejection of a valid-marked stream.
     """
+
     identity: ReaderIdentity
     payload: Optional[bytes]
 
@@ -168,8 +180,11 @@ def _unsupported(reason):
 
 
 def _hash(value):
-    if (type(value) is not Sha256 or type(value.value) is not str
-            or re.fullmatch(r"[0-9a-f]{64}", value.value) is None):
+    if (
+        type(value) is not Sha256
+        or type(value.value) is not str
+        or re.fullmatch(r"[0-9a-f]{64}", value.value) is None
+    ):
         _invalid("malformed SHA-256 identity")
 
 
@@ -212,11 +227,13 @@ def _contract(value, limits):
     _table_identity(value.table)
     if value.table.build != value.build:
         _invalid("contract/table build mismatch")
-    if (type(value.table_size) is not int
-            or not 1 <= value.table_size <= limits.table_entries):
+    if type(value.table_size) is not int or not 1 <= value.table_size <= limits.table_entries:
         _invalid("invalid contract table bound")
-    if (type(value.string_fields) is not tuple or value.string_fields != STRING_FIELDS
-            or any(type(f) is not str for f in value.string_fields)):
+    if (
+        type(value.string_fields) is not tuple
+        or value.string_fields != STRING_FIELDS
+        or any(type(f) is not str for f in value.string_fields)
+    ):
         _invalid("contract field schema mismatch")
 
 
@@ -298,8 +315,12 @@ def _binding(base, scenario, contract, table, context, expected, limits):
             _invalid("malformed expectation reader identity")
         if r.content is not None:
             _hash(r.content)
-        if (r.state is ReaderState.ABSENT and r.content is not None
-                or r.state is ReaderState.VALID and r.content is None):
+        if (
+            r.state is ReaderState.ABSENT
+            and r.content is not None
+            or r.state is ReaderState.VALID
+            and r.content is None
+        ):
             _invalid("malformed expectation reader binding")
     if e != identity:
         _invalid("expectation is bound to different inputs")
@@ -366,7 +387,7 @@ def _parse(payload, limits):
         end = text.find(">", pos + 1)
         if end < 0:
             _invalid("malformed XML: truncated tag")
-        token = text[pos + 1:end]
+        token = text[pos + 1 : end]
         closing = token.startswith("/")
         if closing:
             token = token[1:]
@@ -410,7 +431,8 @@ def _domain(document):
         "document": {"RRTIndustries"},
         "RRTIndustries": {"Industries"},
         "Industries": {"RRTIndustry"},
-        "RRTIndustry": set(STRING_FIELDS) | {"szName", "Production", "DisplayNames", "Locations", "Wrapper"},
+        "RRTIndustry": set(STRING_FIELDS)
+        | {"szName", "Production", "DisplayNames", "Locations", "Wrapper"},
         "Wrapper": set(STRING_FIELDS) | {"szName", "Wrapper"},
         "Production": {"Resource", "Other"},
         "Resource": {"Input", "Output"},
@@ -428,7 +450,13 @@ def _domain(document):
                 _unsupported("nested scalar content")
             continue
         if node.value == "Other":
-            permitted = {"Input", "Output"} if parent == "Production" else {"InCity"} if parent == "Locations" else set()
+            permitted = (
+                {"Input", "Output"}
+                if parent == "Production"
+                else {"InCity"}
+                if parent == "Locations"
+                else set()
+            )
         else:
             permitted = allowed.get(node.value if node.kind == "element" else "document", set())
         for child in node.children:
@@ -469,7 +497,7 @@ def _records(document):
     root = _first(document, "RRTIndustries")
     container = _first(root, "Industries")
     start = _first(container, "RRTIndustry")
-    return [] if start is None else container.children[container.children.index(start):]
+    return [] if start is None else container.children[container.children.index(start) :]
 
 
 def _load(records, nodes, origin, limits, count):
@@ -480,9 +508,13 @@ def _load(records, nodes, origin, limits, count):
         key = _named(node, "szName", "")
         if key not in records:
             records[key] = {
-                "key": key, "constructed_in": origin, "scenario_touched": False,
+                "key": key,
+                "constructed_in": origin,
+                "scenario_touched": False,
                 "strings": {f: _unknown() for f in STRING_FIELDS},
-                "production": _unknown(), "display_names": _unknown(), "locations": _unknown(),
+                "production": _unknown(),
+                "display_names": _unknown(),
+                "locations": _unknown(),
             }
         record = records[key]
         if origin == "scenario":
@@ -490,21 +522,24 @@ def _load(records, nodes, origin, limits, count):
         for f in STRING_FIELDS:
             record["strings"][f] = _named(node, f, record["strings"][f])
         for container_name, entry, destination in (
-                ("Production", "Resource", "production"),
-                ("DisplayNames", "szDisplayName", "display_names"),
-                ("Locations", "Location", "locations")):
+            ("Production", "Resource", "production"),
+            ("DisplayNames", "szDisplayName", "display_names"),
+            ("Locations", "Location", "locations"),
+        ):
             container = _first(node, container_name)
             first = _first(container, entry)
             if first is None:
                 continue
             result = []
-            for item in container.children[container.children.index(first):]:
+            for item in container.children[container.children.index(first) :]:
                 if destination == "display_names":
                     if item.kind != "element" or item.value != entry:
                         break
                     result.append(_value(item))
                 elif destination == "production":
-                    result.append({"Input": _named(item, "Input", ""), "Output": _named(item, "Output", "")})
+                    result.append(
+                        {"Input": _named(item, "Input", ""), "Output": _named(item, "Output", "")}
+                    )
                 else:
                     result.append(_named(item, "InCity", ""))
             record[destination] = result
@@ -581,12 +616,26 @@ def _expected(value, limits):
         _unsupported("expectation record budget exceeded")
     record_keys = set()
     for record in value["records"]:
-        shape(record, ("key", "constructed_in", "scenario_touched", "strings", "production", "display_names", "locations"))
+        shape(
+            record,
+            (
+                "key",
+                "constructed_in",
+                "scenario_touched",
+                "strings",
+                "production",
+                "display_names",
+                "locations",
+            ),
+        )
         string(record["key"])
         if record["key"] in record_keys:
             _invalid("duplicate expectation record")
         record_keys.add(record["key"])
-        if type(record["constructed_in"]) is not str or record["constructed_in"] not in ("base", "scenario"):
+        if type(record["constructed_in"]) is not str or record["constructed_in"] not in (
+            "base",
+            "scenario",
+        ):
             _invalid("expectation origin mismatch")
         if type(record["scenario_touched"]) is not bool:
             _invalid("expectation touched flag must be bool")
@@ -622,10 +671,16 @@ def _expected(value, limits):
         pruned.add(key)
 
 
-def compare_projection(*, base: ByteReader, scenario: ByteReader,
-                       contract: ContractIdentity, table: ReviewedTable,
-                       context: ProjectionContext, expected: ExpectedProjection,
-                       limits: Limits = Limits()) -> ComparisonResult:
+def compare_projection(
+    *,
+    base: ByteReader,
+    scenario: ByteReader,
+    contract: ContractIdentity,
+    table: ReviewedTable,
+    context: ProjectionContext,
+    expected: ExpectedProjection,
+    limits: Limits = Limits(),
+) -> ComparisonResult:
     """Compare explicit bytes to an exactly bound, reviewed expected projection.
 
     This pure API performs no file, process, provider, application or engine work.
@@ -637,8 +692,13 @@ def compare_projection(*, base: ByteReader, scenario: ByteReader,
         identity = _binding(base, scenario, contract, table, context, expected, limits)
         _expected(expected.value, limits)
         projection = _projection(base, scenario, table, limits)
-        disposition = (Disposition.CONDITIONAL_MATCH if projection == expected.value
-                       else Disposition.CONDITIONAL_MISMATCH)
-        return ComparisonResult(disposition, "conditional projection comparison", identity, projection)
+        disposition = (
+            Disposition.CONDITIONAL_MATCH
+            if projection == expected.value
+            else Disposition.CONDITIONAL_MISMATCH
+        )
+        return ComparisonResult(
+            disposition, "conditional projection comparison", identity, projection
+        )
     except _Reject as error:
         return ComparisonResult(error.disposition, error.reason)

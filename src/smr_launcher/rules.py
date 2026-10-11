@@ -4,6 +4,7 @@ Rules are intentionally narrow. A rule must name the source archive and game
 executable hashes and each file's complete before and after hashes. It cannot
 modify an original archive or infer a repair from a filename alone.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -52,10 +53,19 @@ def _read_existing_addition(path: Path, expected_size: int) -> tuple[bytes, os.s
             pieces.append(chunk)
             size += len(chunk)
         after = os.fstat(fd)
-        same = lambda st: (st.st_dev, st.st_ino, st.st_mode, st.st_size,
-                           st.st_mtime_ns, st.st_ctime_ns)
-        if (size != expected_size or same(before) != same(after)
-                or same(before) != same(path.lstat())):
+        same = lambda st: (
+            st.st_dev,
+            st.st_ino,
+            st.st_mode,
+            st.st_size,
+            st.st_mtime_ns,
+            st.st_ctime_ns,
+        )
+        if (
+            size != expected_size
+            or same(before) != same(after)
+            or same(before) != same(path.lstat())
+        ):
             raise RuleError("Added asset target changed while reading: " + str(path))
         return b"".join(pieces), before
     finally:
@@ -72,15 +82,27 @@ class TokenPatch:
 
     def __post_init__(self) -> None:
         parts = self.path.split("/")
-        if (len(parts) < 2 or parts[0] not in ("CustomAssets", "UserMaps")
-                or unicodedata.normalize("NFC", self.path) != self.path
-                or any(part in ("", ".", "..") or "\\" in part or ":" in part
-                       or any(ord(char) < 32 or ord(char) == 127 for char in part)
-                       for part in parts)):
+        if (
+            len(parts) < 2
+            or parts[0] not in ("CustomAssets", "UserMaps")
+            or unicodedata.normalize("NFC", self.path) != self.path
+            or any(
+                part in ("", ".", "..")
+                or "\\" in part
+                or ":" in part
+                or any(ord(char) < 32 or ord(char) == 127 for char in part)
+                for part in parts
+            )
+        ):
             raise RuleError("Patch path must be a regular file below an install root")
         if not _hash(self.before_sha256) or not _hash(self.after_sha256):
             raise RuleError("Patch must declare exact before and after SHA-256 hashes")
-        if not self.old or self.old == self.new or len(self.old) > 1 << 20 or len(self.new) > 1 << 20:
+        if (
+            not self.old
+            or self.old == self.new
+            or len(self.old) > 1 << 20
+            or len(self.new) > 1 << 20
+        ):
             raise RuleError("Patch tokens must be small, nonempty, and different")
 
 
@@ -92,6 +114,7 @@ class AssetAddition:
     source the bytes from another preserved import, but the resulting rule is
     self-contained and cannot read arbitrary paths during preparation.
     """
+
     path: str
     after_sha256: str
     data: bytes
@@ -99,11 +122,18 @@ class AssetAddition:
 
     def __post_init__(self) -> None:
         parts = self.path.split("/")
-        if (len(parts) < 2 or parts[0] not in ("CustomAssets", "UserMaps")
-                or unicodedata.normalize("NFC", self.path) != self.path
-                or any(part in ("", ".", "..") or "\\" in part or ":" in part
-                       or any(ord(char) < 32 or ord(char) == 127 for char in part)
-                       for part in parts)):
+        if (
+            len(parts) < 2
+            or parts[0] not in ("CustomAssets", "UserMaps")
+            or unicodedata.normalize("NFC", self.path) != self.path
+            or any(
+                part in ("", ".", "..")
+                or "\\" in part
+                or ":" in part
+                or any(ord(char) < 32 or ord(char) == 127 for char in part)
+                for part in parts
+            )
+        ):
             raise RuleError("Added asset path must be a regular file below an install root")
         if not _hash(self.after_sha256) or not isinstance(self.data, bytes):
             raise RuleError("Added asset needs an exact SHA-256 and byte payload")
@@ -154,11 +184,17 @@ def applicable_rules(
     rules: Iterable[CompatibilityRule], archive_sha256: str, game_executable_sha256: str
 ) -> tuple[CompatibilityRule, ...]:
     """Select exact matches, rejecting ambiguous versions or overlapping files."""
-    selected = tuple(sorted(
-        (rule for rule in rules if rule.archive_sha256 == archive_sha256
-         and rule.game_executable_sha256 == game_executable_sha256),
-        key=lambda rule: (rule.rule_id, rule.version),
-    ))
+    selected = tuple(
+        sorted(
+            (
+                rule
+                for rule in rules
+                if rule.archive_sha256 == archive_sha256
+                and rule.game_executable_sha256 == game_executable_sha256
+            ),
+            key=lambda rule: (rule.rule_id, rule.version),
+        )
+    )
     identifiers = [rule.rule_id for rule in selected]
     paths = [patch.path.casefold() for rule in selected for patch in rule.patches]
     paths.extend(addition.path.casefold() for rule in selected for addition in rule.additions)
@@ -168,9 +204,12 @@ def applicable_rules(
 
 
 def apply_rules(
-    prepared_copy: Path, archive_sha256: str, game_executable_sha256: str,
+    prepared_copy: Path,
+    archive_sha256: str,
+    game_executable_sha256: str,
     selected: Iterable[CompatibilityRule],
-    *, metadata_policy: str | None = None,
+    *,
+    metadata_policy: str | None = None,
 ) -> RuleApplication:
     """Apply exact rules to a disposable prepared copy, after a full preflight.
 
@@ -181,8 +220,11 @@ def apply_rules(
     if metadata_policy not in (None, PRESERVE_RESOURCE_MTIMES):
         raise RuleError("Unsupported compatibility metadata policy")
     selected = tuple(sorted(selected, key=lambda rule: (rule.rule_id, rule.version)))
-    if any(rule.archive_sha256 != archive_sha256 or
-           rule.game_executable_sha256 != game_executable_sha256 for rule in selected):
+    if any(
+        rule.archive_sha256 != archive_sha256
+        or rule.game_executable_sha256 != game_executable_sha256
+        for rule in selected
+    ):
         raise RuleError("A selected rule does not apply to this archive and game")
     if applicable_rules(selected, archive_sha256, game_executable_sha256) != selected:
         raise RuleError("Rule selection is ambiguous")
@@ -199,14 +241,24 @@ def apply_rules(
     for rule in selected:
         for patch in rule.patches:
             path = root.joinpath(*patch.path.split("/"))
-            if not path.is_file() or path.is_symlink() or path.stat().st_size > MAX_PATCHED_FILE_BYTES:
+            if (
+                not path.is_file()
+                or path.is_symlink()
+                or path.stat().st_size > MAX_PATCHED_FILE_BYTES
+            ):
                 raise RuleError("Patch target is missing or too large: " + patch.path)
             before = path.stat()
             data = path.read_bytes()
             if metadata_policy:
                 after = path.stat()
-                identity = lambda st: (st.st_dev, st.st_ino, st.st_mode, st.st_size,
-                                       st.st_mtime_ns, st.st_ctime_ns)
+                identity = lambda st: (
+                    st.st_dev,
+                    st.st_ino,
+                    st.st_mode,
+                    st.st_size,
+                    st.st_mtime_ns,
+                    st.st_ctime_ns,
+                )
                 if identity(before) != identity(after) or len(data) != before.st_size:
                     raise RuleError("Patch resource metadata changed during preflight")
                 metadata[path] = before
@@ -229,12 +281,18 @@ def apply_rules(
                 try:
                     existing_data, existing_stat = _read_existing_addition(path, len(addition.data))
                 except (OSError, RuleError) as exc:
-                    raise RuleError("Added asset target already exists with different content or metadata: "
-                                    + addition.path) from exc
+                    raise RuleError(
+                        "Added asset target already exists with different content or metadata: "
+                        + addition.path
+                    ) from exc
                 if _digest(existing_data) == addition.after_sha256:
-                    if (metadata_policy == PRESERVE_RESOURCE_MTIMES
-                            and existing_stat.st_mtime_ns != addition.mtime_ns):
-                        raise RuleError("Added asset target has a different mtime: " + addition.path)
+                    if (
+                        metadata_policy == PRESERVE_RESOURCE_MTIMES
+                        and existing_stat.st_mtime_ns != addition.mtime_ns
+                    ):
+                        raise RuleError(
+                            "Added asset target has a different mtime: " + addition.path
+                        )
                     outputs.append((addition.path, addition.after_sha256))
                     continue
                 raise RuleError("Added asset target already exists: " + addition.path)
@@ -252,22 +310,43 @@ def apply_rules(
             outputs.append((addition.path, addition.after_sha256))
     descriptor = []
     for rule in selected:
-        item = dict(id=rule.rule_id, version=rule.version, provenance=rule.provenance,
-                    reason=rule.reason, archive=rule.archive_sha256,
-                    game=rule.game_executable_sha256,
-                    patches=[dict(path=patch.path, before=patch.before_sha256,
-                                  after=patch.after_sha256, old=_digest(patch.old),
-                                  new=_digest(patch.new)) for patch in rule.patches])
+        item = dict(
+            id=rule.rule_id,
+            version=rule.version,
+            provenance=rule.provenance,
+            reason=rule.reason,
+            archive=rule.archive_sha256,
+            game=rule.game_executable_sha256,
+            patches=[
+                dict(
+                    path=patch.path,
+                    before=patch.before_sha256,
+                    after=patch.after_sha256,
+                    old=_digest(patch.old),
+                    new=_digest(patch.new),
+                )
+                for patch in rule.patches
+            ],
+        )
         if rule.additions:
-            item["additions"] = [dict(path=addition.path, after=addition.after_sha256,
-                                       size=len(addition.data), mtime_ns=addition.mtime_ns)
-                                 for addition in rule.additions]
+            item["additions"] = [
+                dict(
+                    path=addition.path,
+                    after=addition.after_sha256,
+                    size=len(addition.data),
+                    mtime_ns=addition.mtime_ns,
+                )
+                for addition in rule.additions
+            ]
         descriptor.append(item)
     # Preserve every legacy rule fingerprint. The opt-in procedure receives a
     # distinct identity; callers still need a separate source-context binding.
-    identity_descriptor = ({"rules": descriptor, "metadata_policy": metadata_policy}
-                           if metadata_policy else descriptor)
-    fingerprint = _digest(json.dumps(identity_descriptor, sort_keys=True, separators=(",", ":")).encode())
+    identity_descriptor = (
+        {"rules": descriptor, "metadata_policy": metadata_policy} if metadata_policy else descriptor
+    )
+    fingerprint = _digest(
+        json.dumps(identity_descriptor, sort_keys=True, separators=(",", ":")).encode()
+    )
     for path, data in writes.items():
         fd, name = tempfile.mkstemp(prefix=".smr-rule-", dir=path.parent)
         stage = Path(name)
@@ -283,8 +362,15 @@ def apply_rules(
                     if stage.stat().st_mtime_ns != source_stat.st_mtime_ns:
                         raise RuleError("Patch stage could not preserve resource mtime")
                 else:
-                    addition = next((item for rule in selected for item in rule.additions
-                                     if root.joinpath(*item.path.split("/")) == path), None)
+                    addition = next(
+                        (
+                            item
+                            for rule in selected
+                            for item in rule.additions
+                            if root.joinpath(*item.path.split("/")) == path
+                        ),
+                        None,
+                    )
                     if addition is None:
                         raise RuleError("Added asset metadata is missing")
                     os.utime(stage, ns=(addition.mtime_ns, addition.mtime_ns))
@@ -292,9 +378,16 @@ def apply_rules(
                         raise RuleError("Added asset mtime could not be recorded")
             os.replace(stage, path)
             if metadata_policy:
-                expected_mtime = metadata[path].st_mtime_ns if path in metadata else next(
-                    item.mtime_ns for rule in selected for item in rule.additions
-                    if root.joinpath(*item.path.split("/")) == path)
+                expected_mtime = (
+                    metadata[path].st_mtime_ns
+                    if path in metadata
+                    else next(
+                        item.mtime_ns
+                        for rule in selected
+                        for item in rule.additions
+                        if root.joinpath(*item.path.split("/")) == path
+                    )
+                )
                 if path.stat().st_mtime_ns != expected_mtime:
                     raise RuleError("Compatibility resource mtime differs")
         finally:

@@ -4,6 +4,7 @@ This module deliberately has no Steam or Feral path discovery. A clean-install
 binding must establish one suitable support tree and a reliable process probe
 before this service is allowed to touch real game data.
 """
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -90,7 +91,9 @@ def _canonical_directory_path(value: Path) -> Path:
         current = current.parent
     if not current.is_dir():
         raise ActivationError("Managed path has a nondirectory parent")
-    fd = os.open(current, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0))
+    fd = os.open(
+        current, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    )
     try:
         # Darwin F_GETPATH returns the on-disk spelling of an open directory.
         raw = fcntl.fcntl(fd, 50, b"\0" * 1024).split(b"\0", 1)[0]
@@ -109,8 +112,11 @@ def _macos_exchange(first: Path, second: Path, *, observed_io=None) -> None:
     function.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
     function.restype = ctypes.c_int
     args = (os.fsencode(first), os.fsencode(second), 0x00000002)
-    result = (function(*args) if observed_io is None else
-              observed_io.call("activation.exchange_syscall", function, *args))
+    result = (
+        function(*args)
+        if observed_io is None
+        else observed_io.call("activation.exchange_syscall", function, *args)
+    )
     if result:
         error = ctypes.get_errno()
         raise OSError(error, os.strerror(error), str(first), str(second))
@@ -211,13 +217,16 @@ class FilesystemProfiles:
         for rel in self.asset_roots:
             if rel.is_absolute() or not rel.parts or any(part in (".", "..") for part in rel.parts):
                 raise ValueError("Asset roots must be safe relative paths")
-        if self.live == self.store or self.live in self.store.parents or self.store in self.live.parents:
+        if (
+            self.live == self.store
+            or self.live in self.store.parents
+            or self.store in self.live.parents
+        ):
             raise ValueError("Live and store roots must be separate")
         self.game_running = game_running
         self.fault_hook = fault_hook or (lambda event: None)
         self.exchange = exchange
         self.observed_io = observed_io
-
 
     def _call(self, name, function, *args, **kwargs):
         if self.observed_io is None:
@@ -249,8 +258,11 @@ class FilesystemProfiles:
             return _make_writable_tree(root)
         for base, directories, files in os.walk(root, followlinks=False, onerror=_walk_error):
             here = Path(base)
-            self._call("activation.directory_chmod", here.chmod,
-                       here.stat().st_mode | stat.S_IWUSR | stat.S_IXUSR)
+            self._call(
+                "activation.directory_chmod",
+                here.chmod,
+                here.stat().st_mode | stat.S_IWUSR | stat.S_IXUSR,
+            )
             for name in files:
                 path = here / name
                 self._call("activation.file_chmod", path.chmod, path.stat().st_mode | stat.S_IWUSR)
@@ -281,7 +293,9 @@ class FilesystemProfiles:
         if not self.binding_file.exists():
             if not enrolling:
                 raise RecoveryError("Game profile binding is missing")
-            self._atomic_json(self.binding_file, dict(schema=SCHEMA, live=str(self.live), store=str(self.store)))
+            self._atomic_json(
+                self.binding_file, dict(schema=SCHEMA, live=str(self.live), store=str(self.store))
+            )
         binding = _read_json(self.binding_file)
         if binding != dict(schema=SCHEMA, live=str(self.live), store=str(self.store)):
             raise RecoveryError("Game profile is bound to another launcher store")
@@ -326,7 +340,9 @@ class FilesystemProfiles:
             subtree = root / rel
             if not subtree.is_dir() or subtree.is_symlink():
                 raise ActivationError("Missing or linked asset root: " + str(subtree))
-            for base, directories, files in os.walk(subtree, followlinks=False, onerror=_walk_error):
+            for base, directories, files in os.walk(
+                subtree, followlinks=False, onerror=_walk_error
+            ):
                 directories.sort()
                 files.sort()
                 for name in directories:
@@ -352,7 +368,15 @@ class FilesystemProfiles:
         return result.hexdigest()
 
     def _write_marker(self, root: Path, profile_id: str, variant_id: Optional[str]) -> None:
-        self._atomic_json(root / MARKER, dict(schema=SCHEMA, profile_id=profile_id, variant_id=variant_id, assets_sha256=self._asset_hash(root)))
+        self._atomic_json(
+            root / MARKER,
+            dict(
+                schema=SCHEMA,
+                profile_id=profile_id,
+                variant_id=variant_id,
+                assets_sha256=self._asset_hash(root),
+            ),
+        )
 
     def _marker(self, root: Path, expected: Optional[str] = None) -> dict:
         _assert_no_symlink_ancestor(root)
@@ -367,7 +391,9 @@ class FilesystemProfiles:
         return marker
 
     def _profile_path(self, profile_id: str) -> Path:
-        if profile_id != ORIGINAL and not (profile_id.startswith("map-") and _SHA256.fullmatch(profile_id[4:])):
+        if profile_id != ORIGINAL and not (
+            profile_id.startswith("map-") and _SHA256.fullmatch(profile_id[4:])
+        ):
             raise ValueError("Profile ID must be original-game or map-<sha256>")
         path = self.profiles / profile_id
         _assert_no_symlink_ancestor(path)
@@ -388,7 +414,9 @@ class FilesystemProfiles:
                 self._write_marker(self.live, ORIGINAL, None)
             self._atomic_json(self.state_file, dict(schema=SCHEMA, active=ORIGINAL))
 
-    def register_variant(self, variant_id: str, prepared_root: Path, *, saved_games: Optional[Path] = None) -> str:
+    def register_variant(
+        self, variant_id: str, prepared_root: Path, *, saved_games: Optional[Path] = None
+    ) -> str:
         """Make an independent writable generation from an immutable prepared tree."""
         if not _SHA256.fullmatch(variant_id):
             raise ValueError("Variant identity must be a lowercase SHA-256 digest")
@@ -401,36 +429,55 @@ class FilesystemProfiles:
             if not source.is_dir():
                 raise ActivationError("Prepared source is missing")
             _assert_regular_tree(source)
-            if source == self.live or source in self.live.parents or self.live in source.parents or source == self.store or source in self.store.parents or self.store in source.parents:
+            if (
+                source == self.live
+                or source in self.live.parents
+                or self.live in source.parents
+                or source == self.store
+                or source in self.store.parents
+                or self.store in source.parents
+            ):
                 raise ActivationError("Prepared source overlaps managed storage")
             expected_hash = self._asset_hash(source)
             destination = self._profile_path(profile_id)
             if self._state()["active"] == profile_id:
                 marker = self._marker(self.live, profile_id)
-                if marker.get("variant_id") != variant_id or marker.get("assets_sha256") != expected_hash:
+                if (
+                    marker.get("variant_id") != variant_id
+                    or marker.get("assets_sha256") != expected_hash
+                ):
                     raise RecoveryError("Active variant differs from the prepared source")
                 return profile_id
             if destination.exists():
                 marker = self._marker(destination, profile_id)
-                if marker.get("variant_id") != variant_id or marker.get("assets_sha256") != expected_hash:
+                if (
+                    marker.get("variant_id") != variant_id
+                    or marker.get("assets_sha256") != expected_hash
+                ):
                     raise RecoveryError("Variant ID collision or modified stored profile")
                 return profile_id
             temporary = self.staging / (profile_id + "-" + uuid.uuid4().hex)
             try:
                 self._copytree(source, temporary)
                 self._make_writable_tree(temporary)
-                if self._asset_hash(temporary) != expected_hash or self._asset_hash(source) != expected_hash:
+                if (
+                    self._asset_hash(temporary) != expected_hash
+                    or self._asset_hash(source) != expected_hash
+                ):
                     raise ActivationError("Prepared source changed during registration")
                 if saved_games is not None:
                     from .variants import _tree_manifest
+
                     _assert_no_symlink_ancestor(saved_games)
                     _assert_regular_tree(saved_games)
                     saved_manifest = _tree_manifest(saved_games)
                     # Never merge retained saves into a generation with existing saves.
                     self._call("activation.empty_saves_rmdir", (temporary / "Saves").rmdir)
                     self._copytree(saved_games, temporary / "Saves")
-                    if (_tree_manifest(temporary / "Saves") != saved_manifest
-                            or _tree_manifest(saved_games) != saved_manifest):
+                    if (
+                        _tree_manifest(temporary / "Saves") != saved_manifest
+                        or _tree_manifest(saved_games) != saved_manifest
+                    ):
                         raise ActivationError("Retained saves changed during restoration")
                     self._make_writable_tree(temporary / "Saves")
                 self._write_marker(temporary, profile_id, variant_id)
@@ -461,26 +508,42 @@ class FilesystemProfiles:
 
     def _recover_locked(self) -> None:
         if self.observed_io is not None and (self.journal.exists() or self.journal.is_symlink()):
+
             def refuse_history():
-                raise RecoveryError("Observed runner refuses pending historical activation recovery")
+                raise RecoveryError(
+                    "Observed runner refuses pending historical activation recovery"
+                )
+
             self._call("activation.pending_recovery_denied", refuse_history)
         state = self._state()
         if not self.journal.exists():
             self._marker(self.live, state["active"])
             return
         journal = _read_json(self.journal)
-        if journal.get("schema") != SCHEMA or state["active"] not in (journal.get("source"), journal.get("target")):
+        if journal.get("schema") != SCHEMA or state["active"] not in (
+            journal.get("source"),
+            journal.get("target"),
+        ):
             raise RecoveryError("Activation journal conflicts with current state")
         source_id = journal.get("source")
         target_id = journal.get("target")
-        if not isinstance(source_id, str) or not isinstance(target_id, str) or source_id == target_id:
+        if (
+            not isinstance(source_id, str)
+            or not isinstance(target_id, str)
+            or source_id == target_id
+        ):
             raise RecoveryError("Invalid activation journal identities")
         source_path = self._profile_path(source_id)
         target_path = self._profile_path(target_id)
         source_exists = source_path.exists()
         target_exists = target_path.exists()
         live_id = self._marker(self.live)["profile_id"]
-        if live_id == source_id and target_exists and not source_exists and state["active"] == source_id:
+        if (
+            live_id == source_id
+            and target_exists
+            and not source_exists
+            and state["active"] == source_id
+        ):
             self._marker(target_path, target_id)
             self._clear_journal()  # Exchange never occurred.
             return
@@ -537,7 +600,9 @@ class FilesystemProfiles:
         with self._locked():
             return self._switch_locked(target_id)
 
-    def play(self, target_id: str, launch: Callable[[], None], startup_seconds: float = 30.0) -> str:
+    def play(
+        self, target_id: str, launch: Callable[[], None], startup_seconds: float = 30.0
+    ) -> str:
         """Serialize this launcher's switch and game start under one live lock.
 
         Direct Steam/Finder launches do not participate in this lock. The

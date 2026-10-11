@@ -1,4 +1,5 @@
 """Synthetic collection and download checks without network or map payloads."""
+
 from io import BytesIO
 from pathlib import Path
 from threading import Event, Lock
@@ -11,7 +12,14 @@ import time
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from smr_launcher.collection import CollectionError, IDENTIFIER, RemoteMap, download_all_maps, download_map, parse_catalogue
+from smr_launcher.collection import (
+    CollectionError,
+    IDENTIFIER,
+    RemoteMap,
+    download_all_maps,
+    download_map,
+    parse_catalogue,
+)
 import smr_launcher.collection as collection_module
 
 
@@ -29,8 +37,17 @@ def catalogue(*files: dict) -> bytes:
 
 class CollectionTests(unittest.TestCase):
     def test_archive_modification_is_separate_from_creation_date(self):
-        record, = parse_catalogue(catalogue({"name": "Map.7z", "source": "original", "size": "3",
-                                             "sha1": "a" * 40, "mtime": "1767841069"}))
+        (record,) = parse_catalogue(
+            catalogue(
+                {
+                    "name": "Map.7z",
+                    "source": "original",
+                    "size": "3",
+                    "sha1": "a" * 40,
+                    "mtime": "1767841069",
+                }
+            )
+        )
         self.assertEqual(record.archive_modified, "2026-01-08")
         self.assertIn("/details/", record.source_url)
         self.assertFalse(hasattr(record, "created"))
@@ -67,7 +84,9 @@ class CollectionTests(unittest.TestCase):
         private = Path(temp.name).resolve() / "downloads"
         progress = []
         with patch.object(collection_module, "_opener", return_value=FakeOpener(payload)):
-            path = download_map(record, private, progress=lambda count, total: progress.append((count, total)))
+            path = download_map(
+                record, private, progress=lambda count, total: progress.append((count, total))
+            )
         self.assertEqual(path.read_bytes(), payload)
         self.assertEqual(path.parent, private)
         self.assertEqual(progress, [(0, len(payload)), (len(payload), len(payload))])
@@ -94,9 +113,12 @@ class CollectionTests(unittest.TestCase):
         stop = Event()
         with patch.object(collection_module, "_opener", return_value=FakeOpener(payload)):
             with self.assertRaisesRegex(CollectionError, "canceled"):
-                download_map(record, private,
-                             progress=lambda count, total: stop.set() if count else None,
-                             cancelled=stop.is_set)
+                download_map(
+                    record,
+                    private,
+                    progress=lambda count, total: stop.set() if count else None,
+                    cancelled=stop.is_set,
+                )
         self.assertEqual(list(private.iterdir()), [])
 
     def test_download_all_bounds_parallelism_and_keeps_per_map_failures(self):
@@ -124,13 +146,20 @@ class CollectionTests(unittest.TestCase):
             return Path(private_directory) / record.name
 
         with patch.object(collection_module, "download_map", side_effect=fake_download):
-            result = download_all_maps(records, Path(temp.name),
-                                       lambda record, state, count, total, detail: events.append(
-                                           (record.name, state, count, detail)), Event(),
-                                       importer=lambda record, path: (
-                                           imported.append(record.name),
-                                           (_ for _ in ()).throw(CollectionError("bad package"))
-                                           if record.name == "Map4.7z" else None))
+            result = download_all_maps(
+                records,
+                Path(temp.name),
+                lambda record, state, count, total, detail: events.append(
+                    (record.name, state, count, detail)
+                ),
+                Event(),
+                importer=lambda record, path: (
+                    imported.append(record.name),
+                    (_ for _ in ()).throw(CollectionError("bad package"))
+                    if record.name == "Map4.7z"
+                    else None,
+                ),
+            )
         self.assertEqual(result, (5, 2, 0))
         self.assertGreater(peak, 1)
         self.assertLessEqual(peak, 4)

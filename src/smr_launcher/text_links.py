@@ -1,4 +1,5 @@
 """Clickable and keyboard reachable HTTP(S) links in read-only native text."""
+
 import re
 import webbrowser
 
@@ -12,7 +13,7 @@ def url_ranges(content):
             while url.endswith(closing) and url.count(closing) > url.count(opening):
                 url = url[:-1]
         if safe_source_url(url):
-            yield match.start(), match.start()+len(url), url
+            yield match.start(), match.start() + len(url), url
 
 
 def render_linked_text(widget, content, *, opener=None):
@@ -27,7 +28,7 @@ def render_linked_text(widget, content, *, opener=None):
     widget._url_tags = tuple(f"url_{i}" for i in range(len(ranges)))
     cursor = widget.cget("cursor")
     red, green, blue = widget.winfo_rgb(widget.cget("background"))
-    color = "#1557b0" if red+green+blue > 98302 else "#8cbcff"
+    color = "#1557b0" if red + green + blue > 98302 else "#8cbcff"
     for tag, (start, end, url) in zip(widget._url_tags, ranges):
         widget.tag_add(tag, f"1.0 + {start} chars", f"1.0 + {end} chars")
         widget.tag_configure(tag, foreground=color, underline=True)
@@ -35,11 +36,12 @@ def render_linked_text(widget, content, *, opener=None):
         widget.tag_bind(tag, "<Enter>", lambda _: widget.configure(cursor="pointinghand"))
         widget.tag_bind(tag, "<Leave>", lambda _: widget.configure(cursor=cursor))
     position = [-1]
+
     def cycle(event):
         reverse = event.keysym == "ISO_Left_Tab" or bool(event.state & 1)
         next_index = position[0] + (-1 if reverse else 1)
         if reverse and position[0] == -1:
-            next_index = len(ranges)-1
+            next_index = len(ranges) - 1
         if not 0 <= next_index < len(ranges):
             position[0] = -1
             target = widget.tk.call("tk_focusPrev" if reverse else "tk_focusNext", widget._w)
@@ -52,10 +54,12 @@ def render_linked_text(widget, content, *, opener=None):
         widget.tag_add("sel", f"1.0 + {start} chars", f"1.0 + {end} chars")
         widget.see(f"1.0 + {start} chars")
         return "break"
+
     def activate(_):
         if 0 <= position[0] < len(ranges):
             opener(ranges[position[0]][2])
             return "break"
+
     widget.bind("<Tab>", cycle)
     widget.bind("<Shift-Tab>", cycle)
     widget.bind("<ISO_Left_Tab>", cycle)

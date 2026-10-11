@@ -1,4 +1,5 @@
 """Read package-authored map details without inventing provenance or dates."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -63,8 +64,12 @@ def safe_source_url(value: str) -> Optional[str]:
         return None
     try:
         parsed = urlsplit(value)
-        if (parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname
-                or parsed.username is not None or parsed.password is not None):
+        if (
+            parsed.scheme.lower() not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
             return None
         # Reading port validates malformed or out-of-range port declarations.
         parsed.port
@@ -123,8 +128,12 @@ def parse_map_metadata(payload: bytes) -> MapMetadata:
             # A non-header line begins the description even without a blank line.
             if not separator:
                 in_headers = False
-    return MapMetadata(**values, description="".join(description).strip(),
-                       raw_text=text, source_urls=tuple(sources))
+    return MapMetadata(
+        **values,
+        description="".join(description).strip(),
+        raw_text=text,
+        source_urls=tuple(sources),
+    )
 
 
 def read_map_metadata(path: Path) -> MapMetadata:
@@ -147,8 +156,9 @@ def read_map_metadata(path: Path) -> MapMetadata:
             next_fd = os.open(component, directory_flags, dir_fd=directory_fd)
             os.close(directory_fd)
             directory_fd = next_fd
-        file_fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
-                          dir_fd=directory_fd)
+        file_fd = os.open(
+            path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd
+        )
         info = os.fstat(file_fd)
         if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_MAP_INFO_BYTES:
             return MapMetadata()

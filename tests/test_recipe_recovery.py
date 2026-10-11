@@ -1,4 +1,5 @@
 """Compiled-map validation must follow recovery of interrupted profile moves."""
+
 from pathlib import Path
 import json
 import sys
@@ -22,7 +23,8 @@ class RecipeRecoveryTests(unittest.TestCase):
         self.app = self.fixture.application
         self.installation = self.fixture.installation
         (self.installation.profile_root / "Settings.ini").write_text(
-            "[User Settings]\nPlayerName = Synthetic\nSkipOpeningMovies = 0\nQuickstart = 1\n")
+            "[User Settings]\nPlayerName = Synthetic\nSkipOpeningMovies = 0\nQuickstart = 1\n"
+        )
         self.original, rule, binding, _stock = self.fixture.compiled_fixture()
         self.compiled = self.fixture.compiled_prepare(self.original, rule, binding)
 
@@ -32,9 +34,11 @@ class RecipeRecoveryTests(unittest.TestCase):
         (self.installation.profile_root / "Saves/original.sav").write_bytes(b"original progress")
         self.original_saves = self.fixture.snapshot_files(self.installation.profile_root / "Saves")
         self.compiled_saves = self.fixture.snapshot_files(
-            self.app.profiles._profile_path(self.compiled.profile_id) / "Saves")
+            self.app.profiles._profile_path(self.compiled.profile_id) / "Saves"
+        )
         self.stock_saves = self.fixture.snapshot_files(
-            self.app.profiles._profile_path(ORIGINAL) / "Saves")
+            self.app.profiles._profile_path(ORIGINAL) / "Saves"
+        )
 
     def exercise_retry(self, event, *, play):
         reached = []
@@ -51,8 +55,10 @@ class RecipeRecoveryTests(unittest.TestCase):
         self.assertEqual(reached, [event])
         self.assertTrue(self.app.profiles.journal.exists())
         self.assertEqual(self.app.profiles._state()["active"], self.original.profile_id)
-        self.assertEqual(json.loads((self.installation.profile_root / MARKER).read_text())["profile_id"],
-                         self.compiled.profile_id)
+        self.assertEqual(
+            json.loads((self.installation.profile_root / MARKER).read_text())["profile_id"],
+            self.compiled.profile_id,
+        )
 
         launched = []
 
@@ -60,10 +66,16 @@ class RecipeRecoveryTests(unittest.TestCase):
             # Called inside the application/profile locks; inspect files directly.
             self.assertFalse(self.app.profiles.journal.exists())
             self.assertEqual(self.app.profiles._state()["active"], self.compiled.profile_id)
-            self.assertEqual(self.fixture.snapshot_files(self.installation.profile_root / "Saves"),
-                             self.compiled_saves)
-            self.assertEqual(self.fixture.snapshot_files(
-                self.app.profiles._profile_path(self.original.profile_id) / "Saves"), self.original_saves)
+            self.assertEqual(
+                self.fixture.snapshot_files(self.installation.profile_root / "Saves"),
+                self.compiled_saves,
+            )
+            self.assertEqual(
+                self.fixture.snapshot_files(
+                    self.app.profiles._profile_path(self.original.profile_id) / "Saves"
+                ),
+                self.original_saves,
+            )
             launched.append(True)
             self.installation.running = True
 
@@ -77,19 +89,26 @@ class RecipeRecoveryTests(unittest.TestCase):
             result = self.app.activate(self.compiled.profile_id)
         self.assertEqual(result, self.compiled.profile_id)
         self.assertFalse(self.app.profiles.journal.exists())
-        self.assertEqual(self.fixture.snapshot_files(self.installation.profile_root / "Saves"),
-                         self.compiled_saves)
+        self.assertEqual(
+            self.fixture.snapshot_files(self.installation.profile_root / "Saves"),
+            self.compiled_saves,
+        )
 
         # Normal switches after recovery must restore the exact independent saves.
         self.app.activate(self.original.profile_id)
-        self.assertEqual(self.fixture.snapshot_files(self.installation.profile_root / "Saves"),
-                         self.original_saves)
+        self.assertEqual(
+            self.fixture.snapshot_files(self.installation.profile_root / "Saves"),
+            self.original_saves,
+        )
         self.app.activate(self.compiled.profile_id)
-        self.assertEqual(self.fixture.snapshot_files(self.installation.profile_root / "Saves"),
-                         self.compiled_saves)
+        self.assertEqual(
+            self.fixture.snapshot_files(self.installation.profile_root / "Saves"),
+            self.compiled_saves,
+        )
         self.app.activate(ORIGINAL)
-        self.assertEqual(self.fixture.snapshot_files(self.installation.profile_root / "Saves"),
-                         self.stock_saves)
+        self.assertEqual(
+            self.fixture.snapshot_files(self.installation.profile_root / "Saves"), self.stock_saves
+        )
 
     def test_activate_recovers_after_exchange_before_recipe_validation(self):
         self.exercise_retry("after_exchange", play=False)

@@ -1,4 +1,5 @@
 """Bounded static diagnostics. A clean report is never proof of gameplay."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -12,7 +13,9 @@ MAX_XML_FILES = 1000
 
 
 def inspect_map(root: Path, stock_names: set[str] | None = None) -> dict:
-    files = [p for name in ("CustomAssets", "UserMaps") for p in (root / name).rglob("*") if p.is_file()]
+    files = [
+        p for name in ("CustomAssets", "UserMaps") for p in (root / name).rglob("*") if p.is_file()
+    ]
     names = {p.name.casefold() for p in files} | (stock_names or set())
     compact = {re.sub(r"\s+", "", name): name for name in names}
     warnings = []
@@ -32,7 +35,10 @@ def inspect_map(root: Path, stock_names: set[str] | None = None) -> dict:
         checked += 1
         total += size
         data = path.read_bytes()
-        if b"<!DOCTYPE" in data.replace(b"\0", b"").upper() or b"<!ENTITY" in data.replace(b"\0", b"").upper():
+        if (
+            b"<!DOCTYPE" in data.replace(b"\0", b"").upper()
+            or b"<!ENTITY" in data.replace(b"\0", b"").upper()
+        ):
             warnings.append(relative + ": XML declarations require manual inspection.")
             continue
         try:
@@ -50,18 +56,33 @@ def inspect_map(root: Path, stock_names: set[str] | None = None) -> dict:
                 filename = value.rsplit("/", 1)[-1].casefold()
                 if filename not in names:
                     near = compact.get(re.sub(r"\s+", "", filename))
-                    detail = ("possible filename mismatch with " + near) if near else "reference not found among loose map/game XML files; it may be packed or unavailable"
+                    detail = (
+                        ("possible filename mismatch with " + near)
+                        if near
+                        else "reference not found among loose map/game XML files; it may be packed or unavailable"
+                    )
                     warnings.append(relative + ": " + value + " — " + detail + ".")
         if len(warnings) >= 200:
             warnings = warnings[:200] + ["Further findings omitted; inspect the package manually."]
             break
     models = inspect_models(root)
     for finding in models["findings"][:200]:
-        detail = ("legacy NIF " + finding["version"] +
-                  " uses a model-loading path implicated in a Mac crash; conversion review required (header-only risk flag)"
-                  if finding.get("legacy_collision_path") else finding["reason"])
+        detail = (
+            "legacy NIF "
+            + finding["version"]
+            + " uses a model-loading path implicated in a Mac crash; conversion review required (header-only risk flag)"
+            if finding.get("legacy_collision_path")
+            else finding["reason"]
+        )
         warnings.append(finding["path"] + ": " + detail + ".")
     if not models["complete"]:
-        warnings.append("Model scan incomplete: a scan limit, unreadable entry or skipped link prevented full header inspection.")
-    return dict(schema=1, xml_files_checked=checked, model_headers=models, warnings=list(dict.fromkeys(warnings)),
-                limitations="Static checks do not run the game, inspect packed FPK contents, or prove loading, train/bridge behavior, performance or save/reload reliability.")
+        warnings.append(
+            "Model scan incomplete: a scan limit, unreadable entry or skipped link prevented full header inspection."
+        )
+    return dict(
+        schema=1,
+        xml_files_checked=checked,
+        model_headers=models,
+        warnings=list(dict.fromkeys(warnings)),
+        limitations="Static checks do not run the game, inspect packed FPK contents, or prove loading, train/bridge behavior, performance or save/reload reliability.",
+    )

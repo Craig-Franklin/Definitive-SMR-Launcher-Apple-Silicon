@@ -1,4 +1,5 @@
 """Synthetic input/context changes must never silently reuse edition saves."""
+
 from dataclasses import replace
 from pathlib import Path
 import hashlib
@@ -11,7 +12,11 @@ from unittest.mock import patch
 from smr_launcher.recipe_identity import RecipePreparationBinding, map_file_context
 from smr_launcher.resource_identity import ResourceFingerprintError
 from smr_launcher.rules import CompatibilityRule, RuleError, TokenPatch
-from smr_launcher.variants import prepare_recipe_variant, prepare_original_variant, prepare_compatibility_variant
+from smr_launcher.variants import (
+    prepare_recipe_variant,
+    prepare_original_variant,
+    prepare_compatibility_variant,
+)
 from smr_launcher.extraction import _unfreeze_directories
 
 
@@ -37,15 +42,33 @@ class RecipeIdentityTests(unittest.TestCase):
         for file in (self.source / self.path, self.source / "UserMaps/Test/untouched.txt"):
             os.utime(file, ns=(old, old))
         self.archive, self.game = sha(b"archive"), sha(b"game")
-        self.rule = CompatibilityRule("synthetic", 1, "synthetic test", "one file",
-                                      self.archive, self.game,
-                                      (TokenPatch(self.path, sha(self.before), sha(self.after), self.before, self.after),))
-        self.binding = RecipePreparationBinding("synthetic-v1", sha(b"recipe"), sha(b"compiler"),
-                                                map_file_context(self.source)["identity"], sha(b"stock"))
+        self.rule = CompatibilityRule(
+            "synthetic",
+            1,
+            "synthetic test",
+            "one file",
+            self.archive,
+            self.game,
+            (TokenPatch(self.path, sha(self.before), sha(self.after), self.before, self.after),),
+        )
+        self.binding = RecipePreparationBinding(
+            "synthetic-v1",
+            sha(b"recipe"),
+            sha(b"compiler"),
+            map_file_context(self.source)["identity"],
+            sha(b"stock"),
+        )
 
     def prepare(self, name, binding=None):
-        return prepare_recipe_variant(self.clean, self.source, self.root / name,
-                                      self.archive, self.game, (self.rule,), binding or self.binding)
+        return prepare_recipe_variant(
+            self.clean,
+            self.source,
+            self.root / name,
+            self.archive,
+            self.game,
+            (self.rule,),
+            binding or self.binding,
+        )
 
     def test_file_identity_ignores_locations_directory_times_and_empty_custom_root(self):
         before = map_file_context(self.source)
@@ -67,7 +90,9 @@ class RecipeIdentityTests(unittest.TestCase):
         with self.assertRaisesRegex(RuleError, "source resource context"):
             self.prepare("stale")
         self.assertFalse((self.root / "stale").exists())
-        updated = replace(self.binding, source_files_sha256=map_file_context(self.source)["identity"])
+        updated = replace(
+            self.binding, source_files_sha256=map_file_context(self.source)["identity"]
+        )
         second = self.prepare("second", updated)
         self.assertNotEqual(first.variant_id, second.variant_id)
         self.assertEqual(first.assets_sha256, second.assets_sha256)
@@ -83,7 +108,10 @@ class RecipeIdentityTests(unittest.TestCase):
         self.assertNotEqual(output.stat().st_ino, (self.source / self.path).stat().st_ino)
         self.assertEqual((self.source / self.path).read_bytes(), self.before)
         self.assertEqual((self.clean / "Saves/keep.sav").read_bytes(), b"original save")
-        self.assertEqual(first.recipe_binding["output_files_sha256"], map_file_context(self.root / "first")["identity"])
+        self.assertEqual(
+            first.recipe_binding["output_files_sha256"],
+            map_file_context(self.root / "first")["identity"],
+        )
 
     def test_stock_recipe_and_compiler_changes_create_distinct_ids(self):
         first = self.prepare("first")
@@ -94,9 +122,15 @@ class RecipeIdentityTests(unittest.TestCase):
 
     def test_legacy_ids_stay_content_based_and_distinct(self):
         def original(name):
-            return prepare_original_variant(self.clean, self.source, self.root / name, self.archive, self.game)
+            return prepare_original_variant(
+                self.clean, self.source, self.root / name, self.archive, self.game
+            )
+
         def legacy(name):
-            return prepare_compatibility_variant(self.clean, self.source, self.root / name, self.archive, self.game, (self.rule,))
+            return prepare_compatibility_variant(
+                self.clean, self.source, self.root / name, self.archive, self.game, (self.rule,)
+            )
+
         old, private, new = original("original"), legacy("legacy"), self.prepare("compiled")
         stat = (self.source / self.path).stat()
         os.utime(self.source / self.path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10**9))

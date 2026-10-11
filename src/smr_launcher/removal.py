@@ -1,4 +1,5 @@
 """Recoverable removal of launcher-owned map files, with exact-variant save retention."""
+
 from pathlib import Path
 import hashlib
 import json
@@ -43,15 +44,33 @@ def retained_saves(app, variant: str):
 def _targets(app, record, remaining, remove_download, download_sha1):
     targets = [("profile", app.profiles._profile_path(record.profile_id))]
     if not any(r.prepared_directory == record.prepared_directory for r in remaining):
-        targets.append(("prepared", _leaf(app.prepared, record.prepared_directory, r"[0-9a-f]{32}")))
-    if record.imported_directory and not any(r.imported_directory == record.imported_directory for r in remaining):
+        targets.append(
+            ("prepared", _leaf(app.prepared, record.prepared_directory, r"[0-9a-f]{32}"))
+        )
+    if record.imported_directory and not any(
+        r.imported_directory == record.imported_directory for r in remaining
+    ):
         targets.append(("import", _leaf(app.imports, record.imported_directory, r"[0-9a-f]{32}")))
     targets.append(("icon", _leaf(app.icons, record.variant_id + ".png", r"[0-9a-f]{64}\.png")))
-    targets.append(("checks", _leaf(app.library / "import-checks", record.variant_id + ".json", r"[0-9a-f]{64}\.json")))
+    targets.append(
+        (
+            "checks",
+            _leaf(
+                app.library / "import-checks", record.variant_id + ".json", r"[0-9a-f]{64}\.json"
+            ),
+        )
+    )
     if remove_download and not any(r.archive_sha256 == record.archive_sha256 for r in remaining):
-        targets.append(("archive", _leaf(app.originals, record.archive_sha256 + ".7z", r"[0-9a-f]{64}\.7z")))
+        targets.append(
+            ("archive", _leaf(app.originals, record.archive_sha256 + ".7z", r"[0-9a-f]{64}\.7z"))
+        )
         if download_sha1 and not any(r.archive_sha1 == download_sha1 for r in remaining):
-            targets.append(("download", _leaf(app.library / "downloads", download_sha1 + ".7z", r"[0-9a-f]{40}\.7z")))
+            targets.append(
+                (
+                    "download",
+                    _leaf(app.library / "downloads", download_sha1 + ".7z", r"[0-9a-f]{40}\.7z"),
+                )
+            )
     return targets
 
 
@@ -68,6 +87,7 @@ def _discard(path: Path):
 def resume(app):
     """Caller holds application lock; all other mutations wait for this journal."""
     from .application import MapRecord
+
     journal = app.library / "removal.json"
     _assert_no_symlink_ancestor(journal)
     if not journal.exists():
@@ -92,7 +112,9 @@ def resume(app):
     with app.profiles._locked():
         app.profiles._require_stopped()
         if app.profiles.journal.exists() or app.profiles._state()["active"] == record.profile_id:
-            raise RemovalError("Switch to Original Game and quit Railroads before removing this map")
+            raise RemovalError(
+                "Switch to Original Game and quit Railroads before removing this map"
+            )
         if retained_saves(app, record.variant_id) is None:
             raise RemovalError("Retained saves are missing; removal stopped")
         if stage.exists() and not {p.name for p in stage.iterdir()}.issubset(plan["targets"]):
@@ -106,11 +128,14 @@ def resume(app):
                         _assert_regular_tree(source)
                         source.chmod(source.stat().st_mode | 0o700)
                     source.rename(destination)
-                    _fsync_dir(source.parent); _fsync_dir(stage)
+                    _fsync_dir(source.parent)
+                    _fsync_dir(stage)
                 elif not source.exists() and destination.exists():
                     pass
                 else:
-                    raise RemovalError("Ambiguous map removal state; files preserved for inspection")
+                    raise RemovalError(
+                        "Ambiguous map removal state; files preserved for inspection"
+                    )
             _atomic_json(app.catalogue_file, dict(schema=1, maps=after))
         # Once catalogue commit is durable, only this transaction's stage is deleted.
         _discard(stage)
@@ -129,7 +154,9 @@ def remove(app, record, remove_download=True):
     with app.profiles._locked():
         app.profiles._require_stopped()
         if app.profiles.journal.exists() or app.profiles._state()["active"] == record.profile_id:
-            raise RemovalError("Switch to Original Game and quit Railroads before removing this map")
+            raise RemovalError(
+                "Switch to Original Game and quit Railroads before removing this map"
+            )
         profile = app.profiles._profile_path(record.profile_id)
         app.profiles._marker(profile, record.profile_id)
         remaining = [r for r in records if r != record]
@@ -140,14 +167,20 @@ def remove(app, record, remove_download=True):
                 sha256, sha1 = hashlib.sha256(), hashlib.sha1()
                 with archive.open("rb") as stream:
                     for chunk in iter(lambda: stream.read(1 << 20), b""):
-                        sha256.update(chunk); sha1.update(chunk)
+                        sha256.update(chunk)
+                        sha1.update(chunk)
                 if sha256.hexdigest() != record.archive_sha256:
                     raise RemovalError("Preserved archive changed; removal stopped")
                 download_sha1 = sha1.hexdigest()
-        targets = [(key, path) for key, path in _targets(app, record, remaining, remove_download, download_sha1) if path.exists()]
+        targets = [
+            (key, path)
+            for key, path in _targets(app, record, remaining, remove_download, download_sha1)
+            if path.exists()
+        ]
         for _, path in targets:
             _assert_no_symlink_ancestor(path)
-            if path.is_dir(): _assert_regular_tree(path)
+            if path.is_dir():
+                _assert_regular_tree(path)
         retained = app.library / "retained-saves"
         _assert_no_symlink_ancestor(retained)
         retained.mkdir(exist_ok=True)
@@ -162,15 +195,32 @@ def remove(app, record, remove_download=True):
             raise RemovalError("Saved games changed during preservation; removal stopped")
         # Durable files before the pointer/journal permit any destructive work.
         from .activation import _fsync_tree
+
         _fsync_tree(snapshot)
-        _atomic_json(retained / (record.variant_id + ".json"), dict(
-            variant_id=record.variant_id, archive_sha256=record.archive_sha256,
-            game_executable_sha256=record.game_executable_sha256, snapshot=transaction,
-            files=before[0], directories=list(before[1])))
+        _atomic_json(
+            retained / (record.variant_id + ".json"),
+            dict(
+                variant_id=record.variant_id,
+                archive_sha256=record.archive_sha256,
+                game_executable_sha256=record.game_executable_sha256,
+                snapshot=transaction,
+                files=before[0],
+                directories=list(before[1]),
+            ),
+        )
         stage = app.library / (".removing-" + transaction)
         stage.mkdir()
-        _atomic_json(app.library / "removal.json", dict(schema=1, id=transaction,
-            record=record.as_json(), before=[r.as_json() for r in records],
-            remove_download=remove_download, download_sha1=download_sha1, targets=[key for key, _ in targets]))
+        _atomic_json(
+            app.library / "removal.json",
+            dict(
+                schema=1,
+                id=transaction,
+                record=record.as_json(),
+                before=[r.as_json() for r in records],
+                remove_download=remove_download,
+                download_sha1=download_sha1,
+                targets=[key for key, _ in targets],
+            ),
+        )
     resume(app)
     return snapshot / "Saves"

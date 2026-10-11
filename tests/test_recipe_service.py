@@ -57,13 +57,17 @@ class SyntheticRecipeServiceTests(unittest.TestCase):
             b"<RRTIndustries><Industries><RRTIndustry><szName>Stock Factory</szName>"
             b"</RRTIndustry></Industries></RRTIndustries>"
         )
-        self.stock_depots_data = b"<RRTDepots><Depot><szName>Stock Depot</szName></Depot></RRTDepots>"
+        self.stock_depots_data = (
+            b"<RRTDepots><Depot><szName>Stock Depot</szName></Depot></RRTDepots>"
+        )
         (self.source / self.SCENARIO_PATH).write_bytes(self.scenario_data)
         (self.source / self.INDUSTRY_PATH).write_bytes(self.industry_data)
         (self.stock / "RRT_Industries.xml").write_bytes(self.stock_industries_data)
         (self.stock / "RRT_Depots.xml").write_bytes(self.stock_depots_data)
         (self.source / "UserMaps/Synthetic/Warehouse").mkdir()
-        (self.source / "UserMaps/Synthetic/Warehouse/test_stockpile.kfm").write_bytes(b"KFM synthetic")
+        (self.source / "UserMaps/Synthetic/Warehouse/test_stockpile.kfm").write_bytes(
+            b"KFM synthetic"
+        )
         self.recipe = self._recipe()
         self.app = self._app()
         self.record = SimpleNamespace(
@@ -73,11 +77,21 @@ class SyntheticRecipeServiceTests(unittest.TestCase):
             scenarios=(self.SCENARIO_PATH,),
         )
 
-    def _recipe(self, *, scenario=None, industry=None, aliases=None,
-                stock_industries=None, stock_depots=None, recipe_id=None):
+    def _recipe(
+        self,
+        *,
+        scenario=None,
+        industry=None,
+        aliases=None,
+        stock_industries=None,
+        stock_depots=None,
+        recipe_id=None,
+    ):
         scenario = self.scenario_data if scenario is None else scenario
         industry = self.industry_data if industry is None else industry
-        stock_industries = self.stock_industries_data if stock_industries is None else stock_industries
+        stock_industries = (
+            self.stock_industries_data if stock_industries is None else stock_industries
+        )
         stock_depots = self.stock_depots_data if stock_depots is None else stock_depots
         output = industry.replace(b"<szName>Test Mill</szName>", b"<szName>Registered One</szName>")
         return recipe_service._IdentityRecipe(
@@ -109,14 +123,16 @@ class SyntheticRecipeServiceTests(unittest.TestCase):
                 inner_self.originals = self.originals
 
             def _stock_file_context(inner_self):
-                return file_context({"installed_assets": self.stock},
-                                    required_roles=("installed_assets",))
+                return file_context(
+                    {"installed_assets": self.stock}, required_roles=("installed_assets",)
+                )
 
         return FakeApplication()
 
     def resolve(self, recipe=None, record=None):
-        with patch.object(recipe_service, "extract_supported_industry_registry",
-                          return_value=self.REGISTRY):
+        with patch.object(
+            recipe_service, "extract_supported_industry_registry", return_value=self.REGISTRY
+        ):
             return recipe_service._resolve(self.app, record or self.record, recipe or self.recipe)
 
     def test_compiles_exact_reviewed_patch_and_binds_source_stock_and_compiler(self):
@@ -124,8 +140,9 @@ class SyntheticRecipeServiceTests(unittest.TestCase):
         self.assertEqual(len(rules), 1)
         rule = rules[0]
         patch_result = rule.patches[0]
-        expected = self.industry_data.replace(b"<szName>Test Mill</szName>",
-                                              b"<szName>Registered One</szName>")
+        expected = self.industry_data.replace(
+            b"<szName>Test Mill</szName>", b"<szName>Registered One</szName>"
+        )
         self.assertEqual(rule.rule_id, self.RECIPE_ID)
         self.assertEqual(rule.version, 2)
         self.assertEqual(rule.archive_sha256, self.ARCHIVE)
@@ -134,24 +151,37 @@ class SyntheticRecipeServiceTests(unittest.TestCase):
         self.assertEqual(patch_result.old, self.industry_data)
         self.assertEqual(patch_result.new, expected)
         self.assertIn(b"<szSecondaryModel>test_stockpile.kfm</szSecondaryModel>", patch_result.new)
-        self.assertEqual(patch_result.new.replace(b"<szName>Registered One</szName>",
-                                                  b"<szName>Test Mill</szName>"),
-                         patch_result.old)
+        self.assertEqual(
+            patch_result.new.replace(
+                b"<szName>Registered One</szName>", b"<szName>Test Mill</szName>"
+            ),
+            patch_result.old,
+        )
         self.assertEqual(patch_result.before_sha256, sha(self.industry_data))
         self.assertEqual(patch_result.after_sha256, sha(expected))
         self.assertEqual(binding.recipe_id, self.RECIPE_ID)
-        self.assertEqual(binding.source_files_sha256,
-                         file_context({"user_maps": self.source / "UserMaps",
-                                       "custom_assets": self.source / "CustomAssets"})["identity"])
-        self.assertEqual(binding.stock_files_sha256,
-                         self.app._stock_file_context()["identity"])
-        self.assertEqual(binding.recipe_sha256, recipe_service._sha(json.dumps(
-            asdict(self.recipe), sort_keys=True, separators=(",", ":")).encode()))
+        self.assertEqual(
+            binding.source_files_sha256,
+            file_context(
+                {
+                    "user_maps": self.source / "UserMaps",
+                    "custom_assets": self.source / "CustomAssets",
+                }
+            )["identity"],
+        )
+        self.assertEqual(binding.stock_files_sha256, self.app._stock_file_context()["identity"])
+        self.assertEqual(
+            binding.recipe_sha256,
+            recipe_service._sha(
+                json.dumps(asdict(self.recipe), sort_keys=True, separators=(",", ":")).encode()
+            ),
+        )
         self.assertEqual(binding.compiler_sha256, recipe_service.compiler_contract_digest())
         binding_json = binding.as_json()
         self.assertEqual(binding_json["recipe_id"], self.RECIPE_ID)
-        self.assertEqual(binding_json["file_context_algorithm"],
-                         "sha256-resource-files-content-mtime-ns-v1")
+        self.assertEqual(
+            binding_json["file_context_algorithm"], "sha256-resource-files-content-mtime-ns-v1"
+        )
         self.assertEqual(binding_json["metadata_policy"], "preserve-imported-resource-mtimes-v1")
 
     def test_public_resolver_rejects_unknown_ids_without_touching_app(self):
@@ -195,8 +225,9 @@ class SyntheticRecipeServiceTests(unittest.TestCase):
         source_before = fixture.snapshot_files(imported)
         archive_before = fixture.archive.read_bytes()
 
-        with patch.object(recipe_service, "resolve_bundled_recipe",
-                          return_value=((rule,), binding)) as resolve:
+        with patch.object(
+            recipe_service, "resolve_bundled_recipe", return_value=((rule,), binding)
+        ) as resolve:
             compiled = app.create_recipe_edition(original, binding.recipe_id)
 
         resolve.assert_called_once_with(app, original, binding.recipe_id)
@@ -206,8 +237,10 @@ class SyntheticRecipeServiceTests(unittest.TestCase):
         self.assertTrue(compiled.recipe_receipt_sha256)
         self.assertEqual(fixture.snapshot_files(imported), source_before)
         self.assertEqual(fixture.archive.read_bytes(), archive_before)
-        self.assertEqual((app.prepared / compiled.prepared_directory /
-                          "CustomAssets/Example.txt").read_bytes(), b"compatible map asset")
+        self.assertEqual(
+            (app.prepared / compiled.prepared_directory / "CustomAssets/Example.txt").read_bytes(),
+            b"compatible map asset",
+        )
         self.assertFalse(app.verification_for(compiled))
 
         app.activate(compiled.profile_id)
@@ -268,14 +301,25 @@ class SyntheticRecipeServiceTests(unittest.TestCase):
 
     def test_missing_or_malformed_identity_flags_are_rejected(self):
         cases = (
-            (self.industry_data.replace(b"<bInCity>1</bInCity>", b""),
-             "explicit reviewed city/mountain fields"),
-            (self.industry_data.replace(b"<bIsMountainous>0</bIsMountainous>", b""),
-             "explicit reviewed city/mountain fields"),
-            (self.industry_data.replace(b"<bInCity>1</bInCity>", b"<bInCity>true</bInCity>"),
-             "explicit reviewed city/mountain fields"),
-            (self.industry_data.replace(b"<bIsMountainous>0</bIsMountainous>", b"<bIsMountainous>0</bIsMountainous><bIsMountainous>0</bIsMountainous>"),
-             "explicit reviewed city/mountain fields"),
+            (
+                self.industry_data.replace(b"<bInCity>1</bInCity>", b""),
+                "explicit reviewed city/mountain fields",
+            ),
+            (
+                self.industry_data.replace(b"<bIsMountainous>0</bIsMountainous>", b""),
+                "explicit reviewed city/mountain fields",
+            ),
+            (
+                self.industry_data.replace(b"<bInCity>1</bInCity>", b"<bInCity>true</bInCity>"),
+                "explicit reviewed city/mountain fields",
+            ),
+            (
+                self.industry_data.replace(
+                    b"<bIsMountainous>0</bIsMountainous>",
+                    b"<bIsMountainous>0</bIsMountainous><bIsMountainous>0</bIsMountainous>",
+                ),
+                "explicit reviewed city/mountain fields",
+            ),
             (self.industry_data.replace(b"</RRTIndustries>", b""), "not well formed"),
         )
         for index, (data, message) in enumerate(cases):
@@ -286,9 +330,7 @@ class SyntheticRecipeServiceTests(unittest.TestCase):
                     self.resolve()
 
     def test_other_xml_alias_occurrence_and_case_variant_goal_are_rejected(self):
-        exact_alias = (
-            b"<RRTScenario><Label>Test Mill</Label></RRTScenario>"
-        )
+        exact_alias = b"<RRTScenario><Label>Test Mill</Label></RRTScenario>"
         path = self.source / "UserMaps/Synthetic/other.xml"
         path.write_bytes(exact_alias)
         self.recipe = self._recipe()
@@ -315,9 +357,12 @@ class SyntheticRecipeServiceTests(unittest.TestCase):
                 context = dict(context, identity="f" * 64)
             return context
 
-        with patch.object(recipe_service, "map_file_context", side_effect=change_after_read), \
-             patch.object(recipe_service, "extract_supported_industry_registry",
-                          return_value=self.REGISTRY):
+        with (
+            patch.object(recipe_service, "map_file_context", side_effect=change_after_read),
+            patch.object(
+                recipe_service, "extract_supported_industry_registry", return_value=self.REGISTRY
+            ),
+        ):
             with self.assertRaisesRegex(RuleError, "changed during compilation"):
                 recipe_service._resolve(self.app, self.record, self.recipe)
         self.assertEqual(calls, 2)

@@ -1,4 +1,5 @@
 """Synthetic optional community index validation and cache preservation tests."""
+
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
@@ -13,7 +14,9 @@ from smr_launcher import community
 
 
 def entry(**changes):
-    return dict({"map_name": "Sample Map", "url": "42", "is_stable": "y", "multiplayer": "n"}, **changes)
+    return dict(
+        {"map_name": "Sample Map", "url": "42", "is_stable": "y", "multiplayer": "n"}, **changes
+    )
 
 
 def payload(document=None):
@@ -37,14 +40,20 @@ class FakeOpener:
 
 class CommunityTests(unittest.TestCase):
     def test_flags_exact_filenames_template_and_canonical_discussions(self):
-        records = community.parse_community_index(payload({
-            "Sample_v1_00": entry(),
-            "Other_v1_01": entry(is_stable="n", multiplayer="y"),
-            "Unknown_v1_00": entry(is_stable="", multiplayer=None),
-            "blank": entry(map_name="", multiplayer=""),
-        }))
+        records = community.parse_community_index(
+            payload(
+                {
+                    "Sample_v1_00": entry(),
+                    "Other_v1_01": entry(is_stable="n", multiplayer="y"),
+                    "Unknown_v1_00": entry(is_stable="", multiplayer=None),
+                    "blank": entry(map_name="", multiplayer=""),
+                }
+            )
+        )
         self.assertEqual(set(records), {"Sample_v1_00.7z", "Other_v1_01.7z", "Unknown_v1_00.7z"})
-        self.assertEqual(records["Sample_v1_00.7z"].discussion_url, community.DISCUSSION_ROOT + "42")
+        self.assertEqual(
+            records["Sample_v1_00.7z"].discussion_url, community.DISCUSSION_ROOT + "42"
+        )
         self.assertEqual(records["Sample_v1_00.7z"].stability, "Reported stable")
         self.assertFalse(records["Sample_v1_00.7z"].multiplayer)
         self.assertEqual(records["Other_v1_01.7z"].stability, "Reported unstable")
@@ -53,25 +62,49 @@ class CommunityTests(unittest.TestCase):
         self.assertIsNone(records["Unknown_v1_00.7z"].multiplayer)
 
     def test_malicious_names_discussion_ids_types_and_duplicates_rejected(self):
-        for key in ("../escape", "/absolute", "back\\slash", "scheme:name", "hidden\x00file", ".hidden", " padded "):
+        for key in (
+            "../escape",
+            "/absolute",
+            "back\\slash",
+            "scheme:name",
+            "hidden\x00file",
+            ".hidden",
+            " padded ",
+        ):
             with self.subTest(key=key), self.assertRaises(community.CommunityError):
                 community.parse_community_index(payload({key: entry()}))
-        for changes in ({"url": "https://evil.example/"}, {"url": "../42"}, {"url": "0"},
-                        {"url": 42}, {"url": "1?redirect=evil"}, {"is_stable": True},
-                        {"multiplayer": []}, {"map_name": 3}, {"map_name": ""}):
+        for changes in (
+            {"url": "https://evil.example/"},
+            {"url": "../42"},
+            {"url": "0"},
+            {"url": 42},
+            {"url": "1?redirect=evil"},
+            {"is_stable": True},
+            {"multiplayer": []},
+            {"map_name": 3},
+            {"map_name": ""},
+        ):
             with self.subTest(changes=changes), self.assertRaises(community.CommunityError):
                 community.parse_community_index(payload({"Sample": entry(**changes)}))
-        for data in (b'{"same":{},"same":{}}', payload({"Sample": entry(), "sample": entry()}), b"[]"):
+        for data in (
+            b'{"same":{},"same":{}}',
+            payload({"Sample": entry(), "sample": entry()}),
+            b"[]",
+        ):
             with self.assertRaises(community.CommunityError):
                 community.parse_community_index(data)
 
     def test_limits_and_redirects(self):
-        for data in (b" " * (community.MAX_INDEX_BYTES + 1),
-                     payload({str(i): entry() for i in range(community.MAX_COMMUNITY_MAPS + 1)})):
+        for data in (
+            b" " * (community.MAX_INDEX_BYTES + 1),
+            payload({str(i): entry() for i in range(community.MAX_COMMUNITY_MAPS + 1)}),
+        ):
             with self.assertRaises(community.CommunityError):
                 community.parse_community_index(data)
         with self.assertRaises(community.CommunityError):
-            community._NoRedirects().redirect_request(None, None, 302, "", {}, "http://evil.example/")
+            community._NoRedirects().redirect_request(
+                None, None, 302, "", {}, "http://evil.example/"
+            )
 
     def test_fetch_cache_round_trip_private_atomic_and_failed_refresh_keeps_previous(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -117,7 +150,9 @@ class CommunityTests(unittest.TestCase):
             self.assertEqual(target.read_text(), "preserve me")
             linked = root / "linked"
             linked.symlink_to(root, target_is_directory=True)
-            self.assertEqual(community.read_cached_community_index(linked / "community-index.json"), {})
+            self.assertEqual(
+                community.read_cached_community_index(linked / "community-index.json"), {}
+            )
             with patch.object(community, "_opener", return_value=FakeOpener(payload())):
                 with self.assertRaises(community.CommunityError):
                     community.fetch_community_index(linked / "other.json")

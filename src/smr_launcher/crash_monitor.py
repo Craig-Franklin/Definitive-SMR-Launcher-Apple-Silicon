@@ -1,4 +1,5 @@
 """Local crash collection and exact-process resource protection."""
+
 from __future__ import annotations
 
 import ctypes
@@ -29,9 +30,14 @@ MAX_REPORTS_PER_POLL = 16
 
 
 class _BSDInfo(ctypes.Structure):
-    _fields_ = [("prefix", ctypes.c_uint32 * 12), ("comm", ctypes.c_char * 16),
-                ("name", ctypes.c_char * 32), ("suffix", ctypes.c_uint32 * 6),
-                ("start_sec", ctypes.c_uint64), ("start_usec", ctypes.c_uint64)]
+    _fields_ = [
+        ("prefix", ctypes.c_uint32 * 12),
+        ("comm", ctypes.c_char * 16),
+        ("name", ctypes.c_char * 32),
+        ("suffix", ctypes.c_uint32 * 6),
+        ("start_sec", ctypes.c_uint64),
+        ("start_usec", ctypes.c_uint64),
+    ]
 
 
 def running_game(executable: str) -> dict | None:
@@ -45,8 +51,13 @@ def running_game(executable: str) -> dict | None:
     signatures = {
         "proc_listallpids": [ctypes.c_void_p, ctypes.c_int],
         "proc_pidpath": [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32],
-        "proc_pidinfo": [ctypes.c_int, ctypes.c_int, ctypes.c_uint64,
-                         ctypes.c_void_p, ctypes.c_int],
+        "proc_pidinfo": [
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_uint64,
+            ctypes.c_void_p,
+            ctypes.c_int,
+        ],
     }
     for name, arguments in signatures.items():
         function = getattr(lib, name)
@@ -70,14 +81,21 @@ def running_game(executable: str) -> dict | None:
         if os.fsdecode(path.value) != expected:
             continue
         before, after = _BSDInfo(), _BSDInfo()
-        if lib.proc_pidinfo(pid, 3, 0, ctypes.byref(before), ctypes.sizeof(before)) != ctypes.sizeof(before):
+        if lib.proc_pidinfo(
+            pid, 3, 0, ctypes.byref(before), ctypes.sizeof(before)
+        ) != ctypes.sizeof(before):
             raise OSError("Game identity unavailable")
         if lib.proc_pidpath(pid, path, len(path)) <= 0 or os.fsdecode(path.value) != expected:
             raise OSError("Game identity changed")
-        if lib.proc_pidinfo(pid, 3, 0, ctypes.byref(after), ctypes.sizeof(after)) != ctypes.sizeof(after):
+        if lib.proc_pidinfo(pid, 3, 0, ctypes.byref(after), ctypes.sizeof(after)) != ctypes.sizeof(
+            after
+        ):
             raise OSError("Game identity unavailable")
         birth = before.start_sec * 1000000 + before.start_usec
-        if birth <= 0 or (before.start_sec, before.start_usec) != (after.start_sec, after.start_usec):
+        if birth <= 0 or (before.start_sec, before.start_usec) != (
+            after.start_sec,
+            after.start_usec,
+        ):
             raise OSError("Game incarnation changed")
         matches.append(dict(pid=int(pid), birth_us=int(birth), executable=expected))
     if len(matches) > 1:
@@ -99,8 +117,19 @@ def _read_regular(path: Path, maximum: int) -> bytes:
                 break
             data.extend(piece)
         after = os.fstat(fd)
-        identity = lambda s: (s.st_dev, s.st_ino, s.st_mode, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
-        if len(data) != before.st_size or identity(before) != identity(after) or identity(after) != identity(path.lstat()):
+        identity = lambda s: (
+            s.st_dev,
+            s.st_ino,
+            s.st_mode,
+            s.st_size,
+            s.st_mtime_ns,
+            s.st_ctime_ns,
+        )
+        if (
+            len(data) != before.st_size
+            or identity(before) != identity(after)
+            or identity(after) != identity(path.lstat())
+        ):
             raise ValueError("Diagnostic file changed while reading")
         return bytes(data)
     finally:
@@ -131,13 +160,18 @@ def executable_image_uuid(executable: Path) -> str | None:
             command, length = struct.unpack_from("<II", commands, offset)
             if length < 8 or length % 4 or offset + length > size:
                 return None
-            if command == 0x1b:
+            if command == 0x1B:
                 if length != 24:
                     return None
-                found.append(str(uuid.UUID(bytes=commands[offset + 8:offset + 24])))
+                found.append(str(uuid.UUID(bytes=commands[offset + 8 : offset + 24])))
             offset += length
         after = os.fstat(fd)
-        if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
+        if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+        ):
             return None
         return found[0] if offset == size and len(found) == 1 else None
     finally:
@@ -166,12 +200,23 @@ def _private_json(path: Path, value: dict) -> None:
 class CrashMonitor:
     """One launcher-owned monitor with durable session and publication state."""
 
-    def __init__(self, app, launcher_version: str, *, reports_directory=None,
-                 process_probe: Callable = running_game, store=None, parser=None,
-                 publisher=None, now=None, image_uuid_reader=executable_image_uuid,
-                 resource_guard=None) -> None:
+    def __init__(
+        self,
+        app,
+        launcher_version: str,
+        *,
+        reports_directory=None,
+        process_probe: Callable = running_game,
+        store=None,
+        parser=None,
+        publisher=None,
+        now=None,
+        image_uuid_reader=executable_image_uuid,
+        resource_guard=None,
+    ) -> None:
         from .crash_reports import CrashStore, parse_crash_report
         from .crash_reporting import GitHubCrashPublisher
+
         self.app, self.launcher_version = app, launcher_version
         self.root = app.library / "crash-reports"
         self.store = store if store is not None else CrashStore(self.root)
@@ -189,8 +234,12 @@ class CrashMonitor:
         self.parser = parser if parser is not None else parse_crash_report
         source_root = Path(__file__).resolve().parents[2]
         checkout = source_root if (source_root / ".git").exists() else None
-        self.publisher = publisher if publisher is not None else GitHubCrashPublisher(checkout=checkout)
-        self.reports_directory = Path(reports_directory or (Path.home() / "Library/Logs/DiagnosticReports"))
+        self.publisher = (
+            publisher if publisher is not None else GitHubCrashPublisher(checkout=checkout)
+        )
+        self.reports_directory = Path(
+            reports_directory or (Path.home() / "Library/Logs/DiagnosticReports")
+        )
         self.process_probe = process_probe
         self.image_uuid_reader = image_uuid_reader
         self.now = now or (lambda: datetime.now(timezone.utc))
@@ -211,7 +260,9 @@ class CrashMonitor:
         self.session_file = self.root / "active-session.json"
         if self.preferences.exists():
             value = json.loads(_read_regular(self.preferences, 4096))
-            if value.get("schema") != 1 or any(type(value.get(k)) is not bool for k in ("enabled", "automatic_reporting")):
+            if value.get("schema") != 1 or any(
+                type(value.get(k)) is not bool for k in ("enabled", "automatic_reporting")
+            ):
                 raise ValueError("Crash monitor preferences need inspection")
             self.enabled, self.automatic_reporting = value["enabled"], value["automatic_reporting"]
             self.protect_resources = value.get("protect_resources", True)
@@ -226,8 +277,12 @@ class CrashMonitor:
             if index >= 4096:
                 raise ValueError("Session history needs inspection")
             value = json.loads(_read_regular(path, 65536))
-            if (value.get("schema") == 1 and value.get("executable") == str(app.installation.executable)
-                    and value.get("context", {}).get("game_executable_sha256") == app.installation.executable_sha256):
+            if (
+                value.get("schema") == 1
+                and value.get("executable") == str(app.installation.executable)
+                and value.get("context", {}).get("game_executable_sha256")
+                == app.installation.executable_sha256
+            ):
                 self.sessions[path.stem] = value
         if self.sessions:
             self.session = max(self.sessions.values(), key=lambda item: item["started_at"])
@@ -250,10 +305,14 @@ class CrashMonitor:
                 if url:
                     self._history_link(entry["payload"], url)
         except (OSError, ValueError):
-            self.status = "Local crash history needs inspection; memory protection remains available."
+            self.status = (
+                "Local crash history needs inspection; memory protection remains available."
+            )
         self._flush_history()
 
-    def configure(self, *, enabled: bool, automatic_reporting: bool, protect_resources=None) -> None:
+    def configure(
+        self, *, enabled: bool, automatic_reporting: bool, protect_resources=None
+    ) -> None:
         if type(enabled) is not bool or type(automatic_reporting) is not bool:
             raise ValueError("Crash monitoring choices must be booleans")
         with self.lock:
@@ -261,18 +320,31 @@ class CrashMonitor:
                 protect_resources = self.protect_resources
             if type(protect_resources) is not bool:
                 raise ValueError("Resource protection choice must be a boolean")
-            _private_json(self.preferences, dict(schema=1, enabled=enabled,
-                                               automatic_reporting=automatic_reporting,
-                                               protect_resources=protect_resources))
+            _private_json(
+                self.preferences,
+                dict(
+                    schema=1,
+                    enabled=enabled,
+                    automatic_reporting=automatic_reporting,
+                    protect_resources=protect_resources,
+                ),
+            )
             self.enabled, self.automatic_reporting = enabled, automatic_reporting
             self.protect_resources = protect_resources
             self.next_publish = 0
 
     def _record_crash_issue(self, payload):
-        issue = self.map_issues.record(payload, incident_id=payload["report_sha256"],
-            occurred_at=payload["occurred_at"], kind="crash",
-            detail="Confirmed game crash: " + payload["exception_type"] + " / " + payload["signal"]
-                   + ". The active map edition is known; the selected scenario and crash cause may be unknown.")
+        issue = self.map_issues.record(
+            payload,
+            incident_id=payload["report_sha256"],
+            occurred_at=payload["occurred_at"],
+            kind="crash",
+            detail="Confirmed game crash: "
+            + payload["exception_type"]
+            + " / "
+            + payload["signal"]
+            + ". The active map edition is known; the selected scenario and crash cause may be unknown.",
+        )
         if issue:
             self._queue_history_issue(issue)
             self.issue_revision += 1
@@ -316,9 +388,15 @@ class CrashMonitor:
         if fact is None:
             return
         ctx = {k: fact[k] for k in (*IDENTITIES, "scenario")}
-        exit_fact = self._history_call(self.play_history.once, ctx, "unknown_exit",
-            event_id=digest(fact["attempt_id"], "exit"), attempt_id=fact["attempt_id"],
-            source="observed", at=self.now().isoformat())
+        exit_fact = self._history_call(
+            self.play_history.once,
+            ctx,
+            "unknown_exit",
+            event_id=digest(fact["attempt_id"], "exit"),
+            attempt_id=fact["attempt_id"],
+            source="observed",
+            at=self.now().isoformat(),
+        )
         if exit_fact:
             self.history_exits.append(exit_fact)
             self.issue_revision += 1
@@ -343,15 +421,24 @@ class CrashMonitor:
             if path.exists():
                 evidence = json.loads(_read_regular(path, 65536))
             else:
-                evidence = dict(schema=1, session=self.session, footprint_bytes=footprint,
-                                occurred_at=self.now().isoformat(), load_state="unknown",
-                                reason="physical_footprint_limit")
+                evidence = dict(
+                    schema=1,
+                    session=self.session,
+                    footprint_bytes=footprint,
+                    occurred_at=self.now().isoformat(),
+                    load_state="unknown",
+                    reason="physical_footprint_limit",
+                )
                 _private_json(path, evidence)
-            issue = self.map_issues.record(evidence["session"]["context"], incident_id=incident,
-                occurred_at=evidence["occurred_at"], kind="resource_limit",
+            issue = self.map_issues.record(
+                evidence["session"]["context"],
+                incident_id=incident,
+                occurred_at=evidence["occurred_at"],
+                kind="resource_limit",
                 detail="Game exceeded the memory protection limit (physical footprint "
-                       + f"{evidence['footprint_bytes'] / 1024**3:.1f} GiB). "
-                       + "Map loading or gameplay failed; completion of map loading was not confirmed.")
+                + f"{evidence['footprint_bytes'] / 1024**3:.1f} GiB). "
+                + "Map loading or gameplay failed; completion of map loading was not confirmed.",
+            )
             if issue:
                 # Stop protection does not wait on another history-file write.
                 # The existing durable map issue is sufficient for restart recovery.
@@ -376,39 +463,61 @@ class CrashMonitor:
                     except Exception:
                         # Protect the exact observed process even if its session
                         # cannot be persisted. Do not guess the associated map.
-                        self.session = dict(schema=1, executable=process["executable"], process=process,
-                            started_at=datetime.fromtimestamp(process["birth_us"] / 1000000, timezone.utc).isoformat(),
-                            context=dict(game_executable_sha256=self.app.installation.executable_sha256))
+                        self.session = dict(
+                            schema=1,
+                            executable=process["executable"],
+                            process=process,
+                            started_at=datetime.fromtimestamp(
+                                process["birth_us"] / 1000000, timezone.utc
+                            ).isoformat(),
+                            context=dict(
+                                game_executable_sha256=self.app.installation.executable_sha256
+                            ),
+                        )
             try:
                 footprint = self.resource_guard.observe(process, self._retain_resource_failure)
             except Exception:
                 if self.resource_guard.handled:
                     with self.lock:
-                        self.events.append("Railroads exceeded the memory limit, but stopping the game "
-                                           "could not be confirmed. Check the game process. "
-                                           + ("The failure could not be saved locally." if self.resource_guard.retention_failed
-                                              else "The failure was saved locally."))
+                        self.events.append(
+                            "Railroads exceeded the memory limit, but stopping the game "
+                            "could not be confirmed. Check the game process. "
+                            + (
+                                "The failure could not be saved locally."
+                                if self.resource_guard.retention_failed
+                                else "The failure was saved locally."
+                            )
+                        )
                 raise
             if footprint is not None:
                 with self.lock:
-                    map_warning = ("The active custom map edition has been marked as a known issue."
-                                   if self.session["context"].get("variant_id") else
-                                   "No custom map was identified for this session.")
-                    retained = ("The failure could not be saved locally; check available disk space."
-                                if self.resource_guard.retention_failed else
-                                "Diagnostics were saved locally. " + map_warning)
-                    self.events.append("Railroads was stopped after excessive memory use "
-                        + f"({footprint / 1024**3:.1f} GiB). " + retained)
+                    map_warning = (
+                        "The active custom map edition has been marked as a known issue."
+                        if self.session["context"].get("variant_id")
+                        else "No custom map was identified for this session."
+                    )
+                    retained = (
+                        "The failure could not be saved locally; check available disk space."
+                        if self.resource_guard.retention_failed
+                        else "Diagnostics were saved locally. " + map_warning
+                    )
+                    self.events.append(
+                        "Railroads was stopped after excessive memory use "
+                        + f"({footprint / 1024**3:.1f} GiB). "
+                        + retained
+                    )
         finally:
             self.health_lock.release()
 
     def arm(self, profile_id: str | None = None, *, process=None) -> None:
         """Called inside the existing guarded launch callback, before open."""
         with self.lock:
-            context = dict(game_executable_sha256=self.app.installation.executable_sha256,
-                           launcher_version=self.launcher_version,
-                           game_version=self.app.installation.bundle_version,
-                           macos_version=platform.mac_ver()[0] or "UNKNOWN")
+            context = dict(
+                game_executable_sha256=self.app.installation.executable_sha256,
+                launcher_version=self.launcher_version,
+                game_version=self.app.installation.bundle_version,
+                macos_version=platform.mac_ver()[0] or "UNKNOWN",
+            )
             if getattr(self.app.installation, "bundle_id", None):
                 context["expected_bundle_id"] = self.app.installation.bundle_id
             context["process_birth_tolerance_us"] = 1000
@@ -421,17 +530,26 @@ class CrashMonitor:
             if image_uuid:
                 context["expected_image_uuid"] = image_uuid
             if image_uuid and executable.is_relative_to(steam_common):
-                context["expected_redacted_path"] = ("/Users/USER/Library/Application Support/Steam/*/"
-                                                     + str(executable.relative_to(executable.parents[3])))
+                context["expected_redacted_path"] = (
+                    "/Users/USER/Library/Application Support/Steam/*/"
+                    + str(executable.relative_to(executable.parents[3]))
+                )
             if profile_id:
                 record = next((r for r in self.app.catalogue() if r.profile_id == profile_id), None)
                 if record:
-                    context.update(archive_sha256=record.archive_sha256, variant_id=record.variant_id)
+                    context.update(
+                        archive_sha256=record.archive_sha256, variant_id=record.variant_id
+                    )
             started = self.now()
             if process:
                 started = datetime.fromtimestamp(process["birth_us"] / 1000000, timezone.utc)
-            self.session = dict(schema=1, executable=str(self.app.installation.executable),
-                                started_at=started.isoformat(), process=process, context=context)
+            self.session = dict(
+                schema=1,
+                executable=str(self.app.installation.executable),
+                started_at=started.isoformat(),
+                process=process,
+                context=context,
+            )
             identity = hashlib.sha256(json.dumps(self.session, sort_keys=True).encode()).hexdigest()
             _private_json(self.sessions_directory / (identity + ".json"), self.session)
             self.sessions[identity] = self.session
@@ -460,8 +578,13 @@ class CrashMonitor:
                         raise ValueError("Diagnostic report directory needs inspection")
                     scanned += 1
                     name = entry.name.lower()
-                    if (name.startswith(("sid meiers railroads", "sid meier's railroads", "smrailroads"))
-                            and name.endswith((".ips", ".crash")) and entry.is_file(follow_symlinks=False)):
+                    if (
+                        name.startswith(
+                            ("sid meiers railroads", "sid meier's railroads", "smrailroads")
+                        )
+                        and name.endswith((".ips", ".crash"))
+                        and entry.is_file(follow_symlinks=False)
+                    ):
                         found.append(Path(entry.path))
         return sorted(found, key=lambda p: p.lstat().st_mtime_ns, reverse=True)
 
@@ -486,8 +609,10 @@ class CrashMonitor:
                 self._history_exited()
             if self.sessions:
                 count = 0
-                earliest = min(datetime.fromisoformat(item["started_at"]).timestamp()
-                               for item in self.sessions.values())
+                earliest = min(
+                    datetime.fromisoformat(item["started_at"]).timestamp()
+                    for item in self.sessions.values()
+                )
                 for path in self._reports():
                     info = path.lstat()
                     if info.st_mtime < earliest:
@@ -506,10 +631,13 @@ class CrashMonitor:
                             bound = session.get("process") or {}
                             if not bound:
                                 continue
-                            payload = self.parser(raw, expected_executable=session["executable"],
-                                                  expected_pid=bound.get("pid"),
-                                                  session_started_at=datetime.fromisoformat(session["started_at"]),
-                                                  context=session["context"])
+                            payload = self.parser(
+                                raw,
+                                expected_executable=session["executable"],
+                                expected_pid=bound.get("pid"),
+                                session_started_at=datetime.fromisoformat(session["started_at"]),
+                                context=session["context"],
+                            )
                             if payload is not None:
                                 self.store.collect(raw, payload)
                                 self._record_crash_issue(payload)
@@ -525,8 +653,12 @@ class CrashMonitor:
             self._flush_history()
             self.status = "Monitoring Railroads; full crash reports stay on this Mac."
             if probe_failed:
-                self.status = "Process observation unavailable; retained-session crash collection continues."
-            publish_due = self.automatic_reporting and (reconcile or time.monotonic() >= self.next_publish)
+                self.status = (
+                    "Process observation unavailable; retained-session crash collection continues."
+                )
+            publish_due = self.automatic_reporting and (
+                reconcile or time.monotonic() >= self.next_publish
+            )
         # Network work must never hold the session lock needed by Play.
         if publish_due and self.publication_lock.acquire(blocking=False):
             try:
@@ -569,7 +701,11 @@ class CrashMonitor:
     def _publish_pending(self, *, reconcile=False):
         handled = set()
         pending = self.store.pending()
-        uncertain = {e["fingerprint"] for e in pending if e["publication"]["status"] in ("sending", "unknown")}
+        uncertain = {
+            e["fingerprint"]
+            for e in pending
+            if e["publication"]["status"] in ("sending", "unknown")
+        }
         for entry in pending:
             payload = entry["payload"]
             fingerprint = payload["fingerprint"]
@@ -587,25 +723,46 @@ class CrashMonitor:
                 if not reconcile:
                     self.status = "A crash report awaits publication reconciliation."
                     continue
-                result = self.publisher.publish(payload, existing_issue_url=publication.get("issue_url"),
-                                                reconcile_only=True)
+                result = self.publisher.publish(
+                    payload, existing_issue_url=publication.get("issue_url"), reconcile_only=True
+                )
             else:
-                self.store.mark_publication(fingerprint, "sending", incident_id=entry["incident_id"])
+                self.store.mark_publication(
+                    fingerprint, "sending", incident_id=entry["incident_id"]
+                )
                 try:
-                    result = self.publisher.publish(payload, existing_issue_url=publication.get("issue_url"))
+                    result = self.publisher.publish(
+                        payload, existing_issue_url=publication.get("issue_url")
+                    )
                 except Exception:
-                    self.store.mark_publication(fingerprint, "unknown", incident_id=entry["incident_id"])
+                    self.store.mark_publication(
+                        fingerprint, "unknown", incident_id=entry["incident_id"]
+                    )
                     self.status = "Publication outcome unknown; report retained locally."
                     continue
             status = result.get("status", "unknown")
             if status == "pending" and state not in ("sending", "unknown"):
                 # Adapter guarantees pending means no POST began. Durable sending
                 # is deliberately resolved only on this explicit no-mutation result.
-                self.store.reconcile_publication(fingerprint, "pending", detail=result.get("detail"), incident_id=entry["incident_id"])
+                self.store.reconcile_publication(
+                    fingerprint,
+                    "pending",
+                    detail=result.get("detail"),
+                    incident_id=entry["incident_id"],
+                )
             else:
-                self.store.mark_publication(fingerprint, status, issue_url=result.get("issue_url"), detail=result.get("detail"), incident_id=entry["incident_id"])
-            self.status = ("Sanitized crash report published to GitHub." if status == "published"
-                           else "Crash report retained locally; GitHub reporting is pending.")
+                self.store.mark_publication(
+                    fingerprint,
+                    status,
+                    issue_url=result.get("issue_url"),
+                    detail=result.get("detail"),
+                    incident_id=entry["incident_id"],
+                )
+            self.status = (
+                "Sanitized crash report published to GitHub."
+                if status == "published"
+                else "Crash report retained locally; GitHub reporting is pending."
+            )
             if status == "published" and result.get("issue_url"):
                 self._history_link(payload, result["issue_url"])
 
@@ -624,14 +781,19 @@ class CrashMonitor:
             os.close(owner_fd)
             raise
         self.owner_fd = owner_fd
+
         def health_work():
             while not self.stop_event.is_set():
                 try:
                     self.poll_health_once()
                 except Exception:
-                    self.status = "Game resource observation needs inspection; crash collection continues."
+                    self.status = (
+                        "Game resource observation needs inspection; crash collection continues."
+                    )
                 self.stop_event.wait(1)
+
         self.health_thread = Thread(target=health_work, daemon=True, name="smr-resource-guard")
+
         def work():
             try:
                 while not self.stop_event.is_set():
@@ -639,10 +801,13 @@ class CrashMonitor:
                         self.poll_once()
                     except Exception:
                         self.status = "Crash monitoring needs inspection; the game is unaffected."
-                    self.stop_event.wait(0.1 if time.monotonic() < self.fast_observation_until else 5)
+                    self.stop_event.wait(
+                        0.1 if time.monotonic() < self.fast_observation_until else 5
+                    )
             finally:
                 os.close(owner_fd)
                 self.owner_fd = None
+
         self.thread = Thread(target=work, daemon=True, name="smr-crash-monitor")
         try:
             self.thread.start()

@@ -1,4 +1,5 @@
 """Passive controller integration controls with local synthetic crash reports."""
+
 from datetime import datetime, timezone
 import json
 import os
@@ -11,14 +12,22 @@ from unittest.mock import Mock
 from smr_launcher.crash_monitor import CrashMonitor
 
 START = datetime(2026, 1, 2, 12, tzinfo=timezone.utc)
-EXE = '/Applications/Synthetic.app/Contents/MacOS/Game'
+EXE = "/Applications/Synthetic.app/Contents/MacOS/Game"
 PROCESS = dict(pid=123, birth_us=int(START.timestamp() * 1000000), executable=EXE)
 
 
-def report(*, pid=123, birth=None, private='SECRET_CANARY'):
-    return json.dumps(dict(procPath=EXE, pid=pid, procLaunch=birth or START.isoformat(),
-        captureTime='2026-01-02T12:01:00+00:00', exception=dict(type='EXC_BAD_ACCESS', signal='SIGSEGV'),
-        termination=dict(namespace='SIGNAL', code=11), private=private)).encode()
+def report(*, pid=123, birth=None, private="SECRET_CANARY"):
+    return json.dumps(
+        dict(
+            procPath=EXE,
+            pid=pid,
+            procLaunch=birth or START.isoformat(),
+            captureTime="2026-01-02T12:01:00+00:00",
+            exception=dict(type="EXC_BAD_ACCESS", signal="SIGSEGV"),
+            termination=dict(namespace="SIGNAL", code=11),
+            private=private,
+        )
+    ).encode()
 
 
 class MonitorControls(unittest.TestCase):
@@ -26,22 +35,36 @@ class MonitorControls(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.library = Path(self.temp.name).resolve()
-        self.reports = self.library / 'diagnostics'
+        self.reports = self.library / "diagnostics"
         self.reports.mkdir()
-        self.app = SimpleNamespace(library=self.library,
-            installation=SimpleNamespace(executable=Path(EXE), executable_sha256='a'*64, bundle_version='1.0'),
-            profiles=SimpleNamespace(active_profile=lambda: 'original'), catalogue=lambda: [])
+        self.app = SimpleNamespace(
+            library=self.library,
+            installation=SimpleNamespace(
+                executable=Path(EXE), executable_sha256="a" * 64, bundle_version="1.0"
+            ),
+            profiles=SimpleNamespace(active_profile=lambda: "original"),
+            catalogue=lambda: [],
+        )
         self.probe = Mock(return_value=PROCESS)
         self.publisher = Mock()
-        self.publisher.publish.return_value = dict(status='published', issue_url='https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/999')
+        self.publisher.publish.return_value = dict(
+            status="published",
+            issue_url="https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/999",
+        )
 
     def monitor(self):
-        value = CrashMonitor(self.app, '1.2.3', reports_directory=self.reports,
-            process_probe=self.probe, publisher=self.publisher, now=lambda: START)
+        value = CrashMonitor(
+            self.app,
+            "1.2.3",
+            reports_directory=self.reports,
+            process_probe=self.probe,
+            publisher=self.publisher,
+            now=lambda: START,
+        )
         self.addCleanup(value.close)
         return value
 
-    def write_report(self, name='Sid Meiers Railroads_1.ips', **kwargs):
+    def write_report(self, name="Sid Meiers Railroads_1.ips", **kwargs):
         path = self.reports / name
         path.write_bytes(report(**kwargs))
         return path
@@ -52,11 +75,11 @@ class MonitorControls(unittest.TestCase):
         monitor.poll_once()
         entries = monitor.store.pending()
         self.assertEqual(len(entries), 1)
-        self.assertEqual(entries[0]['payload']['exception_type'], 'EXC_BAD_ACCESS')
-        self.assertNotIn('SECRET_CANARY', json.dumps(entries[0]['payload']))
+        self.assertEqual(entries[0]["payload"]["exception_type"], "EXC_BAD_ACCESS")
+        self.assertNotIn("SECRET_CANARY", json.dumps(entries[0]["payload"]))
         self.publisher.publish.assert_not_called()
         self.assertEqual((monitor.root.stat().st_mode & 0o777), 0o700)
-        for path in monitor.root.rglob('*'):
+        for path in monitor.root.rglob("*"):
             if path.is_file():
                 self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
@@ -67,56 +90,58 @@ class MonitorControls(unittest.TestCase):
         self.write_report(pid=124)
         monitor.poll_once()
         self.assertEqual(monitor.store.pending(), [])
-        self.assertEqual(len(list((monitor.root/'unconfirmed').glob('*.raw'))), 1)
+        self.assertEqual(len(list((monitor.root / "unconfirmed").glob("*.raw"))), 1)
         self.publisher.publish.assert_not_called()
 
     def test_collects_retired_report_after_exact_game_has_exited(self):
-        retired = self.reports / 'Retired'
+        retired = self.reports / "Retired"
         retired.mkdir()
-        path = retired / 'Sid Meiers Railroads_delayed.ips'
+        path = retired / "Sid Meiers Railroads_delayed.ips"
         original = report()
         path.write_bytes(original)
         self.probe.return_value = None
         monitor = self.monitor()
-        monitor.arm('original', process=PROCESS)
+        monitor.arm("original", process=PROCESS)
         monitor.configure(enabled=True, automatic_reporting=True)
         monitor.poll_once()
         entries = monitor.store._entries()
         self.assertEqual(len(entries), 1)
-        self.assertEqual(entries[0]['publication']['status'], 'published')
-        self.assertEqual((monitor.root / entries[0]['raw_file']).read_bytes(), original)
+        self.assertEqual(entries[0]["publication"]["status"], "published")
+        self.assertEqual((monitor.root / entries[0]["raw_file"]).read_bytes(), original)
         self.assertEqual(path.read_bytes(), original)
         self.publisher.publish.assert_called_once()
 
     def test_retired_discovery_has_no_recursive_or_unrelated_report_scan(self):
-        retired = self.reports / 'Retired'
+        retired = self.reports / "Retired"
         retired.mkdir()
-        nested = retired / 'nested'
+        nested = retired / "nested"
         nested.mkdir()
-        (nested / 'Sid Meiers Railroads_hidden.ips').write_bytes(report())
-        (retired / 'UnrelatedApp.ips').write_bytes(report())
-        allowed = retired / 'Sid Meiers Railroads_expected.ips'
+        (nested / "Sid Meiers Railroads_hidden.ips").write_bytes(report())
+        (retired / "UnrelatedApp.ips").write_bytes(report())
+        allowed = retired / "Sid Meiers Railroads_expected.ips"
         allowed.write_bytes(report())
         monitor = self.monitor()
         self.assertEqual(monitor._reports(), [allowed])
 
     def test_retired_discovery_shares_the_parent_scan_limit(self):
         from unittest.mock import patch
-        retired = self.reports / 'Retired'
+
+        retired = self.reports / "Retired"
         retired.mkdir()
-        (self.reports / 'unrelated.txt').write_bytes(b'x')
-        (retired / 'Sid Meiers Railroads_expected.ips').write_bytes(report())
+        (self.reports / "unrelated.txt").write_bytes(b"x")
+        (retired / "Sid Meiers Railroads_expected.ips").write_bytes(report())
         monitor = self.monitor()
-        with patch('smr_launcher.crash_monitor.MAX_SCAN_ENTRIES', 2):
+        with patch("smr_launcher.crash_monitor.MAX_SCAN_ENTRIES", 2):
             with self.assertRaises(ValueError):
                 monitor._reports()
 
     def test_retired_discovery_rejects_a_symlink_to_other_logs(self):
         from smr_launcher.activation import ActivationError
-        outside = self.library / 'other-logs'
+
+        outside = self.library / "other-logs"
         outside.mkdir()
-        (outside / 'Sid Meiers Railroads_private.ips').write_bytes(report())
-        (self.reports / 'Retired').symlink_to(outside, target_is_directory=True)
+        (outside / "Sid Meiers Railroads_private.ips").write_bytes(report())
+        (self.reports / "Retired").symlink_to(outside, target_is_directory=True)
         monitor = self.monitor()
         with self.assertRaises(ActivationError):
             monitor._reports()
@@ -127,7 +152,7 @@ class MonitorControls(unittest.TestCase):
         first = self.monitor()
         first.poll_once()
         first.close()
-        self.probe.return_value = dict(PROCESS, pid=456, birth_us=PROCESS['birth_us']+120000000)
+        self.probe.return_value = dict(PROCESS, pid=456, birth_us=PROCESS["birth_us"] + 120000000)
         second = self.monitor()
         second.poll_once()
         self.write_report()
@@ -138,40 +163,42 @@ class MonitorControls(unittest.TestCase):
     def test_probe_failure_still_collects_retained_session(self):
         monitor = self.monitor()
         monitor.poll_once()
-        self.probe.side_effect = OSError('PRIVATE_ERROR_CANARY')
+        self.probe.side_effect = OSError("PRIVATE_ERROR_CANARY")
         self.write_report()
         monitor.poll_once()
         self.assertEqual(len(monitor.store.pending()), 1)
-        self.assertNotIn('PRIVATE_ERROR_CANARY', monitor.status)
+        self.assertNotIn("PRIVATE_ERROR_CANARY", monitor.status)
 
     def test_sending_is_durable_before_post_and_ambiguity_never_reposts(self):
         monitor = self.monitor()
         self.write_report()
+
         def ambiguous(payload, **kwargs):
-            self.assertEqual(monitor.store.pending()[0]['publication']['status'], 'unknown')
-            raise OSError('PRIVATE_ERROR_CANARY')
+            self.assertEqual(monitor.store.pending()[0]["publication"]["status"], "unknown")
+            raise OSError("PRIVATE_ERROR_CANARY")
+
         self.publisher.publish.side_effect = ambiguous
         monitor.configure(enabled=True, automatic_reporting=True)
         monitor.poll_once()
         self.assertEqual(self.publisher.publish.call_count, 1)
-        self.assertEqual(monitor.store.pending()[0]['publication']['status'], 'unknown')
+        self.assertEqual(monitor.store.pending()[0]["publication"]["status"], "unknown")
         monitor.next_publish = 0
         monitor.poll_once()
         self.assertEqual(self.publisher.publish.call_count, 1)
         self.publisher.publish.side_effect = None
-        self.publisher.publish.return_value = dict(status='unknown')
+        self.publisher.publish.return_value = dict(status="unknown")
         monitor.poll_once(reconcile=True)
-        self.assertTrue(self.publisher.publish.call_args.kwargs['reconcile_only'])
-        self.assertEqual(monitor.store.pending()[0]['publication']['status'], 'unknown')
+        self.assertTrue(self.publisher.publish.call_args.kwargs["reconcile_only"])
+        self.assertEqual(monitor.store.pending()[0]["publication"]["status"], "unknown")
 
     def test_pre_mutation_unavailable_retry_and_success_dedup(self):
         monitor = self.monitor()
         self.write_report()
         monitor.configure(enabled=True, automatic_reporting=True)
-        self.publisher.publish.return_value = dict(status='pending')
+        self.publisher.publish.return_value = dict(status="pending")
         monitor.poll_once()
-        self.assertEqual(monitor.store.pending()[0]['publication']['status'], 'pending')
-        self.publisher.publish.return_value = dict(status='published', issue_url=None)
+        self.assertEqual(monitor.store.pending()[0]["publication"]["status"], "pending")
+        self.publisher.publish.return_value = dict(status="published", issue_url=None)
         monitor.next_publish = 0
         monitor.poll_once()
         self.assertEqual(monitor.store.pending(), [])
@@ -187,68 +214,101 @@ class MonitorControls(unittest.TestCase):
         self.assertFalse(second.enabled)
         self.assertTrue(second.automatic_reporting)
         self.probe.assert_not_called()
-        self.assertFalse(hasattr(second, 'launch'))
-        self.assertFalse(hasattr(second, 'signal'))
+        self.assertFalse(hasattr(second, "launch"))
+        self.assertFalse(hasattr(second, "signal"))
 
     def test_incomplete_report_does_not_starve_valid_report(self):
         monitor = self.monitor()
         self.write_report()
-        (self.reports/'Sid Meiers Railroads_partial.ips').write_bytes(b'{')
+        (self.reports / "Sid Meiers Railroads_partial.ips").write_bytes(b"{")
         monitor.poll_once()
         self.assertEqual(len(monitor.store.pending()), 1)
 
     def test_report_symlink_never_read(self):
-        self.write_report('unrelated.ips')
-        (self.reports/'Sid Meiers Railroads_link.ips').symlink_to(self.reports/'unrelated.ips')
+        self.write_report("unrelated.ips")
+        (self.reports / "Sid Meiers Railroads_link.ips").symlink_to(self.reports / "unrelated.ips")
         monitor = self.monitor()
         monitor.poll_once()
         self.assertEqual(monitor.store.pending(), [])
 
+
 class RedactionCorrelationControls(unittest.TestCase):
     def parse(self, *, report_change=None, context_change=None):
         from smr_launcher.crash_reports import parse_crash_report
-        alias = '/Users/USER/Library/Application Support/Steam/*/Synthetic.app/Contents/MacOS/Game'
-        context = dict(game_executable_sha256='a'*64, launcher_version='1.2.3',
-            expected_bundle_id='example.game', expected_redacted_path=alias,
-            expected_image_uuid='12345678-1234-5678-1234-567812345678',
-            process_birth_tolerance_us=1000)
+
+        alias = "/Users/USER/Library/Application Support/Steam/*/Synthetic.app/Contents/MacOS/Game"
+        context = dict(
+            game_executable_sha256="a" * 64,
+            launcher_version="1.2.3",
+            expected_bundle_id="example.game",
+            expected_redacted_path=alias,
+            expected_image_uuid="12345678-1234-5678-1234-567812345678",
+            process_birth_tolerance_us=1000,
+        )
         context.update(context_change or {})
         value = json.loads(report())
-        value.update(procPath=alias, procLaunch='2026-01-02T12:00:00.000500Z',
-            bundleInfo=dict(CFBundleIdentifier='example.game'),
-            usedImages=[dict(path=alias, uuid=context['expected_image_uuid'])],
-            threads=[dict(triggered=True, frames=[dict(imageIndex=0, imageOffset=256)])])
+        value.update(
+            procPath=alias,
+            procLaunch="2026-01-02T12:00:00.000500Z",
+            bundleInfo=dict(CFBundleIdentifier="example.game"),
+            usedImages=[dict(path=alias, uuid=context["expected_image_uuid"])],
+            threads=[dict(triggered=True, frames=[dict(imageIndex=0, imageOffset=256)])],
+        )
         value.update(report_change or {})
-        return parse_crash_report(json.dumps(value).encode(), expected_executable=EXE,
-            expected_pid=123, session_started_at=START, context=context)
+        return parse_crash_report(
+            json.dumps(value).encode(),
+            expected_executable=EXE,
+            expected_pid=123,
+            session_started_at=START,
+            context=context,
+        )
 
     def test_known_alias_uuid_bundle_pid_and_bounded_birth(self):
         payload = self.parse()
-        self.assertEqual(payload['exception_type'], 'EXC_BAD_ACCESS')
-        self.assertEqual(payload['frames'][0]['image_role'], 'game')
-        self.assertNotIn('/Users/', json.dumps(payload))
+        self.assertEqual(payload["exception_type"], "EXC_BAD_ACCESS")
+        self.assertEqual(payload["frames"][0]["image_role"], "game")
+        self.assertNotIn("/Users/", json.dumps(payload))
 
     def test_wrong_or_missing_qualifier_cannot_publish(self):
-        for change in (dict(pid=124), dict(procPath='/Users/USER/other/Game'),
-                dict(procLaunch='2026-01-02T12:00:00.002Z'), dict(procLaunch=None),
-                dict(bundleInfo=dict(CFBundleIdentifier='other.game')), dict(usedImages=[]),
-                dict(usedImages=[dict(path='/Users/USER/Library/Application Support/Steam/*/Synthetic.app/Contents/MacOS/Game',
-                     uuid='87654321-4321-8765-4321-876543218765')])):
+        for change in (
+            dict(pid=124),
+            dict(procPath="/Users/USER/other/Game"),
+            dict(procLaunch="2026-01-02T12:00:00.002Z"),
+            dict(procLaunch=None),
+            dict(bundleInfo=dict(CFBundleIdentifier="other.game")),
+            dict(usedImages=[]),
+            dict(
+                usedImages=[
+                    dict(
+                        path="/Users/USER/Library/Application Support/Steam/*/Synthetic.app/Contents/MacOS/Game",
+                        uuid="87654321-4321-8765-4321-876543218765",
+                    )
+                ]
+            ),
+        ):
             with self.subTest(change=change):
                 self.assertIsNone(self.parse(report_change=change))
 
     def test_null_termination_with_actual_exception_is_crash(self):
-        self.assertEqual(self.parse(report_change=dict(termination=None))['exception_type'], 'EXC_BAD_ACCESS')
+        self.assertEqual(
+            self.parse(report_change=dict(termination=None))["exception_type"], "EXC_BAD_ACCESS"
+        )
 
     def test_expected_uuid_enforced_for_exact_path_too(self):
-        good = dict(procPath=EXE, usedImages=[dict(path=EXE, uuid='12345678-1234-5678-1234-567812345678')])
+        good = dict(
+            procPath=EXE, usedImages=[dict(path=EXE, uuid="12345678-1234-5678-1234-567812345678")]
+        )
         self.assertIsNotNone(self.parse(report_change=good))
-        for images in ([], [dict(path=EXE, uuid='87654321-4321-8765-4321-876543218765')],
-                       good['usedImages'] * 2):
+        for images in (
+            [],
+            [dict(path=EXE, uuid="87654321-4321-8765-4321-876543218765")],
+            good["usedImages"] * 2,
+        ):
             self.assertIsNone(self.parse(report_change=dict(procPath=EXE, usedImages=images)))
 
     def test_precision_is_opt_in_and_bounded(self):
         from smr_launcher.crash_reports import CrashReportError
+
         self.assertIsNone(self.parse(context_change=dict(process_birth_tolerance_us=0)))
         for tolerance in (-1, 1001, True, 1.5):
             with self.assertRaises(CrashReportError):
@@ -258,29 +318,37 @@ class RedactionCorrelationControls(unittest.TestCase):
         import struct
         import uuid
         from smr_launcher.crash_monitor import executable_image_uuid
+
         with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary).resolve() / 'image'
-            header = struct.pack('<IIIIIIII', 0xfeedfacf, 0x1000007, 3, 2, 1, 24, 0, 0)
-            command = struct.pack('<II', 0x1b, 24) + uuid.UUID('12345678-1234-5678-1234-567812345678').bytes
+            path = Path(temporary).resolve() / "image"
+            header = struct.pack("<IIIIIIII", 0xFEEDFACF, 0x1000007, 3, 2, 1, 24, 0, 0)
+            command = (
+                struct.pack("<II", 0x1B, 24)
+                + uuid.UUID("12345678-1234-5678-1234-567812345678").bytes
+            )
             path.write_bytes(header + command)
-            self.assertEqual(executable_image_uuid(path), '12345678-1234-5678-1234-567812345678')
-            path.write_bytes(header + struct.pack('<II', 0x1b, 200000) + command[8:])
+            self.assertEqual(executable_image_uuid(path), "12345678-1234-5678-1234-567812345678")
+            path.write_bytes(header + struct.pack("<II", 0x1B, 200000) + command[8:])
             self.assertIsNone(executable_image_uuid(path))
-            path.write_bytes(b'x'*32)
+            path.write_bytes(b"x" * 32)
             self.assertIsNone(executable_image_uuid(path))
+
 
 class ReviewFindingControls(MonitorControls):
     def test_blocked_publisher_cannot_block_play_arm(self):
         from threading import Event, Thread
+
         monitor = self.monitor()
         self.write_report()
         monitor.configure(enabled=True, automatic_reporting=True)
         entered, release, armed = Event(), Event(), Event()
+
         def publish(payload, **kwargs):
             entered.set()
             if not release.wait(2):
                 raise TimeoutError()
-            return dict(status='pending')
+            return dict(status="pending")
+
         self.publisher.publish.side_effect = publish
         polling = Thread(target=monitor.poll_once)
         polling.start()
@@ -288,7 +356,7 @@ class ReviewFindingControls(MonitorControls):
             self.assertTrue(entered.wait(1))
             arming = Thread(target=lambda: (monitor.arm(), armed.set()))
             arming.start()
-            self.assertTrue(armed.wait(0.5), 'Play arm blocked behind network')
+            self.assertTrue(armed.wait(0.5), "Play arm blocked behind network")
             arming.join(1)
         finally:
             release.set()
@@ -298,110 +366,168 @@ class ReviewFindingControls(MonitorControls):
     def test_immediate_exact_binding_and_no_game_control(self):
         monitor = self.monitor()
         monitor.arm()
-        self.assertTrue(monitor.bind_after_launch('original'))
-        self.assertEqual(monitor.session['process'], PROCESS)
+        self.assertTrue(monitor.bind_after_launch("original"))
+        self.assertEqual(monitor.session["process"], PROCESS)
         self.assertEqual(len(monitor.sessions), 2)
 
     def test_forced_termination_retained_private_never_published(self):
         monitor = self.monitor()
         value = json.loads(report())
-        value['exception'] = dict(type='EXC_CRASH', signal='SIGKILL')
-        (self.reports/'Sid Meiers Railroads_forced.ips').write_text(json.dumps(value))
+        value["exception"] = dict(type="EXC_CRASH", signal="SIGKILL")
+        (self.reports / "Sid Meiers Railroads_forced.ips").write_text(json.dumps(value))
         monitor.configure(enabled=True, automatic_reporting=True)
         monitor.poll_once()
         self.assertEqual(monitor.store.pending(), [])
-        self.assertEqual(len(list((monitor.root/'unconfirmed').glob('*.raw'))), 1)
+        self.assertEqual(len(list((monitor.root / "unconfirmed").glob("*.raw"))), 1)
         self.publisher.publish.assert_not_called()
+
 
 class RealUseControls(unittest.TestCase):
     def test_rosetta_unknown_address_does_not_split_game_signature(self):
         from smr_launcher.crash_reports import parse_crash_report
-        image_uuid = '12345678-1234-5678-1234-567812345678'
+
+        image_uuid = "12345678-1234-5678-1234-567812345678"
         value = json.loads(report())
-        value.update(usedImages=[dict(path='unknown', uuid='00000000-0000-0000-0000-000000000000'), dict(path=EXE,uuid=image_uuid)],
-            threads=[dict(triggered=True,frames=[dict(imageIndex=0,imageOffset=0x12345000),dict(imageIndex=1,imageOffset=256)])])
+        value.update(
+            usedImages=[
+                dict(path="unknown", uuid="00000000-0000-0000-0000-000000000000"),
+                dict(path=EXE, uuid=image_uuid),
+            ],
+            threads=[
+                dict(
+                    triggered=True,
+                    frames=[
+                        dict(imageIndex=0, imageOffset=0x12345000),
+                        dict(imageIndex=1, imageOffset=256),
+                    ],
+                )
+            ],
+        )
+
         def parse():
-            return parse_crash_report(json.dumps(value).encode(), expected_executable=EXE, expected_pid=123,
-                session_started_at=START,context=dict(game_executable_sha256='a'*64,launcher_version='1.2.3'))
+            return parse_crash_report(
+                json.dumps(value).encode(),
+                expected_executable=EXE,
+                expected_pid=123,
+                session_started_at=START,
+                context=dict(game_executable_sha256="a" * 64, launcher_version="1.2.3"),
+            )
+
         first = parse()
-        value['threads'][0]['frames'][0]['imageOffset'] = 0x789ab000
+        value["threads"][0]["frames"][0]["imageOffset"] = 0x789AB000
         second = parse()
-        self.assertEqual(first['fingerprint'], second['fingerprint'])
-        self.assertNotEqual(first['report_sha256'], second['report_sha256'])
-        value['threads'][0]['frames'][1]['imageOffset'] = 257
-        self.assertNotEqual(first['fingerprint'], parse()['fingerprint'])
+        self.assertEqual(first["fingerprint"], second["fingerprint"])
+        self.assertNotEqual(first["report_sha256"], second["report_sha256"])
+        value["threads"][0]["frames"][1]["imageOffset"] = 257
+        self.assertNotEqual(first["fingerprint"], parse()["fingerprint"])
 
     def test_fingerprint_upgrade_keeps_immutable_incident_publication(self):
         from smr_launcher.crash_reports import CrashStore, parse_crash_report
+
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary).resolve()/'private'
-            payload = parse_crash_report(report(), expected_executable=EXE,expected_pid=123, session_started_at=START,
-                context=dict(game_executable_sha256='a'*64,launcher_version='1.2.3'))
+            root = Path(temporary).resolve() / "private"
+            payload = parse_crash_report(
+                report(),
+                expected_executable=EXE,
+                expected_pid=123,
+                session_started_at=START,
+                context=dict(game_executable_sha256="a" * 64, launcher_version="1.2.3"),
+            )
             with CrashStore(root) as store:
-                original = store.collect(report(),payload)
-                store.mark_publication(payload['fingerprint'],'published')
-                newer = dict(payload, fingerprint='f'*64)
-                retained = store.collect(report(),newer)
-                self.assertEqual(retained['fingerprint'], original['fingerprint'])
-                self.assertEqual(retained['publication']['status'],'published')
-                self.assertEqual(store.pending(),[])
+                original = store.collect(report(), payload)
+                store.mark_publication(payload["fingerprint"], "published")
+                newer = dict(payload, fingerprint="f" * 64)
+                retained = store.collect(report(), newer)
+                self.assertEqual(retained["fingerprint"], original["fingerprint"])
+                self.assertEqual(retained["publication"]["status"], "published")
+                self.assertEqual(store.pending(), [])
 
     def test_finder_path_uses_known_homebrew_cli_without_secret_reads(self):
         from unittest.mock import patch
         from smr_launcher.crash_reporting import bounded_command_runner
-        with patch('smr_launcher.crash_reporting.shutil.which',return_value=None), \
-             patch('smr_launcher.crash_reporting.Path.is_file',return_value=True), \
-             patch('smr_launcher.crash_reporting.os.access',return_value=True), \
-             patch('smr_launcher.crash_reporting.subprocess.run',return_value=SimpleNamespace(returncode=0)) as run:
-            result=bounded_command_runner(('gh','api','user'),stdin=None,timeout=1,max_output_bytes=1024)
-            self.assertEqual(run.call_args.args[0],('/opt/homebrew/bin/gh','api','user'))
-            self.assertEqual(result.returncode,0)
+
+        with (
+            patch("smr_launcher.crash_reporting.shutil.which", return_value=None),
+            patch("smr_launcher.crash_reporting.Path.is_file", return_value=True),
+            patch("smr_launcher.crash_reporting.os.access", return_value=True),
+            patch(
+                "smr_launcher.crash_reporting.subprocess.run",
+                return_value=SimpleNamespace(returncode=0),
+            ) as run,
+        ):
+            result = bounded_command_runner(
+                ("gh", "api", "user"), stdin=None, timeout=1, max_output_bytes=1024
+            )
+            self.assertEqual(run.call_args.args[0], ("/opt/homebrew/bin/gh", "api", "user"))
+            self.assertEqual(result.returncode, 0)
 
     def test_missing_cli_stays_unavailable(self):
         from unittest.mock import patch
         from smr_launcher.crash_reporting import bounded_command_runner
-        with patch('smr_launcher.crash_reporting.shutil.which',return_value=None), \
-             patch('smr_launcher.crash_reporting.Path.is_file',return_value=False), \
-             patch('smr_launcher.crash_reporting.subprocess.run') as run:
+
+        with (
+            patch("smr_launcher.crash_reporting.shutil.which", return_value=None),
+            patch("smr_launcher.crash_reporting.Path.is_file", return_value=False),
+            patch("smr_launcher.crash_reporting.subprocess.run") as run,
+        ):
             with self.assertRaises(FileNotFoundError):
-                bounded_command_runner(('gh','api','user'),stdin=None,timeout=1,max_output_bytes=1024)
+                bounded_command_runner(
+                    ("gh", "api", "user"), stdin=None, timeout=1, max_output_bytes=1024
+                )
             run.assert_not_called()
+
 
 class FreshOccurrenceControls(MonitorControls):
     def test_new_raw_same_fingerprint_uses_fresh_state_and_no_old_url(self):
-        monitor=self.monitor();self.write_report()
-        monitor.configure(enabled=True,automatic_reporting=True);monitor.poll_once()
-        self.assertEqual(self.publisher.publish.call_count,1)
-        first=self.publisher.publish.call_args.args[0]
-        self.write_report(name='Sid Meiers Railroads_2.ips',private='DIFFERENT_RAW')
-        monitor.next_publish=0;monitor.poll_once()
-        self.assertEqual(self.publisher.publish.call_count,2)
-        latest=self.publisher.publish.call_args
-        self.assertEqual(latest.args[0]['fingerprint'],first['fingerprint'])
-        self.assertNotEqual(latest.args[0]['report_sha256'],first['report_sha256'])
-        self.assertIsNone(latest.kwargs['existing_issue_url'])
-        monitor.next_publish=0;monitor.poll_once()
-        self.assertEqual(self.publisher.publish.call_count,2)
-        self.assertEqual(len(list(monitor.store.root.glob('incident-*.publication'))),2)
+        monitor = self.monitor()
+        self.write_report()
+        monitor.configure(enabled=True, automatic_reporting=True)
+        monitor.poll_once()
+        self.assertEqual(self.publisher.publish.call_count, 1)
+        first = self.publisher.publish.call_args.args[0]
+        self.write_report(name="Sid Meiers Railroads_2.ips", private="DIFFERENT_RAW")
+        monitor.next_publish = 0
+        monitor.poll_once()
+        self.assertEqual(self.publisher.publish.call_count, 2)
+        latest = self.publisher.publish.call_args
+        self.assertEqual(latest.args[0]["fingerprint"], first["fingerprint"])
+        self.assertNotEqual(latest.args[0]["report_sha256"], first["report_sha256"])
+        self.assertIsNone(latest.kwargs["existing_issue_url"])
+        monitor.next_publish = 0
+        monitor.poll_once()
+        self.assertEqual(self.publisher.publish.call_count, 2)
+        self.assertEqual(len(list(monitor.store.root.glob("incident-*.publication"))), 2)
 
     def test_uncertain_matching_incident_holds_fresh_raw_until_reconciled(self):
-        monitor=self.monitor();self.write_report()
-        self.publisher.publish.return_value=dict(status='unknown',detail='publication_unconfirmed')
-        monitor.configure(enabled=True,automatic_reporting=True);monitor.poll_once()
-        self.write_report(name='Sid Meiers Railroads_2.ips',private='DIFFERENT_RAW')
-        monitor.next_publish=0;monitor.poll_once()
-        self.assertEqual(self.publisher.publish.call_count,1)
-        self.assertEqual({e['publication']['status'] for e in monitor.store.pending()},{'unknown','pending'})
-        self.publisher.publish.return_value=dict(status='published',issue_url='https://example.invalid/old')
+        monitor = self.monitor()
+        self.write_report()
+        self.publisher.publish.return_value = dict(
+            status="unknown", detail="publication_unconfirmed"
+        )
+        monitor.configure(enabled=True, automatic_reporting=True)
+        monitor.poll_once()
+        self.write_report(name="Sid Meiers Railroads_2.ips", private="DIFFERENT_RAW")
+        monitor.next_publish = 0
+        monitor.poll_once()
+        self.assertEqual(self.publisher.publish.call_count, 1)
+        self.assertEqual(
+            {e["publication"]["status"] for e in monitor.store.pending()}, {"unknown", "pending"}
+        )
+        self.publisher.publish.return_value = dict(
+            status="published", issue_url="https://example.invalid/old"
+        )
         monitor.poll_once(reconcile=True)
-        self.assertEqual(self.publisher.publish.call_count,2)
-        self.assertTrue(self.publisher.publish.call_args.kwargs['reconcile_only'])
-        monitor.next_publish=0;monitor.poll_once()
-        self.assertEqual(self.publisher.publish.call_count,3)
-        self.assertIsNone(self.publisher.publish.call_args.kwargs['existing_issue_url'])
+        self.assertEqual(self.publisher.publish.call_count, 2)
+        self.assertTrue(self.publisher.publish.call_args.kwargs["reconcile_only"])
+        monitor.next_publish = 0
+        monitor.poll_once()
+        self.assertEqual(self.publisher.publish.call_count, 3)
+        self.assertIsNone(self.publisher.publish.call_args.kwargs["existing_issue_url"])
 
     def test_pending_reason_persisted(self):
-        monitor=self.monitor();self.write_report()
-        self.publisher.publish.return_value=dict(status='pending',detail='body_too_large')
-        monitor.configure(enabled=True,automatic_reporting=True);monitor.poll_once()
-        self.assertEqual(monitor.store.pending()[0]['publication']['detail'],'body_too_large')
+        monitor = self.monitor()
+        self.write_report()
+        self.publisher.publish.return_value = dict(status="pending", detail="body_too_large")
+        monitor.configure(enabled=True, automatic_reporting=True)
+        monitor.poll_once()
+        self.assertEqual(monitor.store.pending()[0]["publication"]["detail"], "body_too_large")

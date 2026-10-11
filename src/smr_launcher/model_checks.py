@@ -1,4 +1,5 @@
 """Bounded loose-model diagnostics; no conversion or gameplay certification."""
+
 from __future__ import annotations
 
 import os
@@ -19,7 +20,8 @@ def nif_header(data: bytes) -> dict:
     line, separator, tail = data[:HEADER_BYTES].partition(b"\n")
     match = re.fullmatch(
         rb"(?:NetImmerse|Gamebryo) File Format, Version (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\r?",
-        line)
+        line,
+    )
     if not separator or not match:
         return dict(status="unrecognized", reason="Unrecognized or incomplete NIF header")
     version = tuple(int(part) for part in match.groups())
@@ -27,11 +29,18 @@ def nif_header(data: bytes) -> dict:
         return dict(status="unrecognized", reason="NIF version component is out of range")
     # Earlier formats have different headers and are not parsed by this check.
     if version < (4, 0, 0, 2):
-        return dict(status="unrecognized", reason="Earlier NIF header layout requires separate inspection")
+        return dict(
+            status="unrecognized", reason="Earlier NIF header layout requires separate inspection"
+        )
     if len(tail) < 4 or int.from_bytes(tail[:4], "little") != int.from_bytes(bytes(version), "big"):
-        return dict(status="inconsistent", reason="NIF text and binary versions are missing or disagree")
-    return dict(status="recognized", version=".".join(map(str, version)),
-                legacy_collision_path=version < LEGACY_COLLISION_BOUNDARY)
+        return dict(
+            status="inconsistent", reason="NIF text and binary versions are missing or disagree"
+        )
+    return dict(
+        status="recognized",
+        version=".".join(map(str, version)),
+        legacy_collision_path=version < LEGACY_COLLISION_BOUNDARY,
+    )
 
 
 def inspect_models(root: Path) -> dict:
@@ -45,7 +54,9 @@ def inspect_models(root: Path) -> dict:
 
     def unread(path: Path, reason: str, *, incomplete: bool = False) -> None:
         nonlocal complete
-        findings.append(dict(path=path.relative_to(root).as_posix(), status="unread", reason=reason))
+        findings.append(
+            dict(path=path.relative_to(root).as_posix(), status="unread", reason=reason)
+        )
         if incomplete:
             complete = False
 
@@ -58,13 +69,21 @@ def inspect_models(root: Path) -> dict:
         root_is_symlink = False
         root_is_dir = False
     if root_is_symlink:
-        return dict(files_checked=0, complete=False,
-                    findings=[dict(path=".", status="unread", reason="Import root is a symlink")],
-                    limitations="Loose NIF headers only; packed assets, block contents and resource precedence are not checked. A legacy header is a risk flag, not proof of a crash; other versions are not certified safe.")
+        return dict(
+            files_checked=0,
+            complete=False,
+            findings=[dict(path=".", status="unread", reason="Import root is a symlink")],
+            limitations="Loose NIF headers only; packed assets, block contents and resource precedence are not checked. A legacy header is a risk flag, not proof of a crash; other versions are not certified safe.",
+        )
     if not root_is_dir:
-        return dict(files_checked=0, complete=False,
-                    findings=[dict(path=".", status="unread", reason="Import root is not a readable directory")],
-                    limitations="Loose NIF headers only; packed assets, block contents and resource precedence are not checked. A legacy header is a risk flag, not proof of a crash; other versions are not certified safe.")
+        return dict(
+            files_checked=0,
+            complete=False,
+            findings=[
+                dict(path=".", status="unread", reason="Import root is not a readable directory")
+            ],
+            limitations="Loose NIF headers only; packed assets, block contents and resource precedence are not checked. A legacy header is a risk flag, not proof of a crash; other versions are not certified safe.",
+        )
 
     for name in ("CustomAssets", "UserMaps"):
         scope = root / name
@@ -72,7 +91,11 @@ def inspect_models(root: Path) -> dict:
             scope_exists = scope.exists() or scope.is_symlink()
             scope_is_symlink = scope.is_symlink()
         except OSError as exc:
-            unread(scope, f"Asset scan scope could not be inspected: {exc.strerror or exc}", incomplete=True)
+            unread(
+                scope,
+                f"Asset scan scope could not be inspected: {exc.strerror or exc}",
+                incomplete=True,
+            )
             continue
         if not scope_exists:
             continue
@@ -84,7 +107,11 @@ def inspect_models(root: Path) -> dict:
                 unread(scope, "Asset scan scope is not a directory", incomplete=True)
                 continue
         except OSError as exc:
-            unread(scope, f"Asset scan scope could not be inspected: {exc.strerror or exc}", incomplete=True)
+            unread(
+                scope,
+                f"Asset scan scope could not be inspected: {exc.strerror or exc}",
+                incomplete=True,
+            )
             continue
 
         pending = [scope]
@@ -103,9 +130,15 @@ def inspect_models(root: Path) -> dict:
 
                         try:
                             is_link = child.is_symlink()
-                            is_directory = child.is_dir(follow_symlinks=False) if not is_link else False
+                            is_directory = (
+                                child.is_dir(follow_symlinks=False) if not is_link else False
+                            )
                         except OSError as exc:
-                            unread(path, f"Filesystem entry could not be inspected: {exc.strerror or exc}", incomplete=True)
+                            unread(
+                                path,
+                                f"Filesystem entry could not be inspected: {exc.strerror or exc}",
+                                incomplete=True,
+                            )
                             continue
 
                         if is_link:
@@ -119,8 +152,11 @@ def inspect_models(root: Path) -> dict:
                                     complete = False
                                     limit_reached = True
                                     break
-                            unread(path, "Model or directory link requires separate inspection",
-                                   incomplete=True)
+                            unread(
+                                path,
+                                "Model or directory link requires separate inspection",
+                                incomplete=True,
+                            )
                             continue
                         if is_directory:
                             pending.append(path)
@@ -136,7 +172,11 @@ def inspect_models(root: Path) -> dict:
                         try:
                             is_regular_file = child.is_file(follow_symlinks=False)
                         except OSError as exc:
-                            unread(path, f"Filesystem entry could not be inspected: {exc.strerror or exc}", incomplete=True)
+                            unread(
+                                path,
+                                f"Filesystem entry could not be inspected: {exc.strerror or exc}",
+                                incomplete=True,
+                            )
                             continue
                         if not is_regular_file:
                             unread(path, "Model entry is not a regular file", incomplete=True)
@@ -151,10 +191,18 @@ def inspect_models(root: Path) -> dict:
                         if result["status"] != "recognized" or result["legacy_collision_path"]:
                             findings.append(dict(path=path.relative_to(root).as_posix(), **result))
             except OSError as exc:
-                unread(directory, f"Directory could not be scanned: {exc.strerror or exc}", incomplete=True)
+                unread(
+                    directory,
+                    f"Directory could not be scanned: {exc.strerror or exc}",
+                    incomplete=True,
+                )
             if limit_reached:
                 break
         if limit_reached:
             break
-    return dict(files_checked=checked, complete=complete, findings=sorted(findings, key=lambda f: f["path"]),
-                limitations="Loose NIF headers only; packed assets, block contents and resource precedence are not checked. A legacy header is a risk flag, not proof of a crash; other versions are not certified safe.")
+    return dict(
+        files_checked=checked,
+        complete=complete,
+        findings=sorted(findings, key=lambda f: f["path"]),
+        limitations="Loose NIF headers only; packed assets, block contents and resource precedence are not checked. A legacy header is a risk flag, not proof of a crash; other versions are not certified safe.",
+    )

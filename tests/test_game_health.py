@@ -1,4 +1,5 @@
 """Injected resource observations; never launch or signal a real game."""
+
 import signal
 import unittest
 from unittest.mock import Mock
@@ -55,7 +56,8 @@ class ResourceControls(unittest.TestCase):
         self.observe()
         self.now = 4
         self.probe.side_effect = OSError()
-        with self.assertRaises(OSError): self.observe()
+        with self.assertRaises(OSError):
+            self.observe()
         self.probe.side_effect = None
         self.now = 5
         self.observe()
@@ -78,21 +80,29 @@ class ResourceControls(unittest.TestCase):
     def test_stop_failure_is_not_repeated(self):
         self.probe.return_value = 200 * GIB
         self.stop.side_effect = OSError()
-        with self.assertRaises(OSError): self.observe()
+        with self.assertRaises(OSError):
+            self.observe()
         self.observe()
         self.stop.assert_called_once()
 
     def test_stop_rechecks_identity_before_signals_and_escalation(self):
         now = [0]
-        def wait(seconds): now[0] += seconds
+
+        def wait(seconds):
+            now[0] += seconds
+
         probe = Mock(return_value=PROCESS)
         send = Mock()
+
         def signal_sent(pid, sig):
-            if sig == signal.SIGKILL: probe.return_value = None
+            if sig == signal.SIGKILL:
+                probe.return_value = None
+
         send.side_effect = signal_sent
         stop_game(PROCESS, probe=probe, send_signal=send, wait=wait, clock=lambda: now[0])
-        self.assertEqual([c.args for c in send.call_args_list],
-                         [(123, signal.SIGTERM), (123, signal.SIGKILL)])
+        self.assertEqual(
+            [c.args for c in send.call_args_list], [(123, signal.SIGTERM), (123, signal.SIGKILL)]
+        )
         for current in (dict(PROCESS, birth_us=789), dict(PROCESS, executable="/Other/Game")):
             send.reset_mock()
             with self.assertRaises(OSError):
@@ -102,7 +112,8 @@ class ResourceControls(unittest.TestCase):
     def test_replacement_after_term_refuses_kill(self):
         probe = Mock(side_effect=[PROCESS, dict(PROCESS, birth_us=789)])
         send = Mock()
-        with self.assertRaises(OSError): stop_game(PROCESS, probe=probe, send_signal=send)
+        with self.assertRaises(OSError):
+            stop_game(PROCESS, probe=probe, send_signal=send)
         send.assert_called_once_with(123, signal.SIGTERM)
 
     def test_missing_or_unreadable_process_never_signaled(self):
@@ -114,10 +125,18 @@ class ResourceControls(unittest.TestCase):
 
     def test_stop_has_a_finite_deadline(self):
         now = [0]
-        def wait(seconds): now[0] += seconds
+
+        def wait(seconds):
+            now[0] += seconds
+
         send = Mock()
         with self.assertRaises(OSError):
-            stop_game(PROCESS, probe=lambda exe: PROCESS, send_signal=send,
-                      wait=wait, clock=lambda: now[0])
+            stop_game(
+                PROCESS,
+                probe=lambda exe: PROCESS,
+                send_signal=send,
+                wait=wait,
+                clock=lambda: now[0],
+            )
         self.assertLess(now[0], 5.3)
         self.assertEqual(send.call_count, 2)

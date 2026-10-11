@@ -1,4 +1,5 @@
 """Personal-fork release checks and private, publisher-checked update staging."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -67,7 +68,11 @@ def parse_release(payload: bytes, current_version: str) -> Optional[Release]:
         value = json.loads(payload)
     except (ValueError, UnicodeError) as exc:
         raise UpdateError("Release metadata is invalid") from exc
-    if not isinstance(value, dict) or value.get("draft") is not False or value.get("prerelease") is not False:
+    if (
+        not isinstance(value, dict)
+        or value.get("draft") is not False
+        or value.get("prerelease") is not False
+    ):
         raise UpdateError("Latest release is not a published stable version")
     tag = value.get("tag_name")
     remote_version = version_tuple(tag)
@@ -90,9 +95,13 @@ def parse_release(payload: bytes, current_version: str) -> Optional[Release]:
         raise UpdateError("Release archive URL is not the expected personal-fork asset")
     digest = asset.get("digest")
     size = asset.get("size")
-    if (not isinstance(digest, str) or not digest.startswith("sha256:")
-            or not SHA256.fullmatch(digest[7:]) or type(size) is not int
-            or not 0 < size <= MAX_ZIP_BYTES):
+    if (
+        not isinstance(digest, str)
+        or not digest.startswith("sha256:")
+        or not SHA256.fullmatch(digest[7:])
+        or type(size) is not int
+        or not 0 < size <= MAX_ZIP_BYTES
+    ):
         raise UpdateError("Release archive has no bounded SHA-256 identity")
     return Release(version, asset_name, expected_url, digest[7:], size, page_url)
 
@@ -102,7 +111,9 @@ class _ReleaseRedirects(HTTPRedirectHandler):
         parsed = urlparse(newurl)
         host = parsed.hostname or ""
         if parsed.scheme != "https" or host not in (
-            "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"
+            "github.com",
+            "release-assets.githubusercontent.com",
+            "objects.githubusercontent.com",
         ):
             raise UpdateError("Release download redirected outside GitHub HTTPS")
         return super().redirect_request(request, file_pointer, code, message, headers, newurl)
@@ -113,8 +124,13 @@ def _opener():
 
 
 def fetch_latest_release(current_version: str) -> Optional[Release]:
-    request = Request(LATEST_URL, headers={"Accept": "application/vnd.github+json",
-                                            "User-Agent": "Definitive-SMR-Launcher-Apple-Silicon"})
+    request = Request(
+        LATEST_URL,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "Definitive-SMR-Launcher-Apple-Silicon",
+        },
+    )
     try:
         with _opener().open(request, timeout=15) as response:
             payload = response.read(MAX_METADATA_BYTES + 1)
@@ -139,7 +155,11 @@ class UpdatePreferences:
             value = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             raise UpdateError("Update preferences need inspection") from exc
-        if not isinstance(value, dict) or value.get("schema") != 1 or type(value.get("automatic")) is not bool:
+        if (
+            not isinstance(value, dict)
+            or value.get("schema") != 1
+            or type(value.get("automatic")) is not bool
+        ):
             raise UpdateError("Update preferences have an unexpected format")
         return value["automatic"]
 
@@ -158,13 +178,19 @@ def download_release(release: Release, private_directory: Path) -> Path:
     target = directory / (release.sha256 + ".zip")
     _assert_no_symlink_ancestor(target)
     if target.exists():
-        if target.is_file() and target.stat().st_size == release.size and _sha256(target) == release.sha256:
+        if (
+            target.is_file()
+            and target.stat().st_size == release.size
+            and _sha256(target) == release.sha256
+        ):
             return target
         raise UpdateError("Cached release archive differs from published identity")
     fd, temporary = tempfile.mkstemp(prefix=".release-download-", dir=directory)
     stage = Path(temporary)
     try:
-        request = Request(release.asset_url, headers={"User-Agent": "Definitive-SMR-Launcher-Apple-Silicon"})
+        request = Request(
+            release.asset_url, headers={"User-Agent": "Definitive-SMR-Launcher-Apple-Silicon"}
+        )
         count = 0
         digest = hashlib.sha256()
         with os.fdopen(fd, "wb") as output, _opener().open(request, timeout=60) as response:
@@ -216,11 +242,17 @@ def inspect_app_zip(path: Path) -> None:
                 name = member.filename
                 raw = name[:-1] if name.endswith("/") else name
                 pieces = tuple(raw.split("/"))
-                if (not pieces or pieces[0] != BUNDLE_NAME or name.startswith("/")
-                        or "\\" in name or any(part in ("", ".", "..") for part in pieces)
-                        or len(name) > 1024 or any(len(part) > 255 for part in pieces)
-                        or unicodedata.normalize("NFC", name) != name
-                        or any(ord(char) < 32 or ord(char) == 127 for char in name)):
+                if (
+                    not pieces
+                    or pieces[0] != BUNDLE_NAME
+                    or name.startswith("/")
+                    or "\\" in name
+                    or any(part in ("", ".", "..") for part in pieces)
+                    or len(name) > 1024
+                    or any(len(part) > 255 for part in pieces)
+                    or unicodedata.normalize("NFC", name) != name
+                    or any(ord(char) < 32 or ord(char) == 127 for char in name)
+                ):
                     raise UpdateError("Release archive contains an unsafe path")
                 key = name.rstrip("/").casefold()
                 if key in seen:
@@ -240,9 +272,13 @@ def inspect_app_zip(path: Path) -> None:
                         target = archive.read(member).decode("utf-8")
                     except (UnicodeError, RuntimeError) as exc:
                         raise UpdateError("Release archive link is unreadable") from exc
-                    if (not target or target.startswith("/") or "\\" in target
-                            or unicodedata.normalize("NFC", target) != target
-                            or any(ord(char) < 32 or ord(char) == 127 for char in target)):
+                    if (
+                        not target
+                        or target.startswith("/")
+                        or "\\" in target
+                        or unicodedata.normalize("NFC", target) != target
+                        or any(ord(char) < 32 or ord(char) == 127 for char in target)
+                    ):
                         raise UpdateError("Release archive link escapes the app")
                     links[key] = target
             for key in seen:
@@ -273,12 +309,20 @@ def inspect_app_zip(path: Path) -> None:
 
 
 def _signature_details(bundle: Path) -> tuple[str, str]:
-    checked = subprocess.run(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(bundle)],
-                             capture_output=True, text=True, timeout=60)
+    checked = subprocess.run(
+        ["/usr/bin/codesign", "--verify", "--deep", "--strict", str(bundle)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
     if checked.returncode:
         raise UpdateError("App code signature is invalid")
-    details = subprocess.run(["/usr/bin/codesign", "-dv", "--verbose=4", str(bundle)],
-                             capture_output=True, text=True, timeout=30)
+    details = subprocess.run(
+        ["/usr/bin/codesign", "-dv", "--verbose=4", str(bundle)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
     output = details.stdout + details.stderr
     team = re.search(r"^TeamIdentifier=(.+)$", output, re.MULTILINE)
     identifier = re.search(r"^Identifier=(.+)$", output, re.MULTILINE)
@@ -287,8 +331,9 @@ def _signature_details(bundle: Path) -> tuple[str, str]:
     return team.group(1), identifier.group(1)
 
 
-def verify_publisher(bundle: Path, expected_team: str, expected_version: str,
-                     *, require_name: bool = True) -> None:
+def verify_publisher(
+    bundle: Path, expected_team: str, expected_version: str, *, require_name: bool = True
+) -> None:
     if not TEAM_ID.fullmatch(expected_team):
         raise UpdateError("Trusted Developer ID team is not configured")
     bundle = Path(bundle)
@@ -299,20 +344,28 @@ def verify_publisher(bundle: Path, expected_team: str, expected_version: str,
     if team != expected_team or identifier != BUNDLE_ID:
         raise UpdateError("Update is signed by another publisher or app")
     requirement = f'anchor apple generic and certificate leaf[subject.OU] = "{expected_team}" and identifier "{BUNDLE_ID}"'
-    result = subprocess.run(["/usr/bin/codesign", "--verify", "--deep", "--strict",
-                             "-R=" + requirement, str(bundle)],
-                            capture_output=True, text=True, timeout=60)
+    result = subprocess.run(
+        ["/usr/bin/codesign", "--verify", "--deep", "--strict", "-R=" + requirement, str(bundle)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
     if result.returncode:
         raise UpdateError("Update does not satisfy the trusted Apple signing requirement")
-    result = subprocess.run(["/usr/sbin/spctl", "--assess", "--type", "execute",
-                             "--verbose=4", str(bundle)],
-                            capture_output=True, text=True, timeout=60)
+    result = subprocess.run(
+        ["/usr/sbin/spctl", "--assess", "--type", "execute", "--verbose=4", str(bundle)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
     if result.returncode or "source=Notarized Developer ID" not in result.stdout + result.stderr:
         raise UpdateError("macOS did not accept the signed and notarized app")
     with (bundle / "Contents/Info.plist").open("rb") as stream:
         info = plistlib.load(stream)
-    if (info.get("CFBundleIdentifier") != BUNDLE_ID
-            or info.get("CFBundleShortVersionString") != expected_version):
+    if (
+        info.get("CFBundleIdentifier") != BUNDLE_ID
+        or info.get("CFBundleShortVersionString") != expected_version
+    ):
         raise UpdateError("Signed app identity or version differs from the release")
     executable = bundle / "Contents/MacOS/Definitive SMR Launcher Apple Silicon"
     with executable.open("rb") as stream:
@@ -321,8 +374,7 @@ def verify_publisher(bundle: Path, expected_team: str, expected_version: str,
         raise UpdateError("Release app has no Apple Silicon executable")
 
 
-def stage_release(zip_path: Path, release: Release, library: Path,
-                  trusted_team: str) -> Path:
+def stage_release(zip_path: Path, release: Release, library: Path, trusted_team: str) -> Path:
     """Extract and authenticate an app without touching the installed app or maps."""
     if not TEAM_ID.fullmatch(trusted_team):
         raise UpdateError("Automatic installation requires a trusted Developer ID build")
@@ -334,8 +386,12 @@ def stage_release(zip_path: Path, release: Release, library: Path,
     directory.mkdir(parents=True, mode=0o700, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix=".app-stage-", dir=directory))
     try:
-        result = subprocess.run(["/usr/bin/ditto", "-x", "-k", str(zip_path), str(stage)],
-                                capture_output=True, text=True, timeout=120)
+        result = subprocess.run(
+            ["/usr/bin/ditto", "-x", "-k", str(zip_path), str(stage)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
         if result.returncode:
             raise UpdateError("macOS could not unpack the release app")
         bundle = stage / BUNDLE_NAME
@@ -355,8 +411,12 @@ def trusted_team_from_bundle() -> str:
         value = json.loads(resource.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise UpdateError("Installed app has no readable release policy") from exc
-    if (not isinstance(value, dict) or value.get("schema") != 1
-            or value.get("repository") != SLUG or value.get("bundle_id") != BUNDLE_ID):
+    if (
+        not isinstance(value, dict)
+        or value.get("schema") != 1
+        or value.get("repository") != SLUG
+        or value.get("bundle_id") != BUNDLE_ID
+    ):
         raise UpdateError("Installed app release policy is unexpected")
     team = value.get("team_id")
     return team if isinstance(team, str) and TEAM_ID.fullmatch(team) else ""
@@ -367,8 +427,11 @@ def current_app_bundle() -> Path:
         raise UpdateError("Automatic installation requires the signed Mac app")
     executable = Path(sys.executable)
     bundle = executable.parents[2]
-    if (bundle.name != BUNDLE_NAME or executable.parent.name != "MacOS"
-            or executable.parent.parent.name != "Contents"):
+    if (
+        bundle.name != BUNDLE_NAME
+        or executable.parent.name != "MacOS"
+        or executable.parent.parent.name != "Contents"
+    ):
         raise UpdateError("Running app bundle has an unexpected location")
     _assert_no_symlink_ancestor(bundle)
     return bundle
@@ -389,13 +452,17 @@ def pending_install(library: Path, installed_app: Path, current_version: str) ->
         return None
     if record.get("target") == str(installed_app) and record.get("new_version") == current_version:
         from .update_helper import reconcile_after_exchange
+
         reconcile_after_exchange(pending, current_version)
         return None
     candidate = record.get("candidate")
-    if (record.get("target") != str(installed_app)
-            or record.get("old_version") != current_version
-            or not isinstance(candidate, str) or not Path(candidate).is_dir()
-            or Path(candidate).is_symlink()):
+    if (
+        record.get("target") != str(installed_app)
+        or record.get("old_version") != current_version
+        or not isinstance(candidate, str)
+        or not Path(candidate).is_dir()
+        or Path(candidate).is_symlink()
+    ):
         raise UpdateError("Pending update cannot be resumed automatically")
     return pending
 
@@ -415,9 +482,15 @@ def pending_install_manual(pending: Path) -> bool:
     return value
 
 
-def prepare_install(staged_app: Path, installed_app: Path, release: Release,
-                    library: Path, trusted_team: str, current_version: str,
-                    manual_install: bool = False) -> Path:
+def prepare_install(
+    staged_app: Path,
+    installed_app: Path,
+    release: Release,
+    library: Path,
+    trusted_team: str,
+    current_version: str,
+    manual_install: bool = False,
+) -> Path:
     """Copy a verified app beside its install; leave current app and maps intact."""
     if version_tuple(release.version) <= version_tuple(current_version):
         raise UpdateError("Update is not newer than the installed version")
@@ -425,9 +498,14 @@ def prepare_install(staged_app: Path, installed_app: Path, release: Release,
         raise TypeError("Manual install intent must be Boolean")
     installed_app = Path(installed_app)
     _assert_no_symlink_ancestor(installed_app)
-    if (installed_app.name != BUNDLE_NAME or not installed_app.is_dir()
-            or not os.access(installed_app.parent, os.W_OK | os.X_OK)):
-        raise UpdateError("Move the app to a user-writable Applications folder before automatic updates")
+    if (
+        installed_app.name != BUNDLE_NAME
+        or not installed_app.is_dir()
+        or not os.access(installed_app.parent, os.W_OK | os.X_OK)
+    ):
+        raise UpdateError(
+            "Move the app to a user-writable Applications folder before automatic updates"
+        )
     verify_publisher(installed_app, trusted_team, current_version)
     verify_publisher(staged_app, trusted_team, release.version)
     update_root = Path(library) / "updates"
@@ -449,17 +527,31 @@ def prepare_install(staged_app: Path, installed_app: Path, release: Release,
         raise UpdateError("Update staging path already exists")
     candidate_parent.mkdir(mode=0o700)
     try:
-        result = subprocess.run(["/usr/bin/ditto", str(staged_app), str(candidate)],
-                                capture_output=True, text=True, timeout=120)
+        result = subprocess.run(
+            ["/usr/bin/ditto", str(staged_app), str(candidate)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
         if result.returncode:
             raise UpdateError("Could not copy the release beside the installed app")
         verify_publisher(candidate, trusted_team, release.version)
-        _atomic_json(pending, dict(schema=1, state="ready", target=str(installed_app),
-                                   candidate=str(candidate), backup=str(backup),
-                                   helper_bundle=str(staged_app),
-                                   team=trusted_team, old_version=current_version,
-                                   new_version=release.version, pid=os.getpid(),
-                                   manual_install=manual_install))
+        _atomic_json(
+            pending,
+            dict(
+                schema=1,
+                state="ready",
+                target=str(installed_app),
+                candidate=str(candidate),
+                backup=str(backup),
+                helper_bundle=str(staged_app),
+                team=trusted_team,
+                old_version=current_version,
+                new_version=release.version,
+                pid=os.getpid(),
+                manual_install=manual_install,
+            ),
+        )
         return pending
     except Exception:
         shutil.rmtree(candidate_parent)
@@ -471,6 +563,7 @@ def start_install_helper(pending: Path, library: Path) -> None:
     if not getattr(sys, "frozen", False):
         raise UpdateError("Update installation requires the signed Mac app")
     from . import APP_VERSION
+
     verify_publisher(current_app_bundle(), trusted_team_from_bundle(), APP_VERSION)
     update_root = Path(library) / "updates"
     _assert_no_symlink_ancestor(update_root)
@@ -487,6 +580,11 @@ def start_install_helper(pending: Path, library: Path) -> None:
     _atomic_json(Path(pending), record)
     log = update_root / "helper.log"
     with log.open("ab") as output:
-        subprocess.Popen([str(executable), "--apply-update", str(pending)],
-                         stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
-                         start_new_session=True, close_fds=True)
+        subprocess.Popen(
+            [str(executable), "--apply-update", str(pending)],
+            stdin=subprocess.DEVNULL,
+            stdout=output,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            close_fds=True,
+        )

@@ -1,4 +1,5 @@
 """Optional upstream community declarations, separate from local Mac testing."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -72,20 +73,28 @@ def _parse_document(document: dict) -> dict[str, CommunityMap]:
     result = {}
     names = set()
     for stem, item in document.items():
-        if (not isinstance(stem, str) or not stem or len(stem) > 252
-                or stem.startswith(".") or stem != stem.strip()
-                or unicodedata.normalize("NFC", stem) != stem
-                or any(char in stem for char in "/\\:")
-                or any(ord(char) < 32 or ord(char) == 127 for char in stem)):
+        if (
+            not isinstance(stem, str)
+            or not stem
+            or len(stem) > 252
+            or stem.startswith(".")
+            or stem != stem.strip()
+            or unicodedata.normalize("NFC", stem) != stem
+            or any(char in stem for char in "/\\:")
+            or any(ord(char) < 32 or ord(char) == 127 for char in stem)
+        ):
             raise CommunityError("Community index has an unsafe archive name")
         if not isinstance(item, dict):
             raise CommunityError("Community map must be an object")
         name = item.get("map_name")
         discussion = item.get("url")
-        if (not isinstance(name, str) or len(name) > 255
-                or any(ord(char) < 32 or ord(char) == 127 for char in name)
-                or not isinstance(discussion, str)
-                or not re.fullmatch(r"[1-9][0-9]{0,9}", discussion)):
+        if (
+            not isinstance(name, str)
+            or len(name) > 255
+            or any(ord(char) < 32 or ord(char) == 127 for char in name)
+            or not isinstance(discussion, str)
+            or not re.fullmatch(r"[1-9][0-9]{0,9}", discussion)
+        ):
             raise CommunityError("Community map name or discussion ID is invalid")
         stable = _flag(item.get("is_stable"))
         multiplayer = _flag(item.get("multiplayer"))
@@ -98,7 +107,13 @@ def _parse_document(document: dict) -> dict[str, CommunityMap]:
         if filename.casefold() in names:
             raise CommunityError("Community index contains ambiguous archive names")
         names.add(filename.casefold())
-        label = "Not reported" if stable is None else "Reported stable" if stable else "Reported unstable"
+        label = (
+            "Not reported"
+            if stable is None
+            else "Reported stable"
+            if stable
+            else "Reported unstable"
+        )
         result[filename] = CommunityMap(name, DISCUSSION_ROOT + discussion, label, multiplayer)
     return result
 
@@ -163,10 +178,13 @@ def read_cached_community_index(cache_path: Path) -> dict[str, CommunityMap]:
     """Read local cache only; absent, corrupt, or unsafe caches mean no records."""
     try:
         document = _cache_document(cache_path)
-        if (type(document.get("schema")) is not int or document["schema"] != 1
-                or document.get("source") != COMMUNITY_INDEX_URL
-                or not isinstance(document.get("maps"), dict)
-                or not isinstance(document.get("fetched_at"), str)):
+        if (
+            type(document.get("schema")) is not int
+            or document["schema"] != 1
+            or document.get("source") != COMMUNITY_INDEX_URL
+            or not isinstance(document.get("maps"), dict)
+            or not isinstance(document.get("fetched_at"), str)
+        ):
             return {}
         if datetime.fromisoformat(document["fetched_at"]).tzinfo is None:
             return {}
@@ -189,8 +207,9 @@ def _write_cache(path: Path, document: dict) -> None:
                 raise CommunityError("Community cache destination is not a regular file")
         except FileNotFoundError:
             pass
-        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                     0o600, dir_fd=parent)
+        fd = os.open(
+            temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent
+        )
         with os.fdopen(fd, "wb") as stream:
             fd = None
             stream.write(payload)
@@ -214,7 +233,9 @@ def fetch_community_index(cache_path: Path) -> dict[str, CommunityMap]:
     Failures raise CommunityError and leave any previous cache intact. No fetch
     occurs during cached reads or imports, and no community ratings are posted.
     """
-    request = Request(COMMUNITY_INDEX_URL, headers={"User-Agent": "Definitive-SMR-Launcher-Apple-Silicon"})
+    request = Request(
+        COMMUNITY_INDEX_URL, headers={"User-Agent": "Definitive-SMR-Launcher-Apple-Silicon"}
+    )
     try:
         with _opener().open(request, timeout=15) as response:
             if response.geturl() != COMMUNITY_INDEX_URL:
@@ -222,10 +243,15 @@ def fetch_community_index(cache_path: Path) -> dict[str, CommunityMap]:
             payload = response.read(MAX_INDEX_BYTES + 1)
         document = _decode(payload, MAX_INDEX_BYTES)
         records = _parse_document(document)
-        _write_cache(cache_path, {
-            "schema": 1, "source": COMMUNITY_INDEX_URL,
-            "fetched_at": datetime.now(timezone.utc).isoformat(), "maps": document,
-        })
+        _write_cache(
+            cache_path,
+            {
+                "schema": 1,
+                "source": COMMUNITY_INDEX_URL,
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+                "maps": document,
+            },
+        )
         return records
     except (OSError, ValueError) as exc:
         if isinstance(exc, CommunityError):

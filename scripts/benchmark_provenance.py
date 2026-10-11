@@ -5,6 +5,7 @@ Only generated opaque bytes in a temporary HOME/library are used. No discovery,
 game, profile, archive extraction, network, or GUI runs. Prints JSON measurements;
 retain raw output under ignored .handoff when running in the project checkout.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -64,13 +65,28 @@ def fixture(home, n, collision):
         (app.originals / (archive + ".7z")).write_bytes(payload)
         imported = app.library / "imports" / variant
         imported.mkdir(parents=True)
-        metadata = ("Map Name: Synthetic %04d\nAuthor: Author %d\nDate Created: 2026-01-01\nType: Singleplayer\n\n"
-                    % (i, i % 10) + "Synthetic railway briefing. " * 60).encode()
+        metadata = (
+            "Map Name: Synthetic %04d\nAuthor: Author %d\nDate Created: 2026-01-01\nType: Singleplayer\n\n"
+            % (i, i % 10)
+            + "Synthetic railway briefing. " * 60
+        ).encode()
         (imported / "mapInfo.txt").write_bytes(metadata)
-        records.append(MapRecord("Synthetic %04d" % i, archive, variant, "map-" + variant,
-                                 ("scenario.xml",), variant, "e" * 64, variant,
-                                 "Synthetic_%04d.7z" % i))
-        remotes.append(RemoteMap("Synthetic_%04d.7z" % i, len(payload), hashlib.sha1(payload).hexdigest()))
+        records.append(
+            MapRecord(
+                "Synthetic %04d" % i,
+                archive,
+                variant,
+                "map-" + variant,
+                ("scenario.xml",),
+                variant,
+                "e" * 64,
+                variant,
+                "Synthetic_%04d.7z" % i,
+            )
+        )
+        remotes.append(
+            RemoteMap("Synthetic_%04d.7z" % i, len(payload), hashlib.sha1(payload).hexdigest())
+        )
     initial = json.dumps(dict(schema=1, maps=[record.as_json() for record in records]))
     return app, tuple(remotes), initial
 
@@ -94,8 +110,10 @@ def main():
                 for collision in (False, True):
                     app, remotes, initial = fixture(home, n, collision)
                     expected = None
-                    for name, operation in (("before", lambda: old_match_sources(app, remotes)),
-                                            ("after", lambda: app.match_collection_sources(remotes))):
+                    for name, operation in (
+                        ("before", lambda: old_match_sources(app, remotes)),
+                        ("after", lambda: app.match_collection_sources(remotes)),
+                    ):
                         elapsed = []
                         for _ in range(args.samples):
                             app.catalogue_file.write_text(initial)
@@ -109,28 +127,57 @@ def main():
                         else:
                             assert result == expected, "matching/source semantics changed"
                         app.catalogue_file.write_text(initial)
-                        helper = "_matches_remote" if name == "before" else "_collection_archive_sha1"
-                        with patch.object(app, helper, wraps=getattr(app, helper)) as hashing, \
-                             patch.object(application, "_atomic_json", wraps=application._atomic_json) as writing:
+                        helper = (
+                            "_matches_remote" if name == "before" else "_collection_archive_sha1"
+                        )
+                        with (
+                            patch.object(app, helper, wraps=getattr(app, helper)) as hashing,
+                            patch.object(
+                                application, "_atomic_json", wraps=application._atomic_json
+                            ) as writing,
+                        ):
                             assert operation() == n
-                        row = dict(phase=name, n=n, collision=collision, samples=args.samples,
-                                   catalogue_bytes=len(initial.encode()), archive_bytes=sum(r.size for r in remotes),
-                                   min_ms=min(elapsed), median_ms=statistics.median(elapsed), max_ms=max(elapsed),
-                                   raw_ms=elapsed, untimed_hash_calls=hashing.call_count,
-                                   untimed_catalogue_writes=writing.call_count)
+                        row = dict(
+                            phase=name,
+                            n=n,
+                            collision=collision,
+                            samples=args.samples,
+                            catalogue_bytes=len(initial.encode()),
+                            archive_bytes=sum(r.size for r in remotes),
+                            min_ms=min(elapsed),
+                            median_ms=statistics.median(elapsed),
+                            max_ms=max(elapsed),
+                            raw_ms=elapsed,
+                            untimed_hash_calls=hashing.call_count,
+                            untimed_catalogue_writes=writing.call_count,
+                        )
                         rows.append(row)
                         for remote, record in zip(remotes, app.catalogue()):
                             payload = (app.originals / (record.archive_sha256 + ".7z")).read_bytes()
-                            assert len(payload) == remote.size and hashlib.sha1(payload).hexdigest() == remote.sha1
+                            assert (
+                                len(payload) == remote.size
+                                and hashlib.sha1(payload).hexdigest() == remote.sha1
+                            )
         finally:
             if previous_home is None:
                 os.environ.pop("HOME", None)
             else:
                 os.environ["HOME"] = previous_home
-    print(json.dumps(dict(python=sys.version, platform=platform.platform(), machine=platform.machine(),
-                         clock="perf_counter_ns", os_cache="not flushed", timing="uninstrumented",
-                         fixtures="25/250 distinct 4KiB opaque archives; unique/all-same sizes; no art/evidence",
-                         results=rows), indent=2))
+    print(
+        json.dumps(
+            dict(
+                python=sys.version,
+                platform=platform.platform(),
+                machine=platform.machine(),
+                clock="perf_counter_ns",
+                os_cache="not flushed",
+                timing="uninstrumented",
+                fixtures="25/250 distinct 4KiB opaque archives; unique/all-same sizes; no art/evidence",
+                results=rows,
+            ),
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ Archive contents are never written by this module. Callers must keep original
 packages separate from prepared game generations and treat inspection as static
 evidence, not as a successful game test.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -56,10 +57,22 @@ def _library():
         ("archive_read_new", ctypes.c_void_p, []),
         ("archive_read_support_filter_all", ctypes.c_int, [ctypes.c_void_p]),
         ("archive_read_support_format_all", ctypes.c_int, [ctypes.c_void_p]),
-        ("archive_read_open_filename", ctypes.c_int, [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t]),
-        ("archive_read_next_header", ctypes.c_int, [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]),
+        (
+            "archive_read_open_filename",
+            ctypes.c_int,
+            [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t],
+        ),
+        (
+            "archive_read_next_header",
+            ctypes.c_int,
+            [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)],
+        ),
         ("archive_read_data_skip", ctypes.c_int, [ctypes.c_void_p]),
-        ("archive_read_data", ctypes.c_ssize_t, [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]),
+        (
+            "archive_read_data",
+            ctypes.c_ssize_t,
+            [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t],
+        ),
         ("archive_read_free", ctypes.c_int, [ctypes.c_void_p]),
         ("archive_error_string", ctypes.c_char_p, [ctypes.c_void_p]),
         ("archive_entry_pathname", ctypes.c_char_p, [ctypes.c_void_p]),
@@ -120,7 +133,12 @@ def inspect_package(path: Path) -> PackageInspection:
     try:
         _check(lib.archive_read_support_filter_all(archive), lib, archive, "Enable archive filters")
         _check(lib.archive_read_support_format_all(archive), lib, archive, "Enable archive formats")
-        _check(lib.archive_read_open_filename(archive, os.fsencode(source), 10240), lib, archive, "Open package")
+        _check(
+            lib.archive_read_open_filename(archive, os.fsencode(source), 10240),
+            lib,
+            archive,
+            "Open package",
+        )
         while True:
             entry = ctypes.c_void_p()
             result = lib.archive_read_next_header(archive, ctypes.byref(entry))
@@ -190,7 +208,12 @@ def inspect_package(path: Path) -> PackageInspection:
             raise PackageError("Duplicate or case-colliding package path: " + normalized)
         keys[key] = "dir" if is_dir else "file"
         entries.append(PackageEntry(name, normalized, is_dir, length))
-        if not is_dir and top == "UserMaps" and parts[-1].lower().startswith("rrt_scenario_") and parts[-1].lower().endswith(".xml"):
+        if (
+            not is_dir
+            and top == "UserMaps"
+            and parts[-1].lower().startswith("rrt_scenario_")
+            and parts[-1].lower().endswith(".xml")
+        ):
             scenario_paths.append(normalized)
     for entry in entries:
         parts = entry.install_path.split("/")
@@ -200,4 +223,6 @@ def inspect_package(path: Path) -> PackageInspection:
                 raise PackageError("File occupies a package directory: " + entry.install_path)
     if not found_user_maps or not scenario_paths:
         raise PackageError("No UserMaps scenario was found")
-    return PackageInspection(before, size, wrapper, tuple(entries), tuple(sorted(scenario_paths)), total)
+    return PackageInspection(
+        before, size, wrapper, tuple(entries), tuple(sorted(scenario_paths)), total
+    )

@@ -1,4 +1,5 @@
 """Bounded Internet Archive map catalogue and verified private downloads."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -42,14 +43,22 @@ class RemoteMap:
     archive_modified: str = ""
 
     def __post_init__(self) -> None:
-        if (not isinstance(self.name, str) or not self.name.lower().endswith(".7z")
-                or len(self.name) > 255 or self.name.startswith(".")
-                or unicodedata.normalize("NFC", self.name) != self.name
-                or any(char in self.name for char in ("/", "\\", ":"))
-                or any(ord(char) < 32 or ord(char) == 127 for char in self.name)):
+        if (
+            not isinstance(self.name, str)
+            or not self.name.lower().endswith(".7z")
+            or len(self.name) > 255
+            or self.name.startswith(".")
+            or unicodedata.normalize("NFC", self.name) != self.name
+            or any(char in self.name for char in ("/", "\\", ":"))
+            or any(ord(char) < 32 or ord(char) == 127 for char in self.name)
+        ):
             raise CollectionError("Map filename is unsafe")
-        if (not isinstance(self.size, int) or not 0 < self.size <= MAX_ARCHIVE_BYTES
-                or not isinstance(self.sha1, str) or not re.fullmatch(r"[0-9a-f]{40}", self.sha1)):
+        if (
+            not isinstance(self.size, int)
+            or not 0 < self.size <= MAX_ARCHIVE_BYTES
+            or not isinstance(self.sha1, str)
+            or not re.fullmatch(r"[0-9a-f]{40}", self.sha1)
+        ):
             raise CollectionError("Map size or SHA-1 is invalid")
 
     @property
@@ -83,7 +92,9 @@ def parse_catalogue(payload: bytes) -> tuple[RemoteMap, ...]:
         raise CollectionError("Collection metadata is not valid JSON") from exc
     if not isinstance(document, dict) or not isinstance(document.get("metadata"), dict):
         raise CollectionError("Collection metadata is incomplete")
-    if document["metadata"].get("identifier") != IDENTIFIER or not isinstance(document.get("files"), list):
+    if document["metadata"].get("identifier") != IDENTIFIER or not isinstance(
+        document.get("files"), list
+    ):
         raise CollectionError("Collection identity or file list differs")
     if len(document["files"]) > 10000:
         raise CollectionError("Collection file list exceeds the limit")
@@ -95,17 +106,25 @@ def parse_catalogue(payload: bytes) -> tuple[RemoteMap, ...]:
         name = file.get("name")
         if not isinstance(name, str) or not name.lower().endswith(".7z"):
             continue
-        if (not name or len(name) > 255 or name.startswith(".")
-                or unicodedata.normalize("NFC", name) != name
-                or any(char in name for char in ("/", "\\", ":"))
-                or any(ord(char) < 32 or ord(char) == 127 for char in name)):
+        if (
+            not name
+            or len(name) > 255
+            or name.startswith(".")
+            or unicodedata.normalize("NFC", name) != name
+            or any(char in name for char in ("/", "\\", ":"))
+            or any(ord(char) < 32 or ord(char) == 127 for char in name)
+        ):
             raise CollectionError("Collection contains an unsafe map filename")
         try:
             size = int(file["size"])
         except (KeyError, TypeError, ValueError) as exc:
             raise CollectionError("Map size is missing or invalid: " + name) from exc
         sha1 = file.get("sha1")
-        if not 0 < size <= MAX_ARCHIVE_BYTES or not isinstance(sha1, str) or not re.fullmatch(r"[0-9a-f]{40}", sha1):
+        if (
+            not 0 < size <= MAX_ARCHIVE_BYTES
+            or not isinstance(sha1, str)
+            or not re.fullmatch(r"[0-9a-f]{40}", sha1)
+        ):
             raise CollectionError("Map size or SHA-1 is invalid: " + name)
         key = name.casefold()
         if key in names:
@@ -114,7 +133,9 @@ def parse_catalogue(payload: bytes) -> tuple[RemoteMap, ...]:
         # Archive mtime describes the uploaded file, not the map's creation.
         modified = ""
         try:
-            modified = datetime.fromtimestamp(int(file.get("mtime", "")), timezone.utc).date().isoformat()
+            modified = (
+                datetime.fromtimestamp(int(file.get("mtime", "")), timezone.utc).date().isoformat()
+            )
         except (ValueError, TypeError, OverflowError, OSError):
             pass
         records.append(RemoteMap(name, size, sha1, modified))
@@ -174,14 +195,17 @@ def _unique_cache_object(pairs):
 
 
 def _saved_catalogue(document):
-    if (not isinstance(document, dict)
-            or set(document) != {"schema", "source", "fetched_at", "maps"}
-            or type(document["schema"]) is not int or document["schema"] != 1
-            or document["source"] != METADATA_URL
-            or not isinstance(document["fetched_at"], str)
-            or len(document["fetched_at"]) > 64
-            or not isinstance(document["maps"], list)
-            or len(document["maps"]) > MAX_CACHED_MAPS):
+    if (
+        not isinstance(document, dict)
+        or set(document) != {"schema", "source", "fetched_at", "maps"}
+        or type(document["schema"]) is not int
+        or document["schema"] != 1
+        or document["source"] != METADATA_URL
+        or not isinstance(document["fetched_at"], str)
+        or len(document["fetched_at"]) > 64
+        or not isinstance(document["maps"], list)
+        or len(document["maps"]) > MAX_CACHED_MAPS
+    ):
         raise CollectionError("Catalogue cache schema or source differs")
     fetched = datetime.fromisoformat(document["fetched_at"])
     if fetched.tzinfo is None or fetched > datetime.now(timezone.utc):
@@ -189,19 +213,27 @@ def _saved_catalogue(document):
     records = []
     names = set()
     for item in document["maps"]:
-        if (not isinstance(item, dict) or set(item) != {"name", "size", "sha1", "archive_modified"}
-                or type(item["size"]) is not int
-                or not isinstance(item["archive_modified"], str)):
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"name", "size", "sha1", "archive_modified"}
+            or type(item["size"]) is not int
+            or not isinstance(item["archive_modified"], str)
+        ):
             raise CollectionError("Catalogue cache map schema differs")
         modified = item["archive_modified"]
-        if modified and (len(modified) != 10 or datetime.strptime(modified, "%Y-%m-%d").date().isoformat() != modified):
+        if modified and (
+            len(modified) != 10
+            or datetime.strptime(modified, "%Y-%m-%d").date().isoformat() != modified
+        ):
             raise CollectionError("Catalogue cache map date differs")
         record = RemoteMap(**item)
         if record.name.casefold() in names:
             raise CollectionError("Catalogue cache map names are ambiguous")
         names.add(record.name.casefold())
         records.append(record)
-    return SavedCatalogue(tuple(sorted(records, key=lambda item: item.name.casefold())), document["fetched_at"])
+    return SavedCatalogue(
+        tuple(sorted(records, key=lambda item: item.name.casefold())), document["fetched_at"]
+    )
 
 
 def read_cached_catalogue(path: Path) -> Optional[SavedCatalogue]:
@@ -237,8 +269,15 @@ def write_cached_catalogue(path: Path, records: tuple[RemoteMap, ...]) -> None:
     """
     if len(records) > MAX_CACHED_MAPS:
         raise CollectionError("Catalogue cache exceeds map limit")
-    document = dict(schema=1, source=METADATA_URL, fetched_at=datetime.now(timezone.utc).isoformat(),
-                    maps=[dict(name=r.name, size=r.size, sha1=r.sha1, archive_modified=r.archive_modified) for r in records])
+    document = dict(
+        schema=1,
+        source=METADATA_URL,
+        fetched_at=datetime.now(timezone.utc).isoformat(),
+        maps=[
+            dict(name=r.name, size=r.size, sha1=r.sha1, archive_modified=r.archive_modified)
+            for r in records
+        ],
+    )
     _saved_catalogue(document)
     payload = json.dumps(document, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     if len(payload) > MAX_CACHE_BYTES:
@@ -253,7 +292,9 @@ def write_cached_catalogue(path: Path, records: tuple[RemoteMap, ...]) -> None:
                 raise CollectionError("Catalogue cache destination is not regular")
         except FileNotFoundError:
             pass
-        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
+        fd = os.open(
+            temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent
+        )
         with os.fdopen(fd, "wb") as stream:
             fd = None
             stream.write(payload)
@@ -284,9 +325,13 @@ def _verified_cached(target: Path, record: RemoteMap) -> bool:
     return digest.hexdigest() == record.sha1
 
 
-def download_map(record: RemoteMap, private_directory: Path, *,
-                 progress: Optional[Callable[[int, int], None]] = None,
-                 cancelled: Optional[Callable[[], bool]] = None) -> Path:
+def download_map(
+    record: RemoteMap,
+    private_directory: Path,
+    *,
+    progress: Optional[Callable[[int, int], None]] = None,
+    cancelled: Optional[Callable[[], bool]] = None,
+) -> Path:
     """Download once to a private file, checking the archive's declared length and SHA-1."""
     directory = Path(private_directory).expanduser()
     _assert_no_symlink_ancestor(directory)
@@ -342,10 +387,15 @@ def download_map(record: RemoteMap, private_directory: Path, *,
         _fsync_dir(directory)
 
 
-def download_all_maps(records: tuple[RemoteMap, ...], private_directory: Path,
-                      progress: Progress, cancelled: Event, *,
-                      importer: Optional[Callable[[RemoteMap, Path], object]] = None,
-                      max_workers: int = 4) -> tuple[int, int, int]:
+def download_all_maps(
+    records: tuple[RemoteMap, ...],
+    private_directory: Path,
+    progress: Progress,
+    cancelled: Event,
+    *,
+    importer: Optional[Callable[[RemoteMap, Path], object]] = None,
+    max_workers: int = 4,
+) -> tuple[int, int, int]:
     """Download in a bounded pool; import verified archives serially if asked."""
     if not 1 <= max_workers <= 4:
         raise CollectionError("Parallel download worker count is outside the limit")
@@ -357,9 +407,12 @@ def download_all_maps(records: tuple[RemoteMap, ...], private_directory: Path,
             return "canceled", None
         progress(record, "Downloading", 0, record.size, "")
         try:
-            path = download_map(record, private_directory,
-                                progress=lambda count, total: progress(record, "Downloading", count, total, ""),
-                                cancelled=cancelled.is_set)
+            path = download_map(
+                record,
+                private_directory,
+                progress=lambda count, total: progress(record, "Downloading", count, total, ""),
+                cancelled=cancelled.is_set,
+            )
         except CollectionError as exc:
             if cancelled.is_set() and str(exc) == "Download canceled":
                 progress(record, "Canceled", 0, record.size, "")
@@ -390,8 +443,13 @@ def download_all_maps(records: tuple[RemoteMap, ...], private_directory: Path,
                         progress(record, "Failed", record.size, record.size, str(exc))
                         failed += 1
                         continue
-                progress(record, "Imported" if importer is not None else "Archive verified",
-                         record.size, record.size, "")
+                progress(
+                    record,
+                    "Imported" if importer is not None else "Archive verified",
+                    record.size,
+                    record.size,
+                    "",
+                )
                 completed += 1
             elif result == "failed":
                 failed += 1

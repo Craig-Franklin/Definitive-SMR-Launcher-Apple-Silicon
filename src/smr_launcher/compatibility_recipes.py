@@ -5,6 +5,7 @@ separately establish recipe applicability, registry and effective base context,
 complete source inventory, and preparation metadata before publishing an edition.
 No asset bytes are bundled here; output is constructed from local input bytes.
 """
+
 from __future__ import annotations
 
 from collections import Counter
@@ -39,16 +40,24 @@ class IdentityEdit:
     goal_path: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if (self.kind not in (*_KINDS, "industry-goal")
-                or not isinstance(self.source, str) or not isinstance(self.target, str)
-                or not _IDENTIFIER.fullmatch(self.source)
-                or not _IDENTIFIER.fullmatch(self.target) or self.source == self.target
-                or type(self.count) is not int or not 1 <= self.count <= 1000):
+        if (
+            self.kind not in (*_KINDS, "industry-goal")
+            or not isinstance(self.source, str)
+            or not isinstance(self.target, str)
+            or not _IDENTIFIER.fullmatch(self.source)
+            or not _IDENTIFIER.fullmatch(self.target)
+            or self.source == self.target
+            or type(self.count) is not int
+            or not 1 <= self.count <= 1000
+        ):
             raise RuleError("Invalid typed identity operation")
         if self.kind == "industry-goal":
-            if (not isinstance(self.goal_path, tuple) or not 3 <= len(self.goal_path) <= MAX_DEPTH
-                    or self.goal_path[-2:] != ("OwnListItem", "szObjectName")
-                    or any(not isinstance(x, str) or not _TAG.fullmatch(x) for x in self.goal_path)):
+            if (
+                not isinstance(self.goal_path, tuple)
+                or not 3 <= len(self.goal_path) <= MAX_DEPTH
+                or self.goal_path[-2:] != ("OwnListItem", "szObjectName")
+                or any(not isinstance(x, str) or not _TAG.fullmatch(x) for x in self.goal_path)
+            ):
                 raise RuleError("Industry goal needs an exact structural path")
         elif self.goal_path:
             raise RuleError("Definition operation cannot declare a goal path")
@@ -68,12 +77,18 @@ class PreservedOccurrence:
     attribute: str = ""
 
     def __post_init__(self) -> None:
-        if (not isinstance(self.path, tuple) or not 1 <= len(self.path) <= MAX_DEPTH
-                or any(not isinstance(x, str) or not _TAG.fullmatch(x) for x in self.path)
-                or not isinstance(self.value, str) or not _IDENTIFIER.fullmatch(self.value)
-                or type(self.count) is not int or not 1 <= self.count <= 1000
-                or not isinstance(self.attribute, str)
-                or self.attribute and not _TAG.fullmatch(self.attribute)):
+        if (
+            not isinstance(self.path, tuple)
+            or not 1 <= len(self.path) <= MAX_DEPTH
+            or any(not isinstance(x, str) or not _TAG.fullmatch(x) for x in self.path)
+            or not isinstance(self.value, str)
+            or not _IDENTIFIER.fullmatch(self.value)
+            or type(self.count) is not int
+            or not 1 <= self.count <= 1000
+            or not isinstance(self.attribute, str)
+            or self.attribute
+            and not _TAG.fullmatch(self.attribute)
+        ):
             raise RuleError("Invalid preserved occurrence declaration")
 
 
@@ -94,8 +109,7 @@ class _Node:
 
     @property
     def raw_value(self) -> str:
-        return "".join(item.raw_value if isinstance(item, _Node) else item
-                       for item in self.content)
+        return "".join(item.raw_value if isinstance(item, _Node) else item for item in self.content)
 
 
 def _parse(data: bytes) -> list[_Node]:
@@ -124,9 +138,12 @@ def _parse(data: bytes) -> list[_Node]:
             raise RuleError("Recipe XML declaration requires UTF-8 or ASCII")
 
     def start(name, attrs):
-        if (len(nodes) >= MAX_NODES or len(stack) >= MAX_DEPTH
-                or not _TAG.fullmatch(name)
-                or any(not _TAG.fullmatch(x) or x == "xmlns" for x in attrs)):
+        if (
+            len(nodes) >= MAX_NODES
+            or len(stack) >= MAX_DEPTH
+            or not _TAG.fullmatch(name)
+            or any(not _TAG.fullmatch(x) or x == "xmlns" for x in attrs)
+        ):
             raise RuleError("Unsupported namespace, tag or XML complexity")
         # Find the end of the opening tag while respecting quoted attributes.
         pos, quote = parser.CurrentByteIndex, None
@@ -143,8 +160,9 @@ def _parse(data: bytes) -> list[_Node]:
         if pos == len(data):
             raise RuleError("Unterminated XML opening tag")
         parent = stack[-1] if stack else None
-        node = _Node((parent.path if parent else ()) + (name,), pos + 1,
-                     attributes=attrs, parent=parent)
+        node = _Node(
+            (parent.path if parent else ()) + (name,), pos + 1, attributes=attrs, parent=parent
+        )
         if parent:
             parent.children.append(node)
             parent.content.append(node)
@@ -175,37 +193,48 @@ def _parse(data: bytes) -> list[_Node]:
 
 
 def compile_identity_patch(
-    *, path: str, data: bytes, before_sha256: str, after_sha256: str,
+    *,
+    path: str,
+    data: bytes,
+    before_sha256: str,
+    after_sha256: str,
     edits: tuple[IdentityEdit, ...],
     preserved: tuple[PreservedOccurrence, ...] = (),
 ) -> TokenPatch:
     """Compile one exact XML input to a full-file patch, without any file I/O.
 
-Every exact old/new text or attribute occurrence must be either a declared typed
-edit or a reviewed preserved occurrence. Comments and descriptive substrings
-remain untouched. A successful result proves byte transformation only.
+    Every exact old/new text or attribute occurrence must be either a declared typed
+    edit or a reviewed preserved occurrence. Comments and descriptive substrings
+    remain untouched. A successful result proves byte transformation only.
     """
     if hashlib.sha256(data).hexdigest() != before_sha256:
         raise RuleError("Recipe source hash differs")
-    if (not isinstance(edits, tuple) or not 1 <= len(edits) <= 256
-            or any(not isinstance(e, IdentityEdit) for e in edits)
-            or not isinstance(preserved, tuple) or len(preserved) > 1000
-            or any(not isinstance(p, PreservedOccurrence) for p in preserved)):
+    if (
+        not isinstance(edits, tuple)
+        or not 1 <= len(edits) <= 256
+        or any(not isinstance(e, IdentityEdit) for e in edits)
+        or not isinstance(preserved, tuple)
+        or len(preserved) > 1000
+        or any(not isinstance(p, PreservedOccurrence) for p in preserved)
+    ):
         raise RuleError("Recipe operations must be bounded typed declarations")
     # One source maps to one destination, and distinct sources remain distinct.
     aliases = {e.source: e.target for e in edits}
-    if (any(aliases[e.source] != e.target for e in edits)
-            or len(set(aliases.values())) != len(aliases)
-            or set(aliases) & set(aliases.values())):
+    if (
+        any(aliases[e.source] != e.target for e in edits)
+        or len(set(aliases.values())) != len(aliases)
+        or set(aliases) & set(aliases.values())
+    ):
         raise RuleError("Recipe aliases must be injective and nonoverlapping")
     declarations = [(e.kind, e.path, e.source) for e in edits]
     if len(declarations) != len(set(declarations)):
         raise RuleError("Duplicate identity edit")
     nodes = _parse(data)
     for node in nodes:
-        if (node.path in _KINDS.values()
-                or node.path[-2:] in (("OwnListItem", "szObjectName"),
-                                     ("OwnListItem", "szObjectType"))):
+        if node.path in _KINDS.values() or node.path[-2:] in (
+            ("OwnListItem", "szObjectName"),
+            ("OwnListItem", "szObjectType"),
+        ):
             if node.children or node.raw_value != node.value:
                 raise RuleError("Identity fields require plain unpadded leaf text")
     for definition_path in _KINDS.values():
@@ -235,36 +264,49 @@ remain untouched. A successful result proves byte transformation only.
             if edit.kind == "industry-goal":
                 types = [c for c in node.parent.children if c.path[-1] == "szObjectType"]
                 names = [c for c in node.parent.children if c.path[-1] == "szObjectName"]
-                if (len(names) != 1 or len(types) != 1 or types[0].children
-                        or types[0].value != "Industry"):
+                if (
+                    len(names) != 1
+                    or len(types) != 1
+                    or types[0].children
+                    or types[0].value != "Industry"
+                ):
                     raise RuleError("Ownership reference is not unambiguously Industry typed")
-            body = data[node.start:node.end]
+            body = data[node.start : node.end]
             # Target keys use plain text. Entities, comments or CDATA inside a
             # target are unsupported rather than silently reformatted.
             if body.strip(b" \t\r\n") != edit.source.encode("ascii"):
                 raise RuleError("Unsupported lexical identity representation")
             left = len(body) - len(body.lstrip(b" \t\r\n"))
             right = len(body.rstrip(b" \t\r\n"))
-            replacements.append((node.start + left, node.start + right, edit.target.encode("ascii")))
+            replacements.append(
+                (node.start + left, node.start + right, edit.target.encode("ascii"))
+            )
             selected.add(id(node))
     actual = Counter()
     relevant = set(aliases) | set(aliases.values())
     folded = {value.casefold() for value in relevant}
     for node in nodes:
-        if (node.path[-2:] == ("OwnListItem", "szObjectName")
-                and node.value.casefold() in folded and node.value not in relevant):
+        if (
+            node.path[-2:] == ("OwnListItem", "szObjectName")
+            and node.value.casefold() in folded
+            and node.value not in relevant
+        ):
             raise RuleError("Case-variant ownership reference needs explicit review")
-        if (id(node) not in selected and node.value in relevant
-                and (not node.children or any(text.strip() for text in node.text))):
+        if (
+            id(node) not in selected
+            and node.value in relevant
+            and (not node.children or any(text.strip() for text in node.text))
+        ):
             actual[node.path, node.value, ""] += 1
         for attribute, value in node.attributes.items():
             if value.strip() in relevant:
                 actual[node.path, value.strip(), attribute] += 1
     expected = Counter()
     for occurrence in preserved:
-        if (occurrence.path in _KINDS.values()
-                or occurrence.path[-2:] in (("OwnListItem", "szObjectName"),
-                                           ("OwnListItem", "szObjectType"))):
+        if occurrence.path in _KINDS.values() or occurrence.path[-2:] in (
+            ("OwnListItem", "szObjectName"),
+            ("OwnListItem", "szObjectType"),
+        ):
             raise RuleError("Typed identity fields cannot be declared descriptive occurrences")
         key = occurrence.path, occurrence.value, occurrence.attribute
         if expected[key] or occurrence.value not in relevant:
