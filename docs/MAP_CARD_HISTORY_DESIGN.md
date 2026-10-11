@@ -180,6 +180,11 @@ confirmation forms, a recorded confirmation, the once-only Later prompt, and
 click activation with an injected browser callback. No real browser request is
 needed for those link tests.
 
+History is read once per background gallery snapshot. Cards use the resulting
+plain data and retain cancellable, incremental creation and destruction from the
+launcher performance work. The integration check verifies the ledger read stays
+off the UI thread, current-build isolation, and visible handling of corrupt history.
+
 Run the offline suite with `PYTHONPATH=src python3 -m unittest discover -s tests`.
 Preview the actual components with `python3 scripts/preview_map_history.py` using
 a Python with native Tk (Homebrew Python 3.12 on the development machine). This
@@ -194,7 +199,8 @@ or live game-exit behavior. No actual gameplay, fix test, compatibility result o
 game completion was established during this implementation.
 
 The compatibility programme remains paused: no game tests, worker dispatches,
-compatibility RCA/repair or shared runtime/profile changes. Changes are confined
-to this worktree. Main-checkout local work, private saves and diagnostics are not
-modified. GitHub mutations require the exact personal-fork guard and readback.
-The implementation is not deployed or released by this worktree task.
+compatibility RCA/repair or shared runtime/profile changes. Development and verification use this worktree and temporary fictional data.
+Private saves, diagnostics and unrelated local changes are preserved. GitHub
+publication and merge require the exact personal-fork guard and readback. Source
+merge, packaged release, installed-app behavior and real gameplay evidence remain
+separate milestones.

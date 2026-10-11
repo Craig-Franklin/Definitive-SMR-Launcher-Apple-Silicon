@@ -389,25 +389,84 @@ class LauncherApplication:
         _atomic_json(self.catalogue_file, dict(schema=1, maps=[item.as_json() for item in records]))
         return updated
 
+    @staticmethod
+    def _collection_archive_identity(info: os.stat_result) -> tuple:
+        return (info.st_dev, info.st_ino, info.st_mode, info.st_size,
+                info.st_mtime_ns, info.st_ctime_ns)
+
+    @classmethod
+    def _collection_archive_sha1(cls, path: Path, identity: tuple) -> str:
+        """Hash a stable regular archive without following linked components."""
+        path = path.absolute()
+        directory = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        fd = None
+        try:
+            for component in path.parts[1:-1]:
+                next_directory = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                                         dir_fd=directory)
+                os.close(directory)
+                directory = next_directory
+            fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+            with os.fdopen(fd, "rb") as stream:
+                fd = None
+                before = os.fstat(stream.fileno())
+                if not stat.S_ISREG(before.st_mode) or cls._collection_archive_identity(before) != identity:
+                    raise ApplicationError("Preserved archive changed during source matching")
+                digest = hashlib.sha1()
+                for chunk in iter(lambda: stream.read(1 << 20), b""):
+                    digest.update(chunk)
+                if cls._collection_archive_identity(os.fstat(stream.fileno())) != identity:
+                    raise ApplicationError("Preserved archive changed during source matching")
+                return digest.hexdigest()
+        finally:
+            if fd is not None:
+                os.close(fd)
+            os.close(directory)
+
     def match_collection_sources(self, remotes: tuple[RemoteMap, ...]) -> int:
-        """Attach provenance to old imports only after matching preserved bytes."""
-        candidates: dict[int, list[RemoteMap]] = {}
+        """Match preserved bytes once per archive, then commit the whole batch.
+
+        Unlike the former per-record writes, inspection errors abort all pending
+        matches. The existing atomic writer publishes either the old catalogue
+        or the complete new one; an error after rename may leave the new one.
+        """
+        candidates: dict[tuple[int, str], RemoteMap] = {}
         for remote in remotes:
-            candidates.setdefault(remote.size, []).append(remote)
+            candidates.setdefault((remote.size, remote.sha1), remote)
+        sizes = {size for size, _ in candidates}
+        inspected: dict[Path, tuple[tuple, str]] = {}
         matched = 0
         with self._locked():
-            for record in self.catalogue():
+            records = list(self.catalogue())
+            for index, record in enumerate(records):
                 if record.source_url and record.archive_sha1:
                     continue
                 archive = self.originals / (record.archive_sha256 + ".7z")
                 _assert_no_symlink_ancestor(archive)
-                if not archive.is_file():
+                try:
+                    info = archive.lstat()
+                except FileNotFoundError:
                     continue
-                for remote in candidates.get(archive.stat().st_size, []):
-                    if self._matches_remote(archive, remote):
-                        self._record_source(record, remote)
-                        matched += 1
-                        break
+                if not stat.S_ISREG(info.st_mode) or info.st_size not in sizes:
+                    continue
+                identity = self._collection_archive_identity(info)
+                if archive not in inspected:
+                    inspected[archive] = (identity, self._collection_archive_sha1(archive, identity))
+                observed, digest = inspected[archive]
+                if observed != identity:
+                    raise ApplicationError("Preserved archive changed during source matching")
+                remote = candidates.get((info.st_size, digest))
+                if remote is not None:
+                    records[index] = replace(record, archive_filename=remote.name, source_url=remote.source_url,
+                                             source_label="Internet Archive · verified archive",
+                                             archive_modified=remote.archive_modified, archive_sha1=remote.sha1)
+                    matched += 1
+            if matched:
+                for archive, (identity, _) in inspected.items():
+                    _assert_no_symlink_ancestor(archive)
+                    if self._collection_archive_identity(archive.lstat()) != identity:
+                        raise ApplicationError("Preserved archive changed before source matching commit")
+                _atomic_json(self.catalogue_file, dict(schema=1, maps=[item.as_json() for item in records]))
         return matched
 
     def map_metadata(self, record: MapRecord) -> MapMetadata:

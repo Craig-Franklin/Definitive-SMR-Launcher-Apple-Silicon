@@ -6,12 +6,14 @@ from types import SimpleNamespace
 import tkinter as tk
 from tkinter import ttk
 import unittest
+import time
 from unittest.mock import Mock, patch
 
 from smr_launcher.gui import LauncherWindow
 from smr_launcher.history_ui import HistoryPanel, history_card, gallery_columns
 from smr_launcher.play_history import PlayHistoryStore, context, summarize, digest
 from smr_launcher.text_links import render_linked_text
+from smr_launcher.map_metadata import MapMetadata
 
 
 class NativeHistoryContracts(unittest.TestCase):
@@ -65,12 +67,16 @@ class NativeHistoryContracts(unittest.TestCase):
         window.surface, window.text, window.secondary, window.border, window.accent = self.palette
         window.selected_profile = None; window.search = tk.StringVar()
         window.crash_monitor = None
+        window.closed = window.busy = False; window.view = "maps"
+        window.map_filter = tk.StringVar(value="All maps"); window.sort_order = tk.StringVar(value="Name A–Z")
+        window.status = tk.StringVar(); window.gallery_count = Mock(); window.images = {}
+        window._localize_widgets = Mock()
+        window._background = lambda operation, finished: finished(True, operation())
         records = [SimpleNamespace(name="Map " + ("long title " * (i+1)), archive_sha256=hex(i+1)[2:]*64,
-                   variant_id=hex(i+5)[2:]*64, profile_id=str(i)) for i in range(4)]
-        window.app = SimpleNamespace(library=self.library, installation=SimpleNamespace(executable_sha256="f"*64))
-        window._filtered = lambda: records
-        window._metadata = lambda _: SimpleNamespace(author="Synthetic author", created="11 October 2026")
-        window._verification_text = lambda _: "Not verified"
+                   variant_id=hex(i+5)[2:]*64, profile_id=str(i), archive_filename=str(i)+".7z") for i in range(4)]
+        window.app = SimpleNamespace(library=self.library, installation=SimpleNamespace(executable_sha256="f"*64),
+            catalogue=lambda: records, map_metadata=lambda _: MapMetadata(author="Synthetic author", created="11 October 2026"),
+            verification_for=lambda _: None, map_icon=lambda _: None)
         window._art = lambda _: None
         window._selection_details = Mock()
         window.canvas = tk.Canvas(self.root, highlightthickness=0)
@@ -81,7 +87,10 @@ class NativeHistoryContracts(unittest.TestCase):
         for width in (1000, 790, 550, 290):
             self.root.geometry(f"{width}x780"); self.root.update_idletasks()
             window._resize_gallery(SimpleNamespace(width=width))
-            self.root.update_idletasks()
+            deadline = time.monotonic()+3
+            while (len(window.cards) < len(records) or window._gallery_after_id is not None) and time.monotonic() < deadline:
+                self.root.update()
+            self.assertEqual(len(window.cards), len(records))
             self.assertEqual(window.columns, gallery_columns(width))
             cards = list(window.cards.values())
             for card in cards:

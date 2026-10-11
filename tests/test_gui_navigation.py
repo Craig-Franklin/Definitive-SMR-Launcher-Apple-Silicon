@@ -158,6 +158,7 @@ class NavigationTests(unittest.TestCase):
         window.collection_list = SelectionTree()
         window.collection_detail = Mock()
         window.download_states = {}
+        window.imported_names = set()
         window.search = Mock(); window.search.get.return_value = ""
         window._records = Mock(return_value=())
         window._controls = Mock()
@@ -202,6 +203,8 @@ class NavigationTests(unittest.TestCase):
         window.view = "setup"
         window.status = Mock()
         window._show = Mock()
+        window._collection_rows = Mock()
+        window._publish_collection_caption = Mock()
         records = (object(),)
         window._collection_loaded(records)
         self.assertEqual(window.remote_records, records)
@@ -209,7 +212,9 @@ class NavigationTests(unittest.TestCase):
         window._show.assert_not_called()
         window.view = "collection"
         window._collection_loaded(records)
-        window._show.assert_called_once_with("collection")
+        window._show.assert_not_called()
+        window._collection_rows.assert_called_once_with()
+        window._publish_collection_caption.assert_called_once_with()
 
 
 if __name__ == "__main__":

@@ -55,6 +55,9 @@ breaking changes add a major release. Documentation, tests and chores alone do
 not create a release. A qualifying push releases its exact head after signing
 and notarization; failed checks leave the last working release available.
 
+The personal fork's [`main` access and protection policy](docs/REPOSITORY_ACCESS.md)
+records who may push or merge into `main` and how to verify the live GitHub rule.
+
 ## Build from source
 
 1. Install **Sid Meier’s Railroads!** from Steam on its default public branch.
