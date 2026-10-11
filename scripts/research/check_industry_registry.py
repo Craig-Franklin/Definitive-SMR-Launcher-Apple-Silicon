@@ -19,6 +19,9 @@ import struct
 import sys
 import xml.etree.ElementTree as ET
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from knowledge import consultation
+
 _SOURCE_ROOT = Path(__file__).resolve().parents[2] / "src"
 if str(_SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(_SOURCE_ROOT))
@@ -223,6 +226,7 @@ def main() -> int:
                        help="Discover the installed Steam game, launcher library and stock XML automatically")
     parser.add_argument("--library-source", choices=("imports", "prepared"), default="imports")
     parser.add_argument("--stock-xml", type=Path, help="Optional installed SMRailroadsData/assets/xml directory")
+    parser.add_argument("--corpus-root", type=Path, help="Private corpus with a matching knowledge-binding.json")
     args = parser.parse_args()
     if args.installed_library and (args.game_binary or args.stock_xml):
         parser.error("--installed-library discovers its binary and stock XML; omit explicit paths")
@@ -250,6 +254,8 @@ def main() -> int:
                 results.append(result)
         unique = {row.get("directory", row["root"]): row for row in results}
         report = {"schema": 1, "game_sha256": hashlib.sha256(data).hexdigest(),
+                  "knowledge_use": consultation(hashlib.sha256(data).hexdigest(),
+                                                ["industry_membership"], args.corpus_root),
                   "registry_entries": len(registry), "source": args.library_source if args.library else "map-root",
                   "runtime_checks": 0, "limitations": [
                       "Static identity membership only; no game launch, animation inspection or map repair.",

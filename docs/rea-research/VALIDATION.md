@@ -1,16 +1,18 @@
 # Validation and current status
 
-Updated 11 October 2026 in the isolated research worktree. The current project scope below supersedes the initial synthetic-only plan. Historical test results remain evidence of what was actually run.
+Updated 11 October 2026 in the isolated research worktree. Current authorization covers full local extraction, original tools/findings through a reviewed PR, merge and a separate main-checkout replay. Raw game evidence stays outside Git and cloud tool results. Compatibility automation remains paused; no game execution or release is authorized.
 
-## Current scope and next work
+## Current scope and measured checkpoint
 
-Craig authorized full local game decompilation and asked for a reusable knowledge base for future building, debugging and crash analysis. REA-03 now records that authorization and the raw-local/reviewed-original-publication boundary; license resolution is no longer a project dependency. First-machine toolchain acceptance is sufficient to proceed. Second-machine replay, exhaustive provider/cache testing and a broad dependency audit are follow-ups rather than blockers. No local game corpus is claimed complete.
+The private inventory accounts for 539 regular files across both installed app locations, six distinct native containers and eight architecture slices (six x86_64, two i386). Two i386 slices have no UUID. Three symlinks are inside-app references and were not traversed. Dependency inspection recorded 77 references: seven inventoried app files, 68 system references and two unresolved loader references. One script/Steam-URL wrapper candidate was identified without execution. System code and packed asset contents are not imported.
 
-A fresh metadata-only inventory inspected both known app locations without decompilation or execution. The small Applications bundle contained three regular files and no native modules. The Steam app contained 536 regular files, six distinct native module hashes and three symlinks excluded from traversal. Architecture/UUID metadata tools succeeded for all six modules; observed architecture sets were x86_64 and i386+x86_64. Slice/dependency/symlink classification remains part of REA-04. Private paths, module identifiers and full inventories stay in the local receipt.
+Original corpus.py and knowledge.py implement private manifest/coverage verification, bounded lookup, closed operational publication, a finding catalog and scanner consultation receipts. Full bulk export is running; no complete corpus, bound static finding or main replay is claimed at this checkpoint. A legacy exact-hash main export (64,728 discovered functions; 151 failures) is retained privately as a reference, not as proof of a new run.
 
-The next ready implementation is the private module/slice manifest and a small resumable runner around the existing ExportEngine.java, reusing any matching completed exports. Then build original subsystem notes and compact AI session handoffs. See README.md for acceptance. Keep compatibility automation paused and raw outputs out of cloud tool responses. No new smoke checks were needed for this documentation revision.
+The Python 3.12 synthetic suite passed 785 tests in 52.375 seconds on the research branch. Focused research tests also passed under Python 3.9. The new contracts cover private roots, symlinks/path escapes, digest/build mismatch, stale indexes/catalogs, unknown rule references, integer-only publication, disguised text/JSON, output preservation, bounded address/code lookup and scoped timeout termination. Scanner regressions remain original synthetic fixtures. These tests do not validate game runtime behavior.
 
-Repository continuity now includes root AGENTS.md, a knowledge-consultation workflow, private case consultation fields, default PR prompts and developer-entry links. Scanner/corpus rule-reference enforcement and actual knowledge lookup are still implementation work; no automatic consultation or runtime verification is claimed.
+The human-readable GAME_DEVELOPER_GUIDE.md targets a mid-level developer and links each supported claim to original findings/limits. Caveman's Codex skill was installed from JuliusBrussee/caveman at 2e08b9177c07bb7249a8a2d1a6758e5db281d002 and applied to the explanation pass. No proxy, model service or recurring automation was installed.
+
+Remaining acceptance: finish all module receipts, independently cross-check the industry table, verify and index the corpus, demonstrate local lookup and read-only map scanning, review original publication files, signed push/GitHub Verified readback, merge after PR checks and compare a main replay. A second directory on this Mac is not second-machine reproducibility. First-machine REA acceptance remains sufficient; no passed smoke check was repeated.
 
 ## Historical synthetic validation — before scope expansion
 

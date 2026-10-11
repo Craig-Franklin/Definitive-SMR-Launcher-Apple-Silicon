@@ -2,13 +2,13 @@
 
 ## Start and preserve scope
 
-Inspect the branch and dirty tree before substantive work. Preserve unrelated work. Personal fork only: `Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon`; pass `--repo` on supported GitHub commands and explicit owner/project IDs elsewhere. Do not merge/release or resume the paused compatibility workers/shared `.handoff` from research tasks.
+Inspect the branch and dirty tree before substantive work. Preserve unrelated work. Personal fork only: `Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon`; pass `--repo` on supported GitHub commands and explicit owner/project IDs elsewhere. Craig authorized completing this corpus slice, merging its reviewed PR and replaying from main on 11 October 2026. No release or resumption of the paused compatibility workers/shared `.handoff` is authorized. Future merges require their own task authorization.
 
 ## Use the game knowledge base
 
 For game behavior, compatibility, resource resolution, map validation/preparation, crash analysis or an engine-dependent code change, first read [knowledge use and verification](docs/rea-research/KNOWLEDGE_USE.md) and the current-scope section of [VALIDATION.md](docs/rea-research/VALIDATION.md). Use the relevant original knowledge notes and matching private evidence before making a behavior claim. The corpus is currently being built; never imply missing coverage was checked.
 
-Match executable hash, module UUID and architecture/slice; match map archive/prepared/dependency identities where relevant. Reuse existing analysis after digest/coverage checks. Keep unknown builds, untranslated Rosetta frames and unresolved resource precedence explicit. Do not transfer an inferred rule to every build or map.
+Match executable hash, module UUID and architecture/slice; match map archive/prepared/dependency identities where relevant. Reuse existing analysis after digest/coverage checks. Start with the original `knowledge-catalog.json`, `FINDINGS.md` and the developer guide in `docs/rea-research`; use `corpus.py` for bounded private lookup. Pass `--corpus-root` to research auditors to record matching evidence. Keep unknown builds, untranslated Rosetta frames and unresolved resource precedence explicit. Do not transfer an inferred rule to every build or map.
 
 Record knowledge consulted, applied/rejected rule or finding IDs, identity match, coverage gaps and verification evidence in the private case or analysis receipt. Summaries/PRs give a reviewed original explanation of that consultation and its limits. For a new engine-dependent rule, add an independently specified synthetic positive/negative regression and preserve provenance. A static risk flag, a passed synthetic test and runtime load/save/reopen evidence are separate results. No scan flag does not establish compatibility.
 

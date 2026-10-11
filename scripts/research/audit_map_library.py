@@ -21,8 +21,9 @@ import xml.etree.ElementTree as ET
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from check_industry_registry import (AuditError, discover_installed_library,
                                      extract_registry, read_xml, xml_files)
+from knowledge import annotate_findings, catalog, consultation
 
-ANALYZER_VERSION = "1.1.0-research"
+ANALYZER_VERSION = "1.2.0-research"
 KINDS = {
     "goods": ("GoodsXMLFile", "RRT_Goods.xml", "./Good"),
     "industries": ("IndustriesXMLFile", "RRT_Industries.xml", "./Industries/RRTIndustry"),
@@ -337,6 +338,7 @@ class Scanner:
             add("packed_assets_uninspected", files=packed)
         # Avoid repeated findings from shared default documents.
         unique_findings = list({json.dumps(f, sort_keys=True): f for f in findings}.values())
+        annotate_findings(unique_findings)
         return {"scenarios": scenario_rows, "xml_files": len(files), "xml_hashes": dependencies,
                 "packed_files": len(packed), "findings": unique_findings,
                 "categories": sorted({f["code"] for f in unique_findings})}
@@ -345,6 +347,7 @@ class Scanner:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--installed-library", required=True, action="store_true")
+    parser.add_argument("--corpus-root", type=Path, help="Private corpus with a matching knowledge-binding.json")
     args = parser.parse_args()
     start = time.monotonic()
     binary, library, stock = discover_installed_library()
@@ -368,6 +371,8 @@ def main():
         maps.append(result)
     counts = Counter(code for row in maps for code in row["categories"])
     report = {"schema": 1, "analyzer_version": ANALYZER_VERSION,
+              "knowledge_use": consultation(hashlib.sha256(binary_data).hexdigest(),
+                  [r for r in catalog()[0]["rules"] if r != "industry_membership"], args.corpus_root),
               "analyzer_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
               "xml_scanner_sha256": hashlib.sha256(
                   Path(__file__).with_name("check_industry_registry.py").read_bytes()).hexdigest(),

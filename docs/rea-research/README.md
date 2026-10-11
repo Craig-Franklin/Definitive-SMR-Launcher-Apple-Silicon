@@ -36,7 +36,7 @@ At session start read this file, [AI_PLAYBOOK.md](AI_PLAYBOOK.md), the current s
 | REA-03 | Record local authorization and disclosure boundary | Settled by Craig's instruction; local extraction authorized, raw output private, reviewed original analysis publishable; no license-resolution gate |
 | REA-04 | Identify builds and make the private corpus resumable/queryable | Metadata inventory started; extend synthetic index to real module/slice identities, digest/coverage checks, bounded retrieval and original-analysis handoffs |
 | REA-05 | Complete bulk local decompilation | Reuse verified existing exports first; persist one Ghidra analysis per unique module/slice; export every discovered function; enumerate failures and unresolved code |
-| REA-06 | Build reusable knowledge and AI session handoffs | Local function/resource lookup; original subsystem notes with evidence IDs, confidence and unknowns; compact reviewed handoff for future sessions |
+| REA-06 | Build reusable knowledge and AI session handoffs | Local function/resource lookup; original subsystem notes with evidence IDs, confidence and unknowns; compact reviewed handoff and human-readable developer guide using Caveman's concise explanation guidance |
 | REA-07 | Use the corpus for building, debugging and crashes | One request at a time; matching build/UUID, targeted evidence, falsifying checks and original diagnostics; runtime work stays separately scoped |
 | REA-08 | Publish original tools and reviewed analysis as useful | Explicit candidate-file review, synthetic tests for code changes, signed exact-fork push/readback; no raw corpus in GitHub/CI |
 
@@ -44,7 +44,9 @@ At session start read this file, [AI_PLAYBOOK.md](AI_PLAYBOOK.md), the current s
 
 Finish REA-04 and begin REA-05 together: reconcile existing private export identities and completion records without returning raw content to cloud tools; complete the module/slice/dependency inventory; harden a small bulk runner around the existing exporter; checkpoint each module. Do not wait for the synthetic PR to merge, a second machine, a broad dependency audit, exhaustive provider tests or a rights-holder reply.
 
-The synthetic helper in [EVIDENCE_INDEX.md](EVIDENCE_INDEX.md) is implemented and tested, but does not yet accept game evidence. Generalize it only as needed for the corpus, retaining private-root/digest and publication protections. Do not mistake the plan or metadata inventory for completed game decompilation.
+The synthetic helper in [EVIDENCE_INDEX.md](EVIDENCE_INDEX.md) remains a separate original-fixture publication example. The real corpus commands are documented in [CORPUS.md](CORPUS.md). [FINDINGS.md](FINDINGS.md) and [GAME_DEVELOPER_GUIDE.md](GAME_DEVELOPER_GUIDE.md) provide reviewed original explanations. No raw game evidence is bundled with either tool.
+
+Craig authorized finishing this slice, merging its reviewed PR and replaying from personal-fork main on 11 October 2026. Keep the existing main checkout untouched; use a separate clean checkout. This same-Mac replay is not second-machine validation. No release is authorized.
 
 ## Completion means coverage and reuse
 

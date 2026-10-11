@@ -4,7 +4,7 @@
 
 Root `AGENTS.md` requires consultation for engine-dependent development, crash analysis and custom-map scans. It points here rather than depending on the previous chat. Codex discovers repository instructions when starting a run/session; it does not refresh every already-running session automatically. A checkout without this file cannot inherit it. See [official instruction discovery](https://learn.chatgpt.com/docs/agent-configuration/agents-md).
 
-Current coverage is recorded in VALIDATION.md: installed module metadata inventory and original synthetic tools exist; the complete game corpus and new reviewed subsystem findings do not yet exist. Until they do, report `partial` or `unavailable` for the missing evidence. Existing original code/docs are useful references, but their presence is not proof that a new result was checked against the engine.
+Current coverage is recorded in VALIDATION.md. The private corpus commands, original finding catalog and [developer guide](GAME_DEVELOPER_GUIDE.md) are implemented. Consult [FINDINGS.md](FINDINGS.md) and [CORPUS.md](CORPUS.md) for IDs and commands. Report `partial` or `unavailable` for missing evidence; an original tool's presence is not proof that a result was checked against the engine.
 
 ## Minimal consultation record
 
@@ -34,7 +34,7 @@ Useful original-code entry points: `src/smr_launcher/crash_reports.py`, `crash_d
 4. A finding should identify the original rule/finding used, input evidence and certainty: a known invalid condition, a static risk, a heuristic review lead or unresolved input. Missing/ambiguous/packed dependencies must remain visible. Report check coverage and omitted checks alongside findings.
 5. A no-finding result means no implemented check matched the inspected inputs. It does not prove the map loads, plays, saves or reopens. Only separate runtime evidence can support those claims.
 
-The existing auditors already report provenance/limitations, but do not yet attach the new corpus revision and finding/rule IDs to every result. Their integration is a concrete REA-04/06/07 acceptance item, not a completed enforcement feature. Do not rerun the entire library solely to decorate an unchanged report; add metadata in the next relevant scanner change or run.
+The auditors now attach catalog revision and rule/finding IDs. Pass `--corpus-root` to bind matching private evidence; otherwise the consultation record explicitly says `unavailable`. Unknown references and stale catalogs fail. The broader auditor retains partial status for inherited models not independently verified here. This integration warrants the measured read-only acceptance run; routine future sessions reuse unchanged reports after identity checks.
 
 ## Building and learning loop
 
@@ -42,12 +42,12 @@ Before an engine-dependent code change, find the relevant original behavior note
 
 When a new finding changes understanding, preserve a compact original note with a stable ID, applicable builds, private evidence IDs, confidence, counterexamples, superseded findings and links to original code/tests. Use that note as the next session's reference. Keep detailed raw evidence local and reviewed original summaries discoverable. Promote a rule only to the evidence level actually achieved.
 
-The next knowledge-index implementation must provide a local locator, a digest/versioned finding catalog and lookup by build/subsystem/rule. Scanner/diagnostic receipts will bind that catalog revision and enumerate applied rules; synthetic checks will reject missing/unknown references and wrong-build use. CI can test the original contracts with synthetic fixtures; it cannot access the private corpus or prove a model actually read it.
+`corpus.py` provides a private manifest and bounded function/address/reference/string lookup. `knowledge.py catalog` lists the catalog revision and finding IDs; the JSON catalog maps subsystem/rule to original notes. Scanner receipts bind that revision and enumerate rules. Synthetic checks reject unknown references, stale indexes/catalogs and wrong-build evidence. CI tests the original contracts with synthetic fixtures; it cannot access the private corpus or prove a model actually read it.
 
-## What is enforced now versus next
+## What is enforced
 
-Implemented now: root instructions, this consultation contract, private case fields, default PR review prompts, and links from developer/research entry points. This makes omission visible to a reviewer without a new approval step.
+Implemented: root instructions, this consultation contract, private case fields, default PR review prompts, developer/research entry links, bounded corpus lookup and scanner/catalog reference checks. This makes omission visible without a new approval step.
 
-Next in REA-04/06/07: corpus/finding lookup and machine-checked rule/evidence references in diagnostic/scan receipts. These checks must preserve useful partial results while refusing an engine-verified claim without matching evidence. Instruction following alone is not a mathematical guarantee, and a filled-in receipt is not semantic proof; provenance, useful regressions and explicit review provide separate checks.
+Checks preserve useful partial results and refuse a matching-evidence claim without the required binding. Crash-address interpretation and new subsystem semantics still require a targeted investigation. Instruction following is not a mathematical guarantee, and a filled-in receipt is not semantic proof; provenance, useful regressions and review provide separate checks.
 
-These files currently live on the research branch/draft PR. New sessions using that branch can discover them. Other branches/checkouts need the reviewed instruction/doc changes incorporated before claiming the same coverage. Do not copy files into the dirty main checkout or merge the PR without authorization. Existing sessions must explicitly read the new instructions; no automatic rollout is claimed.
+New sessions discover these instructions in checkouts containing the reviewed changes. Craig authorized this slice's PR merge and separate main replay. Preserve the existing main checkout; do not copy files into it. Other branches need the changes incorporated before claiming equivalent coverage. Existing sessions must explicitly read the new instructions; no automatic refresh of running sessions is claimed.

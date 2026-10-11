@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "findings": [
+    {"id": "SMR-K-001", "subsystem": "industry-registry", "certainty": "static-membership-screen", "note": "FINDINGS.md#smr-k-001"},
+    {"id": "SMR-K-002", "subsystem": "resource-resolution", "certainty": "coverage-limitation", "note": "FINDINGS.md#smr-k-002"},
+    {"id": "SMR-K-003", "subsystem": "map-model", "certainty": "inherited-model-or-heuristic", "note": "FINDINGS.md#smr-k-003"}
+  ],
+  "rules": {
+    "industry_membership": "SMR-K-001",
+    "industry_outside_registry": "SMR-K-001",
+    "xml_unreadable": "SMR-K-002",
+    "xml_dependency_unreadable": "SMR-K-002",
+    "scenario_unreadable": "SMR-K-002",
+    "unexpected_scenario_root": "SMR-K-002",
+    "unexpected_dependency_root": "SMR-K-002",
+    "duplicate_root_xml_reference": "SMR-K-002",
+    "duplicate_xml_basename": "SMR-K-002",
+    "xml_reference_unresolved": "SMR-K-002",
+    "xml_reference_whitespace_review": "SMR-K-002",
+    "packed_assets_uninspected": "SMR-K-002",
+    "nonfinite_literal_review": "SMR-K-003",
+    "definition_key_review": "SMR-K-003",
+    "scenario_good_not_in_base_registry": "SMR-K-003",
+    "production_good_not_registered": "SMR-K-003",
+    "car_good_case_review": "SMR-K-003",
+    "car_good_not_registered": "SMR-K-003",
+    "duplicate_car_good_review": "SMR-K-003",
+    "registered_good_without_car": "SMR-K-003",
+    "rural_annex_not_defined": "SMR-K-003",
+    "standard_terminal_not_defined": "SMR-K-003",
+    "empty_production_reference_review": "SMR-K-003",
+    "industry_alias_capacity_exceeded": "SMR-K-003",
+    "bridge_outside_registry": "SMR-K-003",
+    "bridge_reversed_range": "SMR-K-003",
+    "bridge_span_outlier_review": "SMR-K-003",
+    "goal_good_reference_review": "SMR-K-003"
+  }
+}

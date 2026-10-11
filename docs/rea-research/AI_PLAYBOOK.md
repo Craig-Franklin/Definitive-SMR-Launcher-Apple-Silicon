@@ -64,9 +64,9 @@ Local extraction is authorized; proceed without another license/scope interview:
 
 ## Publication and CI
 
-No proprietary input, derived function export, REA snapshot or raw trace in commits, issue bodies, PR attachments, Actions logs/caches/artifacts, cloud model prompts or shared Pages. The current Python helper accepts only its built-in original fixture; extend it for game module/slice provenance without pretending that support already exists. Use strict output projections for cloud-visible operation receipts; raw local queries may stay expressive. Publish reviewed original analysis and original tools through explicit candidate-file review. Retain disguised payload, symlink/root and output-preservation regressions when changing the boundary.
+No proprietary input, derived function export, REA snapshot or raw trace in commits, issue bodies, PR attachments, Actions logs/caches/artifacts, cloud model prompts or shared Pages. The original `rea/evidence.py` helper accepts only its built-in fixture. `corpus.py` handles actual local module/slice provenance, private retrieval and closed operational publication reports; `knowledge.py` binds original finding IDs to matching static evidence. Use strict output projections for cloud-visible operation receipts; raw local queries stay private. Publish reviewed original analysis and original tools through explicit candidate-file review. Retain disguised payload, symlink/root and output-preservation regressions when changing the boundary.
 
-A publication scanner supports human review; it does not establish intellectual-property rights. Preserve original attribution and dependency licenses. Use signed commits, exact fork guards and remote readback. No automatic merge/release follows from this research plan.
+A publication scanner supports human review; it does not establish intellectual-property rights. Preserve original attribution and dependency licenses. Use signed commits, exact fork guards and remote readback. Craig explicitly authorized this slice's reviewed PR merge and separate main-checkout replay on 11 October 2026. No release is authorized; check the existing release policy before merging.
 
 ## Required result format
 
