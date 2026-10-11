@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "reviewed_date": "2026-10-11",
+  "rea_source_repository": "https://github.com/morluto/rea",
+  "rea_source_commit": "ca11162d027a0d3e3b5a65a54825b00d5689fb80",
+  "npm_package": "rea-agents",
+  "npm_version": "6.4.0",
+  "npm_integrity": "sha512-Vj1zWfSlna5bphGoaoI/TcVBuYvze9u+OyPC3Shz8YkBqaCTqB4COnnRoX7XDwMpwI24ZlFEel2yEj0k8LTWEQ==",
+  "observed_node": "24.13.0",
+  "observed_npm": "11.6.2",
+  "observed_ghidra": "12.1.4",
+  "observed_jdk": "21.0.12.1",
+  "host_architecture": "arm64",
+  "synthetic_target_architecture": "x86_64",
+  "source_equals_npm_artifact": "not established",
+  "game_analysis_authorized_by_this_plan": false
+}

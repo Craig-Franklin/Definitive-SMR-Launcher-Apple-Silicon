@@ -1,5 +1,8 @@
 # Engine research and map diagnostics
 
+For the optional pinned REA toolchain, original-fixture smoke test, research roadmap
+and private-data boundary, start with [Reproducible stability research](../../docs/rea-research/README.md).
+
 ## Broader per-scenario audit
 
 `audit_map_library.py` extends the narrow identity screen with reconstructed
