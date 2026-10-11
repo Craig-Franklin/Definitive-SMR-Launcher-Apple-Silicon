@@ -1,0 +1,104 @@
+"""Thread-safe delivery and bounded download presentation; contains no Tk calls."""
+from collections import deque
+from queue import Empty
+from threading import Condition, Lock
+
+
+class Mailbox:
+    """Close atomically with publication, disposing queued or late owned results."""
+    def __init__(self):
+        self._lock = Lock()
+        self._items = deque()
+        self._closed = False
+
+    def put(self, value, dispose=None):
+        with self._lock:
+            if not self._closed:
+                self._items.append((value, dispose))
+                return
+        if dispose:
+            dispose(value)
+
+    def get_nowait(self):
+        with self._lock:
+            if not self._items:
+                raise Empty
+            return self._items.popleft()[0]
+
+    def close(self):
+        with self._lock:
+            self._closed = True
+            items = tuple(self._items)
+            self._items.clear()
+        for value, dispose in items:
+            if dispose:
+                dispose(value)
+
+
+class DownloadEvents:
+    """Coalesce in-flight byte counts; preserve transitions with backpressure.
+
+    Only one mutable downloading slot per map is retained. Discrete events have
+    a fixed capacity too: producers wait for the UI rather than dropping logs.
+    A terminal map needs an explicit begin() before retry progress is accepted.
+    """
+    def __init__(self, capacity=4096):
+        self.capacity = capacity
+        self._condition = Condition()
+        self._items = deque()
+        self._progress = {}
+        self._terminal = set()
+        self._closed = False
+
+    def begin(self, records):
+        with self._condition:
+            for record in records:
+                self._terminal.discard(record.name)
+
+    def put(self, event):
+        record, state, *_ = event
+        with self._condition:
+            if self._closed or (record.name in self._terminal):
+                return
+            slot = self._progress.get(record.name)
+            if state == "Downloading" and slot is not None:
+                slot[0] = event
+                return
+            while len(self._items) >= self.capacity and not self._closed:
+                self._condition.wait()
+            if self._closed:
+                return
+            self._progress.pop(record.name, None)
+            slot = [event]
+            self._items.append(slot)
+            if state == "Downloading":
+                self._progress[record.name] = slot
+            elif state in ("Imported", "Failed", "Canceled"):
+                self._terminal.add(record.name)
+
+    def get_nowait(self):
+        with self._condition:
+            if not self._items:
+                raise Empty
+            slot = self._items.popleft()
+            record = slot[0][0]
+            if self._progress.get(record.name) is slot:
+                del self._progress[record.name]
+            self._condition.notify_all()
+            return slot[0]
+
+    def empty(self):
+        with self._condition:
+            return not self._items
+
+    def qsize(self):
+        with self._condition:
+            return len(self._items)
+
+    def close(self):
+        with self._condition:
+            self._closed = True
+            self._items.clear()
+            self._progress.clear()
+            self._terminal.clear()
+            self._condition.notify_all()

@@ -13,6 +13,8 @@ import hashlib
 import json
 import os
 import re
+import stat
+import uuid
 import tempfile
 import unicodedata
 
@@ -127,6 +129,146 @@ def fetch_catalogue() -> tuple[RemoteMap, ...]:
     except OSError as exc:
         raise CollectionError("Could not load the Internet Archive collection") from exc
     return parse_catalogue(payload)
+
+
+MAX_CACHED_MAPS = 10000
+MAX_CACHE_BYTES = MAX_METADATA_BYTES
+
+
+@dataclass(frozen=True)
+class SavedCatalogue:
+    records: tuple[RemoteMap, ...]
+    fetched_at: str
+
+
+def _cache_parent(path: Path, create=False):
+    path = Path(path).expanduser()
+    if ".." in path.parts:
+        raise CollectionError("Catalogue cache path contains parent traversal")
+    path = path.absolute()
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    parent = os.open(path.anchor, flags)
+    try:
+        for component in path.parts[1:-1]:
+            if create:
+                try:
+                    os.mkdir(component, mode=0o700, dir_fd=parent)
+                except FileExistsError:
+                    pass
+            next_fd = os.open(component, flags, dir_fd=parent)
+            os.close(parent)
+            parent = next_fd
+        return path, parent
+    except BaseException:
+        os.close(parent)
+        raise
+
+
+def _unique_cache_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise CollectionError("Catalogue cache contains duplicate keys")
+        result[key] = value
+    return result
+
+
+def _saved_catalogue(document):
+    if (not isinstance(document, dict)
+            or set(document) != {"schema", "source", "fetched_at", "maps"}
+            or type(document["schema"]) is not int or document["schema"] != 1
+            or document["source"] != METADATA_URL
+            or not isinstance(document["fetched_at"], str)
+            or len(document["fetched_at"]) > 64
+            or not isinstance(document["maps"], list)
+            or len(document["maps"]) > MAX_CACHED_MAPS):
+        raise CollectionError("Catalogue cache schema or source differs")
+    fetched = datetime.fromisoformat(document["fetched_at"])
+    if fetched.tzinfo is None or fetched > datetime.now(timezone.utc):
+        raise CollectionError("Catalogue cache timestamp is invalid")
+    records = []
+    names = set()
+    for item in document["maps"]:
+        if (not isinstance(item, dict) or set(item) != {"name", "size", "sha1", "archive_modified"}
+                or type(item["size"]) is not int
+                or not isinstance(item["archive_modified"], str)):
+            raise CollectionError("Catalogue cache map schema differs")
+        modified = item["archive_modified"]
+        if modified and (len(modified) != 10 or datetime.strptime(modified, "%Y-%m-%d").date().isoformat() != modified):
+            raise CollectionError("Catalogue cache map date differs")
+        record = RemoteMap(**item)
+        if record.name.casefold() in names:
+            raise CollectionError("Catalogue cache map names are ambiguous")
+        names.add(record.name.casefold())
+        records.append(record)
+    return SavedCatalogue(tuple(sorted(records, key=lambda item: item.name.casefold())), document["fetched_at"])
+
+
+def read_cached_catalogue(path: Path) -> Optional[SavedCatalogue]:
+    """Local-only read; reject links at every path component and bound bytes."""
+    parent = fd = None
+    try:
+        path, parent = _cache_parent(path)
+        fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_CACHE_BYTES:
+            return None
+        with os.fdopen(fd, "rb") as stream:
+            fd = None
+            payload = stream.read(MAX_CACHE_BYTES + 1)
+        if len(payload) > MAX_CACHE_BYTES:
+            return None
+        return _saved_catalogue(json.loads(payload, object_pairs_hook=_unique_cache_object))
+    except (OSError, ValueError, TypeError, RecursionError):
+        return None
+    finally:
+        if fd is not None:
+            os.close(fd)
+        if parent is not None:
+            os.close(parent)
+
+
+def write_cached_catalogue(path: Path, records: tuple[RemoteMap, ...]) -> None:
+    """Validate and atomically replace with a complete catalogue.
+
+    Failures before replace preserve previous bytes. A directory fsync failure
+    after replace can leave the complete new catalogue visible; old or complete
+    new bytes are the recovery contract, never a partially written document.
+    """
+    if len(records) > MAX_CACHED_MAPS:
+        raise CollectionError("Catalogue cache exceeds map limit")
+    document = dict(schema=1, source=METADATA_URL, fetched_at=datetime.now(timezone.utc).isoformat(),
+                    maps=[dict(name=r.name, size=r.size, sha1=r.sha1, archive_modified=r.archive_modified) for r in records])
+    _saved_catalogue(document)
+    payload = json.dumps(document, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    if len(payload) > MAX_CACHE_BYTES:
+        raise CollectionError("Catalogue cache exceeds byte limit")
+    path, parent = _cache_parent(path, create=True)
+    temporary = ".catalogue-" + uuid.uuid4().hex
+    fd = None
+    try:
+        try:
+            info = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+            if not stat.S_ISREG(info.st_mode):
+                raise CollectionError("Catalogue cache destination is not regular")
+        except FileNotFoundError:
+            pass
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
+        with os.fdopen(fd, "wb") as stream:
+            fd = None
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path.name, src_dir_fd=parent, dst_dir_fd=parent)
+        os.fsync(parent)
+    finally:
+        if fd is not None:
+            os.close(fd)
+        try:
+            os.unlink(temporary, dir_fd=parent)
+        except FileNotFoundError:
+            pass
+        os.close(parent)
 
 
 Progress = Callable[[RemoteMap, str, int, int, str], None]
