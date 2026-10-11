@@ -18,6 +18,8 @@ import subprocess
 import tempfile
 from typing import Callable
 
+from .crash_evidence import summarize_crash_evidence
+
 REPOSITORY = "Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon"
 OWNER = "Craig-Franklin"
 REPOSITORY_ID = 1404818508
@@ -382,6 +384,23 @@ def render_issue(payload: dict) -> tuple[str, str]:
         )
     if not p["frames"]:
         rows.append("| unknown | unknown | unknown | unknown |")
+    evidence = summarize_crash_evidence(p)
+    rows += [
+        "",
+        "## Evidence coverage and cross-map comparison",
+        "",
+        "- Family signature version: 1",
+        f"- Candidate family: {evidence['family_fingerprint'] or 'unknown'}",
+        f"- Signature coverage: {evidence['family_status']}",
+        f"- Supported game frames: {evidence['supported_game_frames']}",
+        "- Fault-thread frames retained/source: "
+        + f"{evidence['fault_frames_retained']}/{evidence['fault_frames_source'] if evidence['fault_frames_source'] is not None else 'unknown'}",
+        f"- Fault-thread registers retained: {evidence['fault_registers_retained']}",
+        "- Family limits: " + (", ".join(evidence["family_limits"]) or "none observed"),
+        "- Diagnostic gaps: " + ", ".join(evidence["gaps"]),
+        "",
+        "The family key uses the full retained fault-thread game stack, matching build/module/slice identities and exception class. It excludes map identity and unstable addresses. Partial coverage can compare supported game callers while the fault PC remains unresolved. Complete means signature coverage only. A matching key is a diagnostic lead, not a common-cause or repair-applicability claim; different keys can still share a cause. Existing incident fingerprints and publication grouping remain separate. Scenario, operation and triggering resource are not inferred from the active map.",
+    ]
     rows += [
         "",
         "## Limitations",

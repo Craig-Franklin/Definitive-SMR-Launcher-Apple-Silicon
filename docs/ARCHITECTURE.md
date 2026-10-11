@@ -15,7 +15,7 @@ and upstream comparison, not an active Windows development target.
 | Resources and validation | `resource_context.py`, `resource_identity.py`, `import_checks.py`, `model_checks.py`, `industry_registry.py` | Resolve exact resources and validate supported data contracts |
 | Activation and saves | `activation.py`, `removal.py`, `steam.py`, `live_run_authority.py` | Journalled profile switching, preservation, process checks and explicit runtime authority |
 | Verification and history | `verification.py`, `scenario_evidence.py`, `play_history.py`, `history_ui.py` | Bind evidence/history to the correct variant and distinguish levels of verification |
-| Crash reporting | `crash_monitor.py`, `crash_reports.py`, `crash_reporting.py`, `crash_details.py` | Collect private evidence and produce sanitized public reports |
+| Crash reporting | `crash_monitor.py`, `crash_reports.py`, `crash_reporting.py`, `crash_details.py`, `crash_evidence.py` | Collect private evidence and produce sanitized public reports with coverage and candidate families |
 | Updates and release | `updates.py`, `update_helper.py`; `scripts/release_policy.py`, `scripts/release_macos.py` | App updates, release selection and signed publication |
 | Build and automation | `scripts/build_macos.sh`, `scripts/build_dmg.sh`, `.github/workflows/` | Package and verify the native app, run checks and publish releases |
 | Offline research | `scripts/research/` | Bounded research tools with their own documented authority; not automatic game admission |
