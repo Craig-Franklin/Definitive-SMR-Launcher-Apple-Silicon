@@ -17,7 +17,7 @@ follow the separate [game setup instructions](../MACOS_README.md#install-the-mac
    ```
 
 2. Install Xcode 26 or newer and select its developer tools with `xcode-select`.
-   The build compiles an Apple Translation helper; the launcher reports a clear
+   The build compiles the SwiftUI frontend and an Apple Translation helper; the launcher reports a clear
    limitation when translation is unavailable on an older Mac.
 3. Clone this fork on the Mac and build the app:
 
@@ -29,7 +29,9 @@ follow the separate [game setup instructions](../MACOS_README.md#install-the-mac
    ```
 
 The script creates a local `.venv` and a `dist/` app bundle; both are ignored
-by Git. It checks the arm64 executable and local ad hoc code signature. This
+by Git. It checks both arm64 executables, the local ad hoc code signature and
+a harmless packaged JSON pipe probe. The Swift frontend targets macOS 13; current
+Liquid Glass APIs are guarded for macOS 26 and later. This
 development build is not notarized. Use the published release for automatic
 updates.
 

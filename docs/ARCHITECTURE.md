@@ -1,14 +1,17 @@
 # Mac launcher code map
 
 The original Windows launcher is in `Definitive-SMR-Launcher/`. The independently
-implemented Mac app lives in `src/smr_launcher/`; changes here should preserve its
-Python compatibility and dependency-free runtime.
+implemented Mac app uses `src/native/` for SwiftUI/AppKit presentation and
+`src/smr_launcher/` for Python services. Preserve Python compatibility and the
+dependency-free Python runtime.
 This fork maintains the Mac app only. Inherited Windows files support provenance
 and upstream comparison, not an active Windows development target.
 
 | Area | Starting points | Responsibility |
 | --- | --- | --- |
-| Entry points | `gui.py`, `cli.py`, `__main__.py`; `scripts/launcher_entry.py` | Tk interface, command-line interface and packaged startup |
+| Native presentation | `src/native/SMRLauncher.swift`, `LauncherView.swift`, `LauncherModel.swift`, `Backend.swift` | Native window, retained browsing/drafts and private subprocess transport |
+| Entry points and bridge | `native_backend.py`, `gui.py`, `cli.py`, `__main__.py`; `scripts/launcher_entry.py` | Packaged Swift entry, hidden Tk lifecycle/advanced tools and Python developer/CLI entry |
+| Personal display details | `annotations.py` | Identity-keyed private title/notes/image overrides, separate from package facts |
 | Application operations | `application.py`, `ui_work.py`, `activity.py` | Coordinate services and background work; keep blocking work out of UI callbacks |
 | Catalogue and packages | `collection.py`, `packages.py`, `extraction.py`, `map_metadata.py`, `cache_files.py` | Discover/download/import packages, inspect metadata and share safe cache-file mechanics |
 | Prepared variants and rules | `variants.py`, `rules.py`, `compatibility_recipes.py`, `recipe_service.py` | Prepare reproducible copies; preserve originals and recipe provenance |
@@ -42,3 +45,6 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the working process,
 [compatibility rules](COMPATIBILITY_RULES.md) for rule contracts.
 [Engine notes](ENGINE_MAP.md) and historical audit plans provide background; current
 issues and applicable private authority govern execution.
+
+See the [native implementation boundary and verification](ui-workflow/IMPLEMENTATION.md)
+for the subprocess protocol, update-safe lifecycle and staged advanced-tool migration.

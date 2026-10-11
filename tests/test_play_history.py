@@ -64,6 +64,67 @@ class HistoryContracts(unittest.TestCase):
         self.store.append(e)
         return e
 
+    def test_first_exact_save_reopen_and_continuation_append_as_one_batch(self):
+        self.opened()
+        confirm_checkpoint(self.store, self.ctx, "playable", self.open, game="new", at=time(1))
+        game = next(e["game_id"] for e in self.store.records() if e["kind"] == "game_started")
+        save = digest("exact synthetic save")
+        confirm_checkpoint(
+            self.store, self.ctx, "save_made", self.open, game=game, save_id=save, at=time(2)
+        )
+        second = self.opened(digest("resumed open"), 3)
+        with patch.object(self.store, "append", wraps=self.store.append) as append:
+            added = confirm_checkpoint(
+                self.store,
+                self.ctx,
+                "save_reopened",
+                second,
+                game=game,
+                save_id=save,
+                continued=True,
+                at=time(4),
+            )
+        append.assert_called_once()
+        self.assertEqual(
+            [e["kind"] for e in added], ["game_resumed", "save_reopened", "continued_play"]
+        )
+        self.assertTrue(all(e["attempt_id"] == second and e["game_id"] == game for e in added))
+        self.assertTrue(all(e["save_id"] == save for e in added[1:]))
+
+    def test_invalid_continuation_batch_leaves_reopen_and_binding_unwritten(self):
+        self.opened()
+        confirm_checkpoint(self.store, self.ctx, "playable", self.open, game="new", at=time(1))
+        game = next(e["game_id"] for e in self.store.records() if e["kind"] == "game_started")
+        save = digest("exact synthetic save")
+        confirm_checkpoint(self.store, self.ctx, "save_made", self.open, save_id=save, at=time(2))
+        second = self.opened(digest("resumed open"), 3)
+        before, event = self.store.path.read_bytes(), self.store.event
+
+        def invalid_second(ctx, kind, **fields):
+            if kind == "continued_play":
+                fields["save_id"] = digest("different save without reopen")
+            return event(ctx, kind, **fields)
+
+        with patch.object(self.store, "event", side_effect=invalid_second):
+            with self.assertRaises(HistoryError):
+                confirm_checkpoint(
+                    self.store,
+                    self.ctx,
+                    "save_reopened",
+                    second,
+                    game=game,
+                    save_id=save,
+                    continued=True,
+                    at=time(4),
+                )
+        self.assertEqual(self.store.path.read_bytes(), before)
+        for kind, continued in (("playable", True), ("save_reopened", "yes")):
+            with self.assertRaises(HistoryError):
+                confirm_checkpoint(
+                    self.store, self.ctx, kind, second, continued=continued, at=time(4)
+                )
+        self.assertEqual(self.store.path.read_bytes(), before)
+
     def _tested(self, *, completed=False):
         self.opened()
         failure = self.failure()

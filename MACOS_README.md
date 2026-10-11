@@ -25,6 +25,11 @@ The Mac app does not ship the commercial game or add personal maps and saves
 to the repository. Inherited upstream files retain their own provenance; the
 Mac app uses archives supplied by each user.
 
+The approved native Design B frontend is implemented on the UI workflow delivery
+branch. See [its implementation and verification limits](docs/ui-workflow/IMPLEMENTATION.md).
+It uses SwiftUI/AppKit for the main window and keeps advanced tools in Tk. This
+branch documentation does not establish which release contains the new interface.
+
 ## Install the Mac app
 
 1. Install **Sid Meier's Railroads!** from Steam on an Apple Silicon Mac, using

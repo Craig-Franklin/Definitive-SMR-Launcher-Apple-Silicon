@@ -1,4 +1,5 @@
 """Check the actual app and Applications link inside the read-only disk image."""
+
 from pathlib import Path
 import os
 import plistlib
@@ -10,14 +11,29 @@ import tempfile
 def verify(image: Path, source: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="smr-dmg-check-") as directory:
         mount = Path(directory) / "mounted"
-        subprocess.run(["hdiutil", "attach", "-readonly", "-nobrowse", "-mountpoint",
-                        str(mount), str(image.resolve())], check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(
+            [
+                "hdiutil",
+                "attach",
+                "-readonly",
+                "-nobrowse",
+                "-mountpoint",
+                str(mount),
+                str(image.resolve()),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
         try:
             bundle = mount / source.name
             if os.readlink(mount / "Applications") != "/Applications":
                 raise RuntimeError("Disk image has an unexpected Applications destination")
             subprocess.run(["codesign", "--verify", "--deep", "--strict", str(bundle)], check=True)
-            for relative in ("Contents/Info.plist", "Contents/MacOS/Definitive SMR Launcher Apple Silicon"):
+            for relative in (
+                "Contents/Info.plist",
+                "Contents/MacOS/Definitive SMR Launcher Apple Silicon",
+                "Contents/MacOS/SMRLauncher",
+            ):
                 if (bundle / relative).read_bytes() != (source / relative).read_bytes():
                     raise RuntimeError("Disk image payload differs from the built app")
             info = plistlib.loads((bundle / "Contents/Info.plist").read_bytes())
