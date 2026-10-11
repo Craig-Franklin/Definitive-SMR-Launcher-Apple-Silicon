@@ -445,3 +445,62 @@ class GalleryTests(TestCase):
             self.assertEqual(_read_art(path), b"")
             path.write_bytes(png+b"x"*gallery.MAX_ART_BYTES)
             self.assertEqual(_read_art(path), b"")
+
+
+class MainIntegrationTests(TestCase):
+    def test_issue_revision_refreshes_gallery_when_idle_and_guard_warning_stays_on_ui(self):
+        w = window(); w.view = "maps"; w._render_gallery = Mock(); w.busy = True
+        events = ["Synthetic resource guard stopped the game"]
+        w.crash_monitor = SimpleNamespace(status="Guard ready", issue_revision=1,
+                                         take_events=lambda: events[:])
+        ui = get_ident()
+        with patch("smr_launcher.gui.messagebox.showwarning") as warning:
+            warning.side_effect = lambda *args, **kwargs: self.assertEqual(get_ident(), ui)
+            w._poll()
+            warning.assert_called_once()
+        self.assertFalse(hasattr(w, "_crash_issue_revision"))
+        w._render_gallery.assert_not_called()
+        w._log.assert_called_with("Game resource protection", "Stopped", events[0])
+        events.clear(); w.busy = False
+        w._poll()
+        self.assertEqual(w._crash_issue_revision, 1); w._render_gallery.assert_called_once()
+        w._poll(); w._render_gallery.assert_called_once()
+
+    def test_memory_protection_preference_control_preserves_monitor_contract(self):
+        w = window(); w.crash_monitor = SimpleNamespace(enabled=True, automatic_reporting=False,
+                                                       protect_resources=False, configure=Mock())
+        variables = []
+        class Value:
+            def __init__(self, value): self.value=value; variables.append(self)
+            def get(self): return self.value
+        with patch("smr_launcher.gui.tk") as tk, patch("smr_launcher.gui.ttk") as ttk:
+            tk.BooleanVar.side_effect = Value
+            w.crash_reports()
+            protection = next(call for call in ttk.Checkbutton.call_args_list
+                              if call.kwargs.get("text") == "Stop Railroads if its memory use runs away")
+            self.assertFalse(protection.kwargs["variable"].get())
+            protection.kwargs["variable"].value = True
+            protection.kwargs["command"]()
+        w.crash_monitor.configure.assert_called_once_with(enabled=True, automatic_reporting=False,
+                                                          protect_resources=True)
+
+
+class PersistentIssueGalleryTests(TestCase):
+    from test_application import ApplicationTests
+    setUp = ApplicationTests.setUp
+
+    def test_persistent_issue_is_fresh_in_snapshot_filter_and_details_after_restart(self):
+        from smr_launcher.application import LauncherApplication
+        from smr_launcher.map_issues import MapIssueStore
+        app = self.application
+        app.setup(); record = app.import_archive(self.archive)
+        self.assertEqual(gallery_snapshot(app, Event())[0].verification, "Not verified")
+        MapIssueStore(app.library).record(dict(archive_sha256=record.archive_sha256,
+            variant_id=record.variant_id, game_executable_sha256=app.installation.executable_sha256),
+            incident_id="b"*64, occurred_at="2026-10-11T14:00:00+00:00", kind="resource_limit",
+            detail="Synthetic memory protection failure")
+        restarted = LauncherApplication(app.installation, app.library)
+        snapshot = gallery_snapshot(restarted, Event())
+        self.assertEqual(snapshot[0].verification, "Known issue")
+        self.assertEqual(filter_snapshot(snapshot, "", "Known issue", "Name A–Z"), snapshot)
+        self.assertIn("Synthetic memory protection failure", LauncherWindow._verification_details(restarted.verification_for(record)))

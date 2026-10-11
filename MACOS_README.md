@@ -208,6 +208,26 @@ app keeps future saves with the selected profile. If a switch is interrupted,
 quit Railroads and reopen the launcher to recover the journal before starting
 another game.
 
+While the launcher is open, memory protection checks the exact Railroads process
+once per second. It uses the physical memory footprint, which includes compressed
+and swapped allocations; resident memory alone can hide runaway use. The launcher
+saves a private diagnostic and stops the game if its footprint remains at or above
+8 GiB for five seconds, or reaches 16 GiB on one observation. It checks the executable,
+PID, and process birth before each termination signal. **Help → Crash Reports…**
+has a separate memory protection setting, enabled by default even when crash
+collection or GitHub reporting is off.
+
+Confirmed macOS crashes and memory protection failures create persistent **Known
+issue** warnings for the active custom map edition and game build. These warnings
+appear in the gallery, map details, filters, and the next launch confirmation.
+Existing locally collected crash reports are imported into this warning history
+when the launcher starts. Reports and warnings stay local unless the existing
+automatic GitHub crash reporting option is enabled; memory protection diagnostics
+stay local. Ordinary exits and unmatched diagnostics do not mark a map. A map-level
+warning does not establish which scenario was selected or prove that the map caused
+the failure. The game provides no reliable loading-completion log here, so the
+guard does not use a loading timeout or infer a failed load from high CPU alone.
+
 ## App updates and public releases
 
 The **Setup → App Updates** section has **Check for Updates** and an optional

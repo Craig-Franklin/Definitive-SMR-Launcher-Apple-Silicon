@@ -31,6 +31,7 @@ from . import removal
 from .import_checks import inspect_map
 from .launch_preferences import prepare_settings
 from .resource_identity import ContentHashCache, fingerprint_resources
+from .map_issues import MapIssueStore
 
 
 class ApplicationError(RuntimeError):
@@ -811,6 +812,7 @@ class LauncherApplication:
         return observation.id
 
     def scenario_status_for(self, record: MapRecord, *, options: Optional[dict] = None) -> VerificationSummary:
+        issues = MapIssueStore(self.library).for_map(record, self.installation.executable_sha256)
         records = self.scenario_evidence_store.records()
         legacy = self._legacy_verification_for(record)
         historical = tuple(r for r in self.verification_store.records()
@@ -822,14 +824,17 @@ class LauncherApplication:
         if not records:
             scenarios = [dict(archive_sha256=record.archive_sha256, edition_id=record.variant_id,
                               scenario_path=name, scenario_sha256="") for name in record.scenarios]
-            return reduce_verification((), scenarios, {}, historical=historical)
-        with self._locked():
-            scenarios, context, _, _ = self._scenario_context(record, options)
-            return reduce_verification(records, scenarios, context, historical=historical)
+            result = reduce_verification((), scenarios, {}, historical=historical)
+        else:
+            with self._locked():
+                scenarios, context, _, _ = self._scenario_context(record, options)
+                result = reduce_verification(records, scenarios, context, historical=historical)
+        return replace(result, status="Known issue", local_issues=issues) if issues else result
 
     def verification_for(self, record: MapRecord, *, options: Optional[dict] = None):
         """All views share scenario reduction; legacy results remain limited facts."""
-        if self.scenario_evidence_store.path.exists() or self._legacy_verification_for(record) is not None:
+        if (MapIssueStore(self.library).for_map(record, self.installation.executable_sha256)
+                or self.scenario_evidence_store.path.exists() or self._legacy_verification_for(record) is not None):
             return self.scenario_status_for(record, options=options)
         return None
 

@@ -68,6 +68,23 @@ class ScenarioViewsTests(unittest.TestCase):
         self.assertIn("Camera: pass",details);self.assertIn("Load: unknown",details)
         self.assertIn(self.b["scenario_path"] + " · Not verified",details)
 
+    def test_local_crash_warning_reaches_cli_filter_and_launch_confirmation(self):
+        from smr_launcher.map_issues import MapIssueStore
+        from smr_launcher.cli import _status
+        from unittest.mock import Mock
+        MapIssueStore(self.app.library).record(dict(archive_sha256=self.record.archive_sha256,
+            variant_id=self.record.variant_id, game_executable_sha256=self.installation.executable_sha256),
+            incident_id="f"*64, occurred_at="2026-10-11T14:00:00+00:00", kind="crash", detail="Confirmed game crash")
+        self.gui.search=Value();self.gui.map_filter=Value();self.gui.sort_order=Value()
+        self.gui.metadata_cache={};self.gui.map_filter.set("Known issue")
+        self.assertEqual(self.gui._filtered(),[self.record])
+        self.assertEqual(_status(self.app)["maps"][0]["verification"],"Known issue")
+        self.gui.root=Mock();self.gui._submit=Mock()
+        with patch("smr_launcher.gui.messagebox.askyesno",return_value=False) as prompt:
+            self.gui._play(self.record.profile_id)
+        self.assertIn("Confirmed game crash",prompt.call_args.args[1])
+        self.gui._submit.assert_not_called()
+
     def test_launcher_filter_and_cli_use_authoritative_status(self):
         from smr_launcher.cli import _status
         c=self.f.contract();self.f.record(c)
