@@ -165,12 +165,16 @@ def open_plain(path, flags, mode=0o600):
     fd = None
     try:
         with parent_handle(path) as parent_fd:
-            fd = os.open(
-                path.name,
-                flags | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
-                mode,
-                dir_fd=parent_fd,
-            )
+            flags |= getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+            if flags & os.O_CREAT and not flags & os.O_EXCL:
+                # Separate creation from opening an existing entry. Concurrent
+                # nonexclusive creates can return ENOENT on the Mac filesystem.
+                try:
+                    fd = os.open(path.name, flags | os.O_EXCL, mode, dir_fd=parent_fd)
+                except FileExistsError:
+                    fd = os.open(path.name, flags & ~os.O_CREAT, mode, dir_fd=parent_fd)
+            else:
+                fd = os.open(path.name, flags, mode, dir_fd=parent_fd)
             opened = os.fstat(fd)
             if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
                 raise EvidenceError("Evidence must be a plain regular file")
