@@ -376,11 +376,13 @@ class GalleryTests(TestCase):
         w = window(); w.grid_frame = Mock(); w.selected_profile = "Alpha"; w.columns = 3; w.cards = {}
         w.accent = "blue"; w.border = "gray"; w.surface = "white"; w.secondary = "gray"; w.text = "black"
         w._art = Mock(return_value=None); item = self.item(status="Known issue")
-        with patch("smr_launcher.gui.tk") as tk:
+        with patch("smr_launcher.gui.history_card") as build:
+            build.return_value.winfo_children.return_value = []
+            build.return_value.winfo_reqheight.return_value = 500
             w._create_gallery_card(0, item)
-            binds = [c.args[0] for c in tk.Frame.return_value.bind.call_args_list]
+            binds = [c.args[0] for c in build.return_value.bind.call_args_list]
             self.assertEqual(binds, ["<Button-1>", "<Double-Button-1>", "<MouseWheel>", "<Return>", "<space>"])
-            self.assertTrue(any(c.kwargs.get("text") == "Known issue" for c in tk.Label.call_args_list))
+            self.assertEqual(build.call_args.kwargs["verification"], "Known issue")
             w.app.verification_for.assert_not_called()
 
     def test_snapshot_worker_reads_app_off_ui_and_applies_snapshot_on_ui(self):
@@ -397,6 +399,40 @@ class GalleryTests(TestCase):
         self.assertTrue(calls); self.assertTrue(all(thread != ui for thread in calls))
         self.assertEqual(w._gallery_snapshot[0].metadata.author, "Ada")
         w._begin_gallery_batches.assert_called_once()
+
+    def test_history_is_read_once_off_ui_and_corruption_is_visible(self):
+        from smr_launcher.play_history import PlayHistoryStore, context, digest
+        with TemporaryDirectory() as tmp:
+            library = Path(tmp).resolve()
+            record = self.item().record
+            record.archive_sha256 = "a" * 64
+            record.variant_id = "b" * 64
+            record.scenarios = ("scenario.xml",)
+            store = PlayHistoryStore(library)
+            store.append(store.event(context(record, "c" * 64), "process_confirmed",
+                                     source="observed", attempt_id=digest("synthetic-open")))
+            w = window(); w.view = "maps"; w.grid_frame = Mock(); w.gallery_count = Mock()
+            w._begin_gallery_batches = Mock()
+            w.app = SimpleNamespace(library=library, installation=SimpleNamespace(executable_sha256="c" * 64),
+                                    catalogue=lambda: (record, record), map_metadata=lambda r: MapMetadata(),
+                                    verification_for=lambda r: None, map_icon=lambda r: None)
+            original = PlayHistoryStore.records
+            threads = []
+            def observed(instance):
+                threads.append(get_ident())
+                return original(instance)
+            with patch("smr_launcher.gallery.PlayHistoryStore.records", observed):
+                w._render_gallery(); deliver(w)
+            self.assertEqual(len(threads), 1)
+            self.assertNotEqual(threads[0], get_ident())
+            self.assertEqual([item.history.opens for item in w._gallery_snapshot], [1, 1])
+            self.assertTrue(all(not item.history_error for item in w._gallery_snapshot))
+            w.app.installation.executable_sha256 = "d" * 64
+            self.assertEqual(gallery_snapshot(w.app, Event())[0].history.opens, 0)
+            with patch("smr_launcher.gallery.PlayHistoryStore.records", side_effect=ValueError("corrupt history")):
+                snapshot = gallery_snapshot(w.app, Event())
+            self.assertEqual(snapshot[0].history_error, "corrupt history")
+            self.assertNotEqual(snapshot[0].history.light, "green")
 
     def test_scroll_position_retained_on_filter_and_manual_scroll_during_batches(self):
         w = window(); w.view = "maps"; w.canvas = Mock(); w.canvas.yview.return_value = (.4, .7)
@@ -452,7 +488,7 @@ class MainIntegrationTests(TestCase):
         w = window(); w.view = "maps"; w._render_gallery = Mock(); w.busy = True
         events = ["Synthetic resource guard stopped the game"]
         w.crash_monitor = SimpleNamespace(status="Guard ready", issue_revision=1,
-                                         take_events=lambda: events[:])
+                                         take_events=lambda: events[:], take_history_exits=lambda: [])
         ui = get_ident()
         with patch("smr_launcher.gui.messagebox.showwarning") as warning:
             warning.side_effect = lambda *args, **kwargs: self.assertEqual(get_ident(), ui)
@@ -469,6 +505,7 @@ class MainIntegrationTests(TestCase):
     def test_memory_protection_preference_control_preserves_monitor_contract(self):
         w = window(); w.crash_monitor = SimpleNamespace(enabled=True, automatic_reporting=False,
                                                        protect_resources=False, configure=Mock())
+        w._submit = Mock()
         variables = []
         class Value:
             def __init__(self, value): self.value=value; variables.append(self)
@@ -481,6 +518,10 @@ class MainIntegrationTests(TestCase):
             self.assertFalse(protection.kwargs["variable"].get())
             protection.kwargs["variable"].value = True
             protection.kwargs["command"]()
+            w.crash_monitor.configure.assert_not_called()
+            label, operation = w._submit.call_args.args
+            self.assertIn("Saving", label)
+            operation()
         w.crash_monitor.configure.assert_called_once_with(enabled=True, automatic_reporting=False,
                                                           protect_resources=True)
 

@@ -52,7 +52,7 @@ class MapIssueStore:
         if not isinstance(value["detail"], str) or not 0 < len(value["detail"]) <= 500:
             raise ValueError("Invalid map issue detail")
 
-    def for_map(self, record, game_sha256):
+    def records(self):
         _assert_no_symlink_ancestor(self.root)
         if not self.root.exists():
             return ()
@@ -63,7 +63,10 @@ class MapIssueStore:
                 raise ValueError("Map issue history needs inspection")
             value = json.loads(_read_regular(path, 8192))
             self._validate(value)
-            if (value["archive_sha256"], value["variant_id"], value["game_executable_sha256"]) == (
-                    record.archive_sha256, record.variant_id, game_sha256):
-                result.append(value)
+            result.append(value)
         return tuple(sorted(result, key=lambda v: v["occurred_at"]))
+
+    def for_map(self, record, game_sha256):
+        return tuple(value for value in self.records()
+                     if (value["archive_sha256"], value["variant_id"], value["game_executable_sha256"]) ==
+                     (record.archive_sha256, record.variant_id, game_sha256))

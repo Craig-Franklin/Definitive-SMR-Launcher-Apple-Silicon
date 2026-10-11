@@ -172,6 +172,38 @@ for _code, _value in zip(LANGUAGES, _EDITOR_NOTICE):
     TRANSLATIONS[_code][_EDITOR_NOTICE[0]] = _value
 
 
+
+# Loading-state text is shared by the content panels and persistent activity bar.
+_LOADING_ROWS = """
+Loading…|Laden…|Chargement…|Wird geladen…|लोड हो रहा है…|Caricamento…|正在加载…|Cargando…
+Please wait…|Even geduld…|Veuillez patienter…|Bitte warten…|कृपया प्रतीक्षा करें…|Attendere…|请稍候…|Espere…
+Loading your maps…|Uw kaarten laden…|Chargement de vos cartes…|Ihre Karten werden geladen…|आपके मानचित्र लोड हो रहे हैं…|Caricamento delle tue mappe…|正在加载您的地图…|Cargando sus mapas…
+Loading maps…|Kaarten laden…|Chargement des cartes…|Karten werden geladen…|मानचित्र लोड हो रहे हैं…|Caricamento mappe…|正在加载地图…|Cargando mapas…
+Checking maps…|Kaarten controleren…|Vérification des cartes…|Karten werden geprüft…|मानचित्र जाँचे जा रहे हैं…|Controllo mappe…|正在检查地图…|Comprobando mapas…
+Displaying maps…|Kaarten weergeven…|Affichage des cartes…|Karten werden angezeigt…|मानचित्र दिखाए जा रहे हैं…|Visualizzazione mappe…|正在显示地图…|Mostrando mapas…
+Filtering maps…|Kaarten filteren…|Filtrage des cartes…|Karten werden gefiltert…|मानचित्र छाँटे जा रहे हैं…|Filtro mappe…|正在筛选地图…|Filtrando mapas…
+Loading the map collection…|Kaartencollectie laden…|Chargement de la collection de cartes…|Kartensammlung wird geladen…|मानचित्र संग्रह लोड हो रहा है…|Caricamento della raccolta mappe…|正在加载地图集合…|Cargando la colección de mapas…
+Loading map details…|Kaartdetails laden…|Chargement des détails de la carte…|Kartendetails werden geladen…|मानचित्र विवरण लोड हो रहा है…|Caricamento dettagli mappa…|正在加载地图详情…|Cargando detalles del mapa…
+Loading activity history…|Activiteitengeschiedenis laden…|Chargement de l’historique…|Aktivitätsverlauf wird geladen…|गतिविधि इतिहास लोड हो रहा है…|Caricamento cronologia attività…|正在加载活动历史…|Cargando historial de actividad…
+Could not load maps|Kaarten konden niet worden geladen|Impossible de charger les cartes|Karten konnten nicht geladen werden|मानचित्र लोड नहीं हो सके|Impossibile caricare le mappe|无法加载地图|No se pudieron cargar los mapas
+Could not display maps|Kaarten konden niet worden weergegeven|Impossible d’afficher les cartes|Karten konnten nicht angezeigt werden|मानचित्र दिखाए नहीं जा सके|Impossibile visualizzare le mappe|无法显示地图|No se pudieron mostrar los mapas
+Could not load the collection|Collectie kon niet worden geladen|Impossible de charger la collection|Sammlung konnte nicht geladen werden|संग्रह लोड नहीं हो सका|Impossibile caricare la raccolta|无法加载集合|No se pudo cargar la colección
+Could not load map details|Kaartdetails konden niet worden geladen|Impossible de charger les détails|Kartendetails konnten nicht geladen werden|मानचित्र विवरण लोड नहीं हो सका|Impossibile caricare i dettagli della mappa|无法加载地图详情|No se pudieron cargar los detalles
+See the status message for details. You can try again.|Bekijk de statusmelding voor details. Probeer het opnieuw.|Consultez le message d’état. Vous pouvez réessayer.|Details stehen in der Statusmeldung. Versuchen Sie es erneut.|विवरण के लिए स्थिति संदेश देखें। आप फिर कोशिश कर सकते हैं।|Vedi il messaggio di stato. Puoi riprovare.|请查看状态消息了解详情。您可以重试。|Consulte el mensaje de estado. Puede intentarlo de nuevo.
+{completed} of {total}|{completed} van {total}|{completed} sur {total}|{completed} von {total}|{total} में से {completed}|{completed} di {total}|{completed} / {total}|{completed} de {total}
+{operation} {completed} of {total}|{operation} {completed} van {total}|{operation} {completed} sur {total}|{operation} {completed} von {total}|{operation} {total} में से {completed}|{operation} {completed} di {total}|{operation} {completed} / {total}|{operation} {completed} de {total}
+Checking maps… {completed} of {total}|Kaarten controleren… {completed} van {total}|Vérification des cartes… {completed} sur {total}|Karten prüfen… {completed} von {total}|मानचित्र जाँच… {total} में से {completed}|Controllo mappe… {completed} di {total}|正在检查地图… {completed} / {total}|Comprobando mapas… {completed} de {total}
+Displaying maps… {completed} of {total}|Kaarten weergeven… {completed} van {total}|Affichage des cartes… {completed} sur {total}|Karten anzeigen… {completed} von {total}|मानचित्र दिखाना… {total} में से {completed}|Visualizzazione mappe… {completed} di {total}|正在显示地图… {completed} / {total}|Mostrando mapas… {completed} de {total}
+{count} shown · {total} imported|{count} weergegeven · {total} geïmporteerd|{count} affichées · {total} importées|{count} angezeigt · {total} importiert|{count} दिखाए गए · {total} आयात किए गए|{count} visualizzate · {total} importate|显示 {count} 张 · 已导入 {total} 张|{count} mostrados · {total} importados
+{operation} · {count} other operations|{operation} · {count} andere activiteiten|{operation} · {count} autres opérations|{operation} · {count} weitere Vorgänge|{operation} · {count} अन्य कार्य|{operation} · altre {count} operazioni|{operation} · 另有 {count} 项操作|{operation} · {count} operaciones más
+"""
+for _row in _LOADING_ROWS.strip().splitlines():
+    _values = _row.split("|")
+    if len(_values) != len(LANGUAGES):
+        raise RuntimeError("Invalid loading translation row")
+    for _code, _value in zip(LANGUAGES, _values):
+        TRANSLATIONS[_code][_values[0]] = _value
+
 def set_language(code: str) -> None:
     global _LANGUAGE
     if code not in LANGUAGES:
