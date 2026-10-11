@@ -38,11 +38,11 @@ At session start read this file, [AI_PLAYBOOK.md](AI_PLAYBOOK.md), the current s
 | REA-05 | Complete bulk local decompilation | Eight analyzed/exported slices, all 81,808 discovered functions attempted; 79,340 decompiled, 2,241 external, 227 failures retained; installed resources unchanged |
 | REA-06 | Build reusable knowledge and AI session handoffs | Original finding catalog, private static binding, developer guide using Caveman guidance, root instructions and compact handoff |
 | REA-07 | Use the corpus for building, debugging and crashes | Actual read-only map audits and lookup acceptance passed; industry cross-check matched 36 entries; broader rules partial; crash workflow documented, no crash diagnosis claimed |
-| REA-08 | Publish original tools and reviewed analysis as useful | Original source/guide review and signed commits; PR checks, merge and main replay tracked in VALIDATION.md; no raw corpus in GitHub/CI |
+| REA-08 | Publish original tools and reviewed analysis as useful | PR #205 merged with Verified signature; fresh main replay and tested workflows compared; exact export variation retained in VALIDATION.md; no raw corpus in GitHub/CI |
 
 ## Reuse and next work
 
-Reuse the matching private corpus for a concrete new debugging, map or crash question. Start with the original finding IDs and retrieve only the relevant neighborhood. Target retained failures when their functions matter; do not repeat every import. Extend a subsystem note only with new evidence and an independently stated counterexample. A second machine and broader provider audit remain optional follow-ups.
+Reuse the matching accepted private corpus for a concrete new debugging, map or crash question. Main replay reproduced the tested lookups and map audits, with precise export variation recorded in [VALIDATION.md](VALIDATION.md). Prefer build identity and static addresses over inferred names when comparing imports. Start with the original finding IDs and retrieve only the relevant neighborhood. Target retained failures when their functions matter; do not repeat every import. Extend a subsystem note only with new evidence and an independently stated counterexample. A second machine and broader provider audit remain optional follow-ups.
 
 The synthetic helper in [EVIDENCE_INDEX.md](EVIDENCE_INDEX.md) remains a separate original-fixture publication example. The real corpus commands are documented in [CORPUS.md](CORPUS.md). [FINDINGS.md](FINDINGS.md) and [GAME_DEVELOPER_GUIDE.md](GAME_DEVELOPER_GUIDE.md) provide reviewed original explanations. No raw game evidence is bundled with either tool.
 

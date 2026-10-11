@@ -44,6 +44,8 @@ When a new finding changes understanding, preserve a compact original note with 
 
 `corpus.py` provides a private manifest and bounded function/address/reference/string lookup. `knowledge.py catalog` lists the catalog revision and finding IDs; the JSON catalog maps subsystem/rule to original notes. Scanner receipts bind that revision and enumerate rules. Synthetic checks reject unknown references, stale indexes/catalogs and wrong-build evidence. CI tests the original contracts with synthetic fixtures; it cannot access the private corpus or prove a model actually read it.
 
+Cold main replay reproduced the tested lookups and map audits. All 79,340 reconstructed implementation files matched byte for byte; five external declaration labels and reference row order varied. Match functions across imports by build, static address and body digest where available; names and types remain reconstructed evidence. Keep the accepted corpus and its binding as the reference, preserve a fresh import separately, and consult [the comparison limits](VALIDATION.md#pr-and-main-replay) before claiming exact reproducibility.
+
 ## What is enforced
 
 Implemented: root instructions, this consultation contract, private case fields, default PR review prompts, developer/research entry links, bounded corpus lookup and scanner/catalog reference checks. This makes omission visible without a new approval step.

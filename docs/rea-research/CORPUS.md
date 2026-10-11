@@ -53,6 +53,14 @@ names, signatures, errors, bodies and static reference/string content remain
 part of comparison. This is stronger than comparing counts, but not proof of
 correct decompilation or identical native runtime behavior.
 
+The first cold main replay reproduced coverage, bounded lookups and both map
+audits. All 79,340 decompiled implementations matched byte for byte. Strict
+exports differed in five external declaration labels and reference row order;
+see [the exact comparison](VALIDATION.md#pr-and-main-replay). The comparison keeps
+these differences visible. Prefer build identity, static address and body
+digest when correlating functions across imports. Retain the accepted corpus
+instead of replacing it merely because a fresh import finished.
+
 ## Retrieve locally
 
 ```sh

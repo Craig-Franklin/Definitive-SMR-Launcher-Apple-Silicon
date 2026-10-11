@@ -21,7 +21,7 @@ Updated 11 October 2026. Craig authorized full local extraction, original tools/
 | Narrow map screen | 236 variants, 221 directories; 131 with static membership risk, 120 with explicit-placement risk, 10 unresolved; no broken-map/crash count implied |
 | Broader map screen | 221 imports, 227 scenarios, 2,579 XML files; catalog/rule references attached; inherited models retain partial knowledge status |
 | Map preservation | Before/after hashes matched for 2,716 XML/catalogue inputs; no repair or runtime checks |
-| Synthetic source checks | Integrated checkpoint passed 838 tests in 53.111 seconds under Python 3.12; 55 focused research tests and 10 separate synthetic evidence-helper tests passed under Python 3.9 after final build/provenance/CLI hardening; exact latest-main integration checked by PR CI |
+| Synthetic source checks | Exact merged-main commit a17d709 passed 893 tests in 51.367 seconds under Python 3.12; 55 focused research tests and 10 separate synthetic evidence-helper tests passed under Python 3.9 after final build/provenance/CLI hardening; exact-head PR and main CI passed |
 
 The closed publication candidate contains only fixed labels, integer counts, preservation and human-review-required markers. Original code/tests, the finding catalog and authored explanations were reviewed separately. No raw code, game tables/strings, private source paths, snapshots, databases, diagnostics or map names are publication inputs. A scanner is not legal clearance and a review marker does not authenticate human approval.
 
@@ -33,7 +33,26 @@ The human-readable GAME_DEVELOPER_GUIDE.md targets a mid-level developer and lin
 
 ## PR and main replay
 
-PR #205 contains original tools, synthetic tests, continuity instructions and reviewed original findings only. Main's current performance/access-policy commits were merged into the research branch without conflicts. Latest release v0.12.5 already includes that performance change; research commits use chore/docs subjects and do not request a release. Exact-head PR checks, merge and fresh main replay/comparison are pending at this checkpoint. The existing main checkout remains untouched.
+[PR #205](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/pull/205) merged at a17d70981bb3fa68501d8e67c6a82b6160007cc4 with a GitHub Verified signature. It contains original tools, synthetic tests, continuity instructions and reviewed original findings only. Its source tree equals the reviewed research head f4405883a71ded850023541b3f6d359491deb918. Exact-head PR CI and main CI passed. Main CI skipped both release build and publication; the unrelated launcher release v0.13.0 had already published before this research merge. No research release was made.
+
+The fresh replay checkout is pinned to that exact main commit. Later workflow-standards commits through 559b9f0af267c8331b85ffddc5df7f2e458bea82 leave the research tools, tests and corpus documents unchanged. The follow-up evidence PR uses the current squash/linear-history policy. The existing main checkout was never mutated by this work; unrelated external edits appeared there during the run, so whole-checkout byte equality is not claimed.
+
+The cold main replay completed in 2354.947 seconds, using eight fresh Ghidra imports and zero reused functions. All eight logs reported analysis and post-analysis success; no whole-analysis timeout was reported. Receipts retain the committed runner hash, argv, profile, provider PID and timing. One owned JVM was observed with a 2147483648-byte maximum heap; this is not a peak-RSS measurement. No owned provider process remained after completion.
+
+| Main replay comparison | Observed result |
+| --- | --- |
+| Inputs/profile | Inventory, dependencies and provider profile matched baseline; copied binaries and all 539 installed resources verified unchanged |
+| Coverage/failures | All eight slices and every coverage counter matched; identical 199/5/23 failure categories and function statuses |
+| Strict canonical exports | Different in modules 0, 1 and 6; equality excludes timing/reuse metadata but retains row order, external declaration labels and reconstructed text |
+| Static references | Four reference files differed only in row order: main references and string references, plus string references in modules 1 and 6; sorted row-digest multisets matched with zero added/removed rows |
+| Function variation | Five external-function names, prototype strings and exporter-generated declaration-comment digests changed in the main module; body hashes, ranges, statuses and every other stable function field matched |
+| Naming diagnosis | Simultaneous substitution of the changed qualified and unqualified names made all five prototype strings and all five generated external declaration comments equal; these files contain no implementation |
+| Stable code/graphs/strings | All 79,340 successful decompilation implementation files matched byte for byte; call graphs and identified-string files matched in every slice |
+| Index/binding/lookups | 81,808 functions indexed; all 36 industry entries matched; all four bounded lookup payloads and selected code digests matched baseline |
+| Actual map audits | Both stable scanner payloads matched baseline; industry knowledge matched, broader knowledge remained partial |
+| Map preservation | Same 2,716 XML/catalogue input hashes before and after both audits; zero runtime checks |
+
+This demonstrates repeatable inventory, coverage and the tested retrieval/map-analysis workflows on this Mac. It does **not** demonstrate exact canonical export reproducibility: external declaration naming and reference row order varied. All observed differences are accounted for at that level; the cause of the naming variation was not established. Matching reconstruction bytes does not prove correct source recovery or identical runtime behavior. Both private corpora and difference receipts are preserved. Continue using the accepted original corpus and identify functions by matching build/static address/body digest where available. No dependency upgrade, provider-profile change or speculative full rerun was used to hide the variation.
 
 A new directory/checkout on this Mac is not second-machine reproducibility. REA-02 remains first-machine accepted. This corpus covers discovered static code, not all possible machine code, original source recovery, every engine subsystem or runtime compatibility. Packed assets, indirect behavior, failed bodies, resource precedence, translated crash-frame mapping and gameplay/save semantics remain explicit limits.
 
