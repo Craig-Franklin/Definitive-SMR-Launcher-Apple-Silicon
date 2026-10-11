@@ -79,11 +79,13 @@ class ScenarioViewsTests(unittest.TestCase):
         self.gui.metadata_cache={};self.gui.map_filter.set("Known issue")
         self.assertEqual(self.gui._filtered(),[self.record])
         self.assertEqual(_status(self.app)["maps"][0]["verification"],"Known issue")
-        self.gui.root=Mock();self.gui._submit=Mock()
+        self.gui.root=Mock();self.gui._submit=Mock();self.gui.closed=False;self.gui.close_when_idle=False
         with patch("smr_launcher.gui.messagebox.askyesno",return_value=False) as prompt:
             self.gui._play(self.record.profile_id)
+            _label, inspect, checked = self.gui._submit.call_args.args
+            checked(inspect())
         self.assertIn("Confirmed game crash",prompt.call_args.args[1])
-        self.gui._submit.assert_not_called()
+        self.gui._submit.assert_called_once()  # Current inspection only; refused launch.
 
     def test_launcher_filter_and_cli_use_authoritative_status(self):
         from smr_launcher.cli import _status

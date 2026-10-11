@@ -4,6 +4,49 @@ from queue import Empty
 from threading import Condition, Lock
 
 
+class Activities:
+    """UI-owned activity tokens: overlapping operations settle independently."""
+    def __init__(self):
+        self._next = 0
+        self._jobs = {}
+
+    def begin(self, label, priority=0):
+        self._next += 1
+        self._jobs[self._next] = (priority, label, None, None)
+        return self._next
+
+    def update(self, token, label, completed=None, total=None):
+        if token in self._jobs:
+            priority = self._jobs[token][0]
+            self._jobs[token] = (priority, label, completed, total)
+
+    def end(self, token):
+        self._jobs.pop(token, None)
+
+    def display(self):
+        if not self._jobs:
+            return None
+        token = max(self._jobs, key=lambda key: (self._jobs[key][0], key))
+        _, label, completed, total = self._jobs[token]
+        return label, completed, total, len(self._jobs)
+
+
+class LatestValue:
+    """A bounded, coalescing worker-to-UI progress slot; never calls Tk."""
+    def __init__(self):
+        self._lock = Lock()
+        self._value = None
+
+    def put(self, value):
+        with self._lock:
+            self._value = value
+
+    def take(self):
+        with self._lock:
+            value, self._value = self._value, None
+            return value
+
+
 class Mailbox:
     """Close atomically with publication, disposing queued or late owned results."""
     def __init__(self):
