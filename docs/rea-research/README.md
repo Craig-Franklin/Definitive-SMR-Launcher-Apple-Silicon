@@ -41,6 +41,8 @@ The public repository stores our reproducible method. The local research directo
 
 Only REA-01 and the first-machine portion of REA-02 are addressed by the initial setup. A second clean-machine replay is still required. The Project carries specific status and completion criteria. Planned work must not be labelled implemented or game-verified.
 
+The original synthetic REA-04 index and publication projection are now implemented; see [commands and precise limits](EVIDENCE_INDEX.md) and the updated validation record. Review and broader acceptance remain open.
+
 ## First investigation after the rights decision
 
 Begin with the known crash represented by [issue #193](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/193) and the scoped crash-to-repair work in [#190](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/190). Prior research reports a conditional legacy collision-data handle/pointer mismatch; the original fault instruction and triggering resource remain unbound. Treat that as a lead to verify, not a settled cause.
