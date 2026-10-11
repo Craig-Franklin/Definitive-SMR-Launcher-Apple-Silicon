@@ -19,6 +19,15 @@ sort and filters operate on an in-memory presentation without rereading packages
 Selection, drafts and native scroll positions survive ordinary navigation. Refresh
 keeps the last usable presentation until a complete replacement succeeds.
 
+Normal native launches hold a private per-user file lock for the process lifetime,
+before starting Python services. A second cooperating copy activates the exact
+recorded owner and exits; invalid ownership or lock errors refuse startup. The lock
+file remains in place, and the operating system releases ownership on process exit.
+Synthetic `--fixture` previews bypass the lock and never activate a normal instance.
+Older builds do not participate: close an existing older launcher before the first
+guarded launch. Existing transaction and game guards still protect operations; the
+frontend lock is not proof that a previously closing Python service has exited.
+
 The inspector includes Overview, Play History, Issues & Evidence, Edit Details and
 Record Outcome. Personal titles, notes and selected image copies live separately
 from package facts, keyed by archive and variant hashes. The image picker bounds
