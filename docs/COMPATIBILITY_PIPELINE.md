@@ -355,6 +355,18 @@ game identities match. No unreviewed name substitution runs during ordinary Play
 
 ### Compiled recipe service (experimental API)
 
+The dormant bank converter can use the existing full-file `TokenPatch` path;
+it does not require a separate writer or preparation mechanism. Invented bank
+fixtures exercise that path against independently encoded complete target bytes,
+including color/property-order variants, unrelated-file and original preservation,
+resource mtimes, preparation context and idempotence. Foreign archive/build
+declarations, changed preimages, wrong output hashes and linked targets refuse.
+These are mechanical source checks. No bundled bank recipe or activation is
+enabled; the converter's production input/output digest seals remain intact.
+They do not establish a selected resource provider, collision/render equivalence,
+full-map feature preservation or gameplay/save acceptance. Track those in
+[#188](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/188).
+
 `compatibility_recipes.compile_identity_patch` constructs an exact full-file
 patch in memory from the user's XML and reviewed typed operations. It edits
 industry keys, depot keys or explicitly Industry-typed ownership references;
