@@ -41,6 +41,7 @@ LABELS = dict(
     crash_load="Crashed during load",
     crash_play="Crashed during play",
     crash_unknown="Crash · phase unknown",
+    crash_process_link="Crash linked to game session",
     resource_stop="Resource stop",
     cancelled="Cancelled",
     unknown_exit="Outcome unknown",
@@ -220,6 +221,16 @@ def validate(e):
         raise HistoryError("Exact save identity required")
     if e["kind"] in FAILURES and not e["incident_id"]:
         raise HistoryError("Failure identity required")
+    if e["kind"] == "crash_process_link" and (
+        not e["incident_id"]
+        or not e["attempt_id"]
+        or e["source"] != "observed"
+        or e["scope"] != "related"
+        or scenario
+    ):
+        raise HistoryError(
+            "Crash process link requires exact observed identities without a scenario"
+        )
     if e["kind"].startswith("fix_") and (not scenario or not e["fix_id"]):
         raise HistoryError("Fixes require an exact scenario and fix identity")
     if e["kind"] in ("fix_test_passed", "fix_test_failed") and (
@@ -267,6 +278,30 @@ def validate_relation(e, previous):
                 raise HistoryError("Checkpoint has no confirmed process")
         if confirmed and instant(e["at"]) < instant(confirmed["at"]):
             raise HistoryError("Checkpoint predates its confirmed process")
+    if kind == "crash_process_link":
+        rows = (
+            previous.maps.get(tuple(e[k] for k in IDENTITIES), [])
+            if isinstance(previous, RelationIndex)
+            else previous
+        )
+        if not confirmed or instant(e["at"]) < instant(confirmed["at"]):
+            raise HistoryError("Crash process link has no preceding confirmed process")
+        if not any(
+            same_map(e, r)
+            and r["kind"] in ("crash_load", "crash_play", "crash_unknown")
+            and r["incident_id"] == e["incident_id"]
+            and instant(r["at"]) == instant(e["at"])
+            for r in rows
+        ):
+            raise HistoryError("Crash process link has no matching retained crash")
+        if any(
+            same_map(e, r)
+            and r["kind"] == kind
+            and r["incident_id"] == e["incident_id"]
+            and r["attempt_id"] != e["attempt_id"]
+            for r in rows
+        ):
+            raise HistoryError("Crash already links to a different process")
     if kind.startswith("fix_"):
         rows = (
             previous.maps.get(tuple(e[k] for k in IDENTITIES), [])
@@ -587,6 +622,31 @@ class PlayHistoryStore:
         event = self.issue_event(value)
         self.append(event)
         return event
+
+    @staticmethod
+    def crash_process_events(value, session):
+        """Project an already parser-matched session; never infer a game action."""
+        process = PlayHistoryStore.session_event(session)
+        if (
+            value["kind"] != "crash"
+            or process is None
+            or process["kind"] != "process_confirmed"
+            or not same_map(value, process)
+            or instant(value["occurred_at"]) < instant(process["at"])
+        ):
+            raise HistoryError("Crash process context is missing, different or too late")
+        ctx = {**{k: value[k] for k in IDENTITIES}, "scenario": ""}
+        link = PlayHistoryStore.event(
+            ctx,
+            "crash_process_link",
+            event_id=digest("crash_process_link", value["incident_id"]),
+            incident_id=value["incident_id"],
+            attempt_id=process["attempt_id"],
+            at=value["occurred_at"],
+            source="observed",
+            scope="related",
+        )
+        return process, link
 
     def link(self, ctx, url, *, scope="exact", source="player_confirmed"):
         issue_number(url)

@@ -230,6 +230,7 @@ class CrashMonitor:
         self.history_error = ""
         self.history_exits = []
         self._history_pending = []
+        self._history_links_pending = []
         self._history_live = None
         self.issue_revision = 0
         self.parser = parser if parser is not None else parse_crash_report
@@ -334,7 +335,7 @@ class CrashMonitor:
             self.protect_resources = protect_resources
             self.next_publish = 0
 
-    def _record_crash_issue(self, payload):
+    def _record_crash_issue(self, payload, *, session=None):
         issue = self.map_issues.record(
             payload,
             incident_id=payload["report_sha256"],
@@ -347,7 +348,7 @@ class CrashMonitor:
             + ". The active map edition is known; the selected scenario and crash cause may be unknown.",
         )
         if issue:
-            self._queue_history_issue(issue)
+            self._queue_history_issue(issue, session=session)
             self.issue_revision += 1
 
     def _history_call(self, operation, *args, **kwargs):
@@ -358,16 +359,26 @@ class CrashMonitor:
             self.history_error = str(exc)
             return None
 
-    def _queue_history_issue(self, issue):
+    def _queue_history_issue(self, issue, *, session=None):
         fact = self._history_call(self.play_history.issue_event, issue)
         if fact:
             self._history_pending.append(fact)
+            if session is not None:
+                linked = self._history_call(self.play_history.crash_process_events, issue, session)
+                if linked:
+                    self._history_links_pending.append(linked)
 
     def _flush_history(self):
         with self.lock:
             pending, self._history_pending = self._history_pending, []
+            links, self._history_links_pending = self._history_links_pending, []
             if pending:
-                self._history_call(self.play_history.append, *pending)
+                recorded = self._history_call(self.play_history.append, *pending)
+                if recorded is not None:
+                    # Optional enrichment cannot reject an admissible baseline
+                    # or another incident's link. Never retry ambiguous writes.
+                    for linked in links:
+                        self._history_call(self.play_history.append, *linked)
                 self.issue_revision += 1
 
     def _history_link(self, payload, url):
@@ -654,7 +665,7 @@ class CrashMonitor:
                             )
                             if payload is not None:
                                 self.store.collect(raw, payload)
-                                self._record_crash_issue(payload)
+                                self._record_crash_issue(payload, session=session)
                                 break
                         if payload is None:
                             self._retain_unconfirmed(raw)

@@ -125,6 +125,26 @@ not alter report/family fingerprints or publication grouping.
 
 ## Next useful collection work
 
+After a report passes exact retained-session parser validation, the collector
+preserves that relation in private play history as `crash_process_link`. It joins
+the incident digest to the existing confirmed-process attempt digest. The link
+requires matching archive/variant/build identities, a preceding confirmed process
+and an existing crash at the report capture time. Conflicting process associations
+refuse; duplicate collection is idempotent. A delayed report uses its accepted
+retained session, even when a newer game process exists.
+
+This separate observed fact has related scope and an unknown scenario. It does
+not overwrite historical failures or player-supplied phase attribution, count
+another crash/open, or supply a gameplay action, cause or repair. Raw process
+IDs, executable paths and notes are not added to the link. Public payloads and
+issue/family grouping remain unchanged. Optional link failures retain baseline
+crash-history recording and existing protection behavior.
+
+New source reads existing history without rewriting it. Older readers that do
+not recognize this event kind can refuse the history; downgrade compatibility
+is not claimed. Existing incident and session records remain intact. Source and
+synthetic checks do not prove natural reporting in the installed application.
+
 Track delivery and remaining work in
 [#216](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/216).
 Prioritize explicit scenario/operation evidence and frozen input/dependency
