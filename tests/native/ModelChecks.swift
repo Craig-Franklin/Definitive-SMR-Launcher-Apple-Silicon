@@ -50,16 +50,77 @@ import Foundation
         precondition(p95 < 250, "In-memory filtering/sorting regressed")
         print(String(format: "Native model checks passed; 1000 synthetic maps, 40 in-memory queries, p95 %.2f ms (not render timing)", p95))
 
+        try await checkDecoder()
+
         let backend = Backend()
         var eventSeen = false
         backend.event = { name, data in eventSeen = name == "fixture" && data.flag("synthetic") }
         try backend.start(executable: URL(fileURLWithPath: CommandLine.arguments[1]), arguments: [CommandLine.arguments[2]])
         let reply = try await backend.call("echo", ["text": "Unicode café · 地图"])
         precondition(reply.text("text") == "Unicode café · 地图" && eventSeen)
+        let firstText = String(repeating: "a", count: 100_000)
+        let secondText = String(repeating: "b", count: 100_000)
+        async let firstReply = backend.call("echo", ["text": firstText])
+        async let secondReply = backend.call("echo", ["text": secondText])
+        let concurrent = try await (firstReply, secondReply)
+        precondition(concurrent.0.text("text") == firstText && concurrent.1.text("text") == secondText, "Concurrent requests must retain separate ordered wire envelopes")
         do { _ = try await backend.call("reject"); preconditionFailure("Service failure was swallowed") }
         catch { precondition(error.localizedDescription == "synthetic rejection") }
+        let liveModel = LauncherModel(fixture: false, backend: backend)
+        liveModel.connected = true
+        var ticks = 0
+        var longestGap = 0.0
+        let clock = ContinuousClock()
+        var previous = clock.now
+        let heartbeat = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000)
+                let now = clock.now
+                let duration = previous.duration(to: now).components
+                longestGap = max(longestGap, Double(duration.seconds) * 1000 + Double(duration.attoseconds) / 1e15)
+                previous = now; ticks += 1
+            }
+        }
+        await Task.yield()
+        let loadStarted = clock.now
+        await liveModel.refresh()
+        heartbeat.cancel()
+        await heartbeat.value
+        precondition(liveModel.error.isEmpty && liveModel.maps.count == 1000)
+        precondition(ticks > 1 && longestGap < 500, "Large fragmented replies must not monopolize the main actor")
+        print(String(format: "Large synthetic library passed; 1000 maps, 16 MiB text, %d main-actor ticks, max gap %.2f ms, total %@ (not viewport timing)", ticks, longestGap, String(describing: loadStarted.duration(to: clock.now))))
         do { _ = try await backend.call("disconnect"); preconditionFailure("Lost mutation result was swallowed") }
         catch { precondition(error.localizedDescription.contains("unknown") || error.localizedDescription.contains("inspect")) }
         print("Native pipe checks passed; partial replies, events, explicit rejection and unknown disconnect")
+    }
+
+    static func checkDecoder() async throws {
+        let bytes = Data("{\"text\":\"地图 café\"}\n{\"text\":\"second\"}\n{\"text\":\"third\"}\n".utf8)
+        let split = bytes.firstIndex(of: 0xe5)! + 1
+        let replies: [String] = try await withCheckedThrowingContinuation { continuation in
+            var values: [String] = []
+            let reader = ReplyDecoder { result in
+                precondition(!Thread.isMainThread, "Framing and JSON decode must run off the UI thread")
+                do {
+                    values.append(try result.get().text("text"))
+                    if values.count == 3 { continuation.resume(returning: values) }
+                } catch { continuation.resume(throwing: error) }
+            }
+            reader.receive(bytes.prefix(split))
+            reader.receive(bytes.suffix(from: split))
+        }
+        precondition(replies == ["地图 café", "second", "third"], "Split UTF-8 and coalesced replies must preserve wire order")
+        for (data, message) in [(Data("[]\n".utf8), "Invalid launcher response"), (Data("{\n".utf8), ""), (Data(repeating: 65, count: 128 * 1024 * 1024 + 1), "size limit")] {
+            await withCheckedContinuation { continuation in
+                let reader = ReplyDecoder { result in
+                    precondition(!Thread.isMainThread)
+                    guard case .failure(let error) = result else { preconditionFailure("Invalid/oversized input was accepted") }
+                    precondition(message.isEmpty || error.localizedDescription.contains(message), error.localizedDescription)
+                    continuation.resume()
+                }
+                reader.receive(data)
+            }
+        }
+        print("Background decoder checks passed; split UTF-8, ordered coalesced messages, malformed/nonobject JSON and 128 MiB cap")
     }
 }

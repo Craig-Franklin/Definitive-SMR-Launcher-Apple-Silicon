@@ -55,6 +55,9 @@ control. Setup opens its existing consent UI; the bridge cannot bypass it.
 
 `src/native` owns presentation. `native_backend.py` communicates through private
 stdin/stdout JSON lines with request identities, explicit success/failure and events.
+Reply framing and JSON decoding run on a dedicated serial background queue;
+snapshot metadata and image preparation run outside the main actor. The main actor
+applies completed presentation state. Pipe writes stay ordered on their own queue.
 There is no listening socket, web runtime or new third-party dependency. The hidden
 Tk owner retains initialization, polling, crash observation, guarded operations,
 update handling and safe shutdown. Advanced tools appear only on explicit navigation.
@@ -111,6 +114,24 @@ compiled but has not been exercised on macOS 13. Before/after manual-action targ
 viewport p95 at 250/1,000 maps, wider accessibility settings and operational dialogs
 remain acceptance work in the canonical issues. Engine knowledge consultation is
 not applicable: the changes reuse existing evidence contracts and add no engine rule.
+
+### Large-reply responsiveness correction
+
+Read-only sampling of a hanging installed 0.19.1 launcher found its main thread
+almost entirely in `Backend.receive`, repeatedly searching accumulated reply data
+for a newline. Fragmented large replies caused quadratic scanning on the UI thread.
+The correction searches only new bytes, decodes JSON off-thread in wire order and
+prepares map presentation asynchronously. Disconnects still report unknown mutation
+results, and the 128 MiB transport limit remains enforced.
+
+With 1,000 fictional maps and 16 MiB of text in 8 KiB pipe fragments, the old parser
+exceeded a bounded 20-second check. The corrected transport and model completed in
+about 75 ms, with main-actor scheduling gaps below 3 ms in the local synthetic run.
+That is transport/preparation evidence, not viewport rendering or real-library
+acceptance. Regression checks also cover split UTF-8, coalesced ordered replies,
+malformed/nonobject JSON, oversize rejection and unknown disconnected results.
+Private live-process samples remain local. No running launcher was stopped or
+replaced for this diagnosis.
 
 ## Build and isolated preview
 
