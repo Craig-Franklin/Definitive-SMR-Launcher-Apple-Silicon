@@ -87,6 +87,14 @@ def child(source: Path, mode: str, count: int) -> dict:
             deadline = time.perf_counter() + 15
             def wait_startup():
                 if clock["ready_ms"] is not None:
+                    now = time.perf_counter()
+                    clock["max_gap_ms"] = max(clock["max_gap_ms"],
+                        (now - clock["last_tick"]) * 1000)
+                    if clock["mapped_ms"] is not None:
+                        clock["max_gap_after_mapped_ms"] = max(
+                            clock["max_gap_after_mapped_ms"],
+                            (now - max(clock["last_tick"],
+                             clock["start"] + clock["mapped_ms"] / 1000)) * 1000)
                     window.root.quit()
                 elif time.perf_counter() >= deadline:
                     clock["timed_out"] = True

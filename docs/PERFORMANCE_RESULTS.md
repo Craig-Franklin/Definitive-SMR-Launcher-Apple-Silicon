@@ -22,15 +22,15 @@ Native GUI samples use a fresh process and temporary HOME each time, exclude Pyt
 
 | Native Tk workload, n=5 | Before median ms | After median ms | Interpretation |
 | --- | ---: | ---: | --- |
-| Startup window mapped, injected 500 ms discovery | 752.981 | 329.565 | 56% earlier feedback; imports excluded |
-| Startup welcome-ready, same injection | 748.956 | 783.339 | 4.6% slower; within 10% target |
-| Startup maximum post-map timer gap | 102.602 max | 22.234 max | <=50 ms target met on this fixture |
+| Startup window mapped, injected 500 ms discovery | 766.630 | 330.398 | 57% earlier feedback; imports excluded |
+| Startup welcome-ready, same injection | 762.870 | 757.759 | 0.7% faster; within 10% target |
+| Startup maximum post-map timer gap | 103.531 max | 13.468 max | <=50 ms target met on this fixture |
 | 250-map gallery initial call | 861.001 | 7.299 | <=100 ms target met |
 | First gallery card observed | 865.030 | 158.707 | Includes snapshot work and first batch |
 | All gallery cards / idle layout | 873.810 | 592.754 | 32% lower elapsed time |
 | Gallery maximum timer gap | 925.949 max | 44.710 max | <=50 ms target met, no artwork/evidence |
 
-Startup ranges before/after: mapped 745.761–757.449 / 313.051–356.329 ms; ready 741.703–752.805 / 772.944–806.629 ms. Gallery ranges before/after: initial call 845.384–914.889 / 3.450–10.054 ms; all cards 856.389–925.935 / 585.910–607.247 ms. After measurements use integrated production-source commit `0cc4d80070706b140120e23c40cb49657cb95a29`; before uses `0fdd684`. The final gallery harness supplies the executable identity required by integrated map warnings and valid 64-hex variant keys. Preflight asserts absent gameplay verification; final snapshots assert normal Not verified labels with empty notices. Earlier gallery timings using the incomplete fake installation were discarded and both sources rerun. Final documentation and benchmark corrections do not change production code.
+Startup ranges before/after: mapped 754.259–817.482 / 325.679–343.732 ms; ready 749.542–788.740 / 754.140–772.545 ms. Gallery ranges before/after: initial call 845.384–914.889 / 3.450–10.054 ms; all cards 856.389–925.935 / 585.910–607.247 ms. After measurements use integrated production-source commit `0cc4d80070706b140120e23c40cb49657cb95a29`; before uses `0fdd684`. The final gallery harness supplies the executable identity required by integrated map warnings and valid 64-hex variant keys. Preflight asserts absent gameplay verification; final snapshots assert normal Not verified labels with empty notices. Earlier gallery timings using the incomplete fake installation were discarded and both sources rerun. Startup also samples the final unfinished interval immediately before quitting; both startup sources were rerun after that instrumentation correction, and the monitor smoke samples its final handover tail. Final documentation and benchmark corrections do not change production code.
 
 Provenance timings use 4 KiB opaque files, fresh synthetic catalogue resets outside each timed operation, real locking/durable writes, n=3. The retained old algorithm and new algorithm are measured separately; old always runs first, so cache/order bias remains. Counters run separately from timings. Original file bytes and decoded matching outputs are checked.
 
@@ -63,7 +63,7 @@ The coordinator visually inspected the rebuilt package's welcome screen using th
 
 Independent ordinary Sol/high review found and routed fixes for aggregate artwork/decode bounds, cache post-rename guarantee wording/testing, and published-main reconciliation. Earlier evolving-source observations also led to preserving image references, resuming canceled gallery work after unrelated operations, and correcting the benchmark's final timer interval. No Astra advisor was needed. Final review checks the integrated source, hashes and claims; reviewer has no implementation authorship or native GUI ownership.
 
-A single successful-bootstrap native smoke injects a 500 ms fake monitor constructor: visible mapping was observed at 361.852 ms, UI handover at 789.488 ms and maximum post-map timer gap 15.926 ms. A separate close-during-construction smoke records one late monitor disposal and zero UI bootstrap applications after close. Both use injected app/monitor services and deny external operations; no real monitor/game starts. The close check is lifecycle evidence only, with no mapping/timing claim.
+A single successful-bootstrap native smoke injects a 500 ms fake monitor constructor: visible mapping was observed at 341.378 ms, UI handover at 766.679 ms and maximum post-map timer gap 14.140 ms. A separate close-during-construction smoke records one late monitor disposal and zero UI bootstrap applications after close. Both use injected app/monitor services and deny external operations; no real monitor/game starts. The close check is lifecycle evidence only, with no mapping/timing claim.
 
 ## Reproduction and remaining limits
 
