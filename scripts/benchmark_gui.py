@@ -106,12 +106,13 @@ def child(source: Path, mode: str, count: int) -> dict:
                 live = root / "live"
                 live.mkdir()
                 app = LauncherApplication(SimpleNamespace(profile_root=live,
+                                          executable_sha256="0" * 64,
                                           game_running=lambda: False), root / "library")
                 app.profiles.state_file.parent.mkdir(parents=True, exist_ok=True)
                 app.profiles.state_file.write_text("{}")
                 records = []
                 for index in range(count):
-                    key = f"{index:032x}"
+                    key = f"{index:064x}"
                     directory = app.imports / key
                     directory.mkdir(parents=True)
                     (directory / "mapInfo.txt").write_text(
@@ -124,6 +125,10 @@ def child(source: Path, mode: str, count: int) -> dict:
                         imported_directory=key))
                 app.catalogue_file.write_text(json.dumps(
                     {"schema": 1, "maps": [record.as_json() for record in records]}))
+                # Catch fixture drift when normal verification gains new context.
+                # Preflight is outside the measured presentation, for both sources.
+                assert len(app.catalogue()) == count
+                assert all(app.verification_for(record) is None for record in records)
                 window.app = app
                 window.metadata_cache.clear()
                 result = {"mode": mode, "maps": count, "no_icons_or_evidence": True,
@@ -142,6 +147,10 @@ def child(source: Path, mode: str, count: int) -> dict:
                         if cards and result["first_card_ms"] is None:
                             result["first_card_ms"] = (time.perf_counter() - started) * 1000
                         if cards == count:
+                            if hasattr(window, "_gallery_snapshot"):
+                                assert len(window._gallery_snapshot) == count
+                                assert all(item.verification == "Not verified" and not item.notice
+                                           for item in window._gallery_snapshot)
                             window.root.update_idletasks()
                             result["all_cards_ms"] = (time.perf_counter() - started) * 1000
                             result["max_gap_ms"] = max(clock["max_gap_ms"],

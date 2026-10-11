@@ -15,6 +15,8 @@ import subprocess
 import sys
 import tempfile
 import time
+from threading import Event
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'src'), str(ROOT / 'tests')]
@@ -76,5 +78,31 @@ def spread(values): return dict(min=min(values), median=statistics.median(values
 results['summary'] = {name: {key: spread(value) for key, value in group.items() if key.endswith('_ms')}
                       for name, group in results['progress'].items()}
 results['summary']['cache_read_validate_ms'] = spread(results['cache']['read_validate_ms'])
+samples = []
+publication_records = tuple(RemoteMap(f'Map{i}.7z', 5, f'{i:040x}') for i in range(221))
+for _ in range(11):
+    w = window(); release = Event(); provenance = Event(); community = Event(); cache = Event()
+    fetched = []
+    def fetch(): fetched.append(time.perf_counter()); return publication_records
+    def matching(records): provenance.set(); release.wait(2)
+    def community_fetch(path): community.set(); release.wait(2); return {}
+    def cache_write(path, records): cache.set(); release.wait(2)
+    w.app.match_collection_sources.side_effect = matching; w.app.catalogue.return_value = ()
+    try:
+        with patch('smr_launcher.gui.fetch_catalogue', side_effect=fetch), \
+             patch('smr_launcher.gui.fetch_community_index', side_effect=community_fetch), \
+             patch('smr_launcher.gui.write_cached_catalogue', side_effect=cache_write):
+            w._refresh_collection()
+            # Deliberately exercise a nearly worst-case normal 100ms poll phase.
+            time.sleep(.1); w._poll()
+            assert w.remote_records == publication_records and not w.busy
+            samples.append((time.perf_counter()-fetched[0])*1000)
+            assert provenance.wait(1) and community.wait(1) and cache.wait(1)
+            assert not release.is_set()
+    finally:
+        release.set(); w.background_results.close()
+result = dict(method='221 records, fake Treeview callback, 100ms mailbox poll phase, all three maintenance tasks blocked, no Tk/network',
+              samples_ms=samples, min_ms=min(samples), median_ms=statistics.median(samples), max_ms=max(samples))
+results['publication'] = result
 results['python'] = sys.version.split()[0]
 print(json.dumps(results, indent=2))
