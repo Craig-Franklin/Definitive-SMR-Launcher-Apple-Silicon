@@ -53,6 +53,26 @@ checked applicability rule covering build, resource/model structure, dependencie
 provider resolution and operation. Preserve input identities, originals, features
 and saves. Static matches and runtime repair acceptance remain separate results.
 
+## Process age and payload versions
+
+New reports use public payload schema 3, adding only `process_age_ms`: a
+nonnegative unsigned 64-bit integer. The parser derives elapsed wall time from
+the already validated report capture and process-launch timestamps. It computes
+integer milliseconds and discards submillisecond precision. It does not publish
+the raw launch timestamp, infer a scenario or label the interval as loading or
+play time. System uptime and Mach absolute ticks are different measurements.
+
+The first cohort's source intervals were 106.1489s (#193), 78.0295s (#195),
+1203.5844s (#196) and 1259.1421s (#215). These observations distinguish short and
+long process lifetimes, without establishing an operation, phase or cause.
+
+Schemas 1 and 2 remain valid with their original exact field sets. Their rendered
+age is `unknown`. Reprocessing the same raw report with a newer parser retains
+the original immutable payload and publication state; it never retroactively
+inserts an age. Fresh schema-3 reports keep incident-specific publication state.
+Process age is excluded from both incident grouping and family-v1 signatures.
+The publisher independently checks the new field's exact type and bounds.
+
 ## Private preparation provenance
 
 New private session records include optional `catalogue_preparation` when the

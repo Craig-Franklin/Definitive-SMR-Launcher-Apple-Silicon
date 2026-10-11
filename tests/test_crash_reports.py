@@ -27,7 +27,7 @@ CONTEXT = {
     "expected_bundle_id": "example.synthetic.game",
 }
 EXPECTED_KEYS = set(
-    "schema fingerprint report_sha256 occurred_at game_executable_sha256 launcher_version game_version macos_version architecture translated archive_sha256 variant_id scenario_key exception_type signal termination_namespace exception_codes frames diagnostics".split()
+    "schema fingerprint report_sha256 occurred_at game_executable_sha256 launcher_version game_version macos_version architecture translated archive_sha256 variant_id scenario_key exception_type signal termination_namespace exception_codes frames diagnostics process_age_ms".split()
 )
 
 
@@ -271,6 +271,7 @@ class StoreControls(unittest.TestCase):
         self.raw = modern()
         self.payload = parse(self.raw)
         self.payload.pop("diagnostics")
+        self.payload.pop("process_age_ms")
         self.payload["schema"] = 1  # Existing immutable-store contract stays covered.
 
     def test_private_modes_raw_retention_and_restart(self):
@@ -292,6 +293,7 @@ class StoreControls(unittest.TestCase):
         other_raw = modern(captureTime="2026-01-02T12:02:00Z")
         other_payload = parse(other_raw)
         other_payload.pop("diagnostics")
+        other_payload.pop("process_age_ms")
         other_payload["schema"] = 1
         second = self.store.collect(other_raw, other_payload)
         self.assertEqual(first["fingerprint"], second["fingerprint"])
@@ -418,7 +420,7 @@ class LegacyVersionControls(unittest.TestCase):
     def test_new_legacy_payload_has_explicit_unavailable_details(self):
         p = parse(legacy())
         d = p["diagnostics"]
-        self.assertEqual(p["schema"], 2)
+        self.assertEqual(p["schema"], 3)
         self.assertEqual(d["format"], "legacy_crash")
         self.assertEqual(d["threads"], dict(source_count=None, retained_count=0, items=[]))
         self.assertEqual(

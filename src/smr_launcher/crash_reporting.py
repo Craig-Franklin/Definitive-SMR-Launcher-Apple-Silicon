@@ -97,9 +97,18 @@ def _uint(value: object, maximum: int = 2**64 - 1) -> bool:
 def validate_public_payload(payload: dict) -> dict:
     """Return an independent normalized copy, rejecting all unknown or freeform data."""
     _require(
-        type(payload) is dict and type(payload.get("schema")) is int and payload["schema"] in (1, 2)
+        type(payload) is dict
+        and type(payload.get("schema")) is int
+        and payload["schema"] in (1, 2, 3)
     )
-    _require(set(payload) == (_FIELDS | {"diagnostics"} if payload["schema"] == 2 else _FIELDS))
+    expected = set(_FIELDS)
+    if payload["schema"] >= 2:
+        expected.add("diagnostics")
+    if payload["schema"] == 3:
+        expected.add("process_age_ms")
+    _require(set(payload) == expected)
+    if payload["schema"] == 3:
+        _require(_uint(payload["process_age_ms"]))
     for key in ("fingerprint", "report_sha256", "game_executable_sha256"):
         _require(_matches(payload[key], _HASH))
     for key in ("archive_sha256", "variant_id", "scenario_key"):
@@ -141,7 +150,7 @@ def validate_public_payload(payload: dict) -> dict:
     result = dict(payload)
     result["frames"] = clean_frames
     result["exception_codes"] = list(codes)
-    if payload["schema"] == 2:
+    if payload["schema"] >= 2:
         result["diagnostics"] = _validate_diagnostics(payload["diagnostics"])
     return result
 
@@ -353,6 +362,7 @@ def render_issue(payload: dict) -> tuple[str, str]:
         "## Crash summary",
         "",
         f"- Occurred: {p['occurred_at']}",
+        f"- Process age at report (ms): {p.get('process_age_ms', 'unknown')}",
         f"- Exception: {p['exception_type']}; signal: {p['signal']}; termination: {p['termination_namespace']}",
         "- Exception codes: " + (", ".join(f"0x{c:x}" for c in p["exception_codes"]) or "unknown"),
         f"- Launcher: {p['launcher_version']}; game: {p['game_version']}; macOS: {p['macos_version']}",
@@ -399,7 +409,7 @@ def render_issue(payload: dict) -> tuple[str, str]:
         "- Family limits: " + (", ".join(evidence["family_limits"]) or "none observed"),
         "- Diagnostic gaps: " + ", ".join(evidence["gaps"]),
         "",
-        "The family key uses the full retained fault-thread game stack, matching build/module/slice identities and exception class. It excludes map identity and unstable addresses. Partial coverage can compare supported game callers while the fault PC remains unresolved. Complete means signature coverage only. A matching key is a diagnostic lead, not a common-cause or repair-applicability claim; different keys can still share a cause. Existing incident fingerprints and publication grouping remain separate. Scenario, operation and triggering resource are not inferred from the active map.",
+        "The family key uses the full retained fault-thread game stack, matching build/module/slice identities and exception class. It excludes map identity and unstable addresses. Partial coverage can compare supported game callers while the fault PC remains unresolved. Complete means signature coverage only. A matching key is a diagnostic lead, not a common-cause or repair-applicability claim; different keys can still share a cause. Existing incident fingerprints and publication grouping remain separate. Process age is elapsed wall time since the report's process launch, not observed loading or gameplay phase. Scenario, operation and triggering resource are not inferred from age or the active map.",
     ]
     rows += [
         "",
@@ -409,7 +419,7 @@ def render_issue(payload: dict) -> tuple[str, str]:
         "Repeated incidents with this fingerprint are retained locally and grouped into this issue.",
         "",
     ]
-    if p["schema"] == 2:
+    if p["schema"] >= 2:
         rows += [
             "## Structured diagnostics",
             "",

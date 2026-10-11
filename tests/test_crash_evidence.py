@@ -146,6 +146,7 @@ class CrashEvidenceTests(unittest.TestCase):
         self.assertIsNone(summary(payload(report))["family_fingerprint"])
         legacy = dict(original, schema=1)
         del legacy["diagnostics"]
+        del legacy["process_age_ms"]
         self.assertIsNone(summary(legacy)["family_fingerprint"])
 
     def test_rendered_coverage_preserves_marker_and_privacy_gate(self):

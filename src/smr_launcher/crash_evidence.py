@@ -28,7 +28,7 @@ def summarize_crash_evidence(payload):
         gaps=gaps,
     )
     limits = result["family_limits"]
-    if payload["schema"] != 2:
+    if payload["schema"] not in (2, 3):
         limits.append("structured_diagnostics_unavailable")
         return result
     details = payload["diagnostics"]

@@ -103,7 +103,7 @@ def parse(s=None):
 def test_handwritten_useful_all_threads_registers_images_and_codes():
     p = parse()
     d = p["diagnostics"]
-    assert p["schema"] == 2 and d["format"] == "modern_ips" and d["faulting_thread"] == 1
+    assert p["schema"] == 3 and d["format"] == "modern_ips" and d["faulting_thread"] == 1
     assert d["threads"]["source_count"] == d["threads"]["retained_count"] == 2
     assert d["threads"]["items"][0]["frames"]["items"] == [
         dict(index=0, image_index=1, offset=32, address=32800)
@@ -376,6 +376,7 @@ def test_schema1_immutable_restart_upgrade_and_fresh_schema2_state():
     first = parse()
     old = copy.deepcopy(first)
     old.pop("diagnostics")
+    old.pop("process_age_ms")
     old["schema"] = 1
     with tempfile.TemporaryDirectory(dir=os.environ.get("CRASH_TEST_TEMP_ROOT")) as t:
         root = Path(t).resolve() / "store"

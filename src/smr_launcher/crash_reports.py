@@ -400,8 +400,11 @@ def parse_crash_report(
             else "other"
         )
         frames.append(dict(index=index, image_role=role, image_uuid=image_uuid, offset=offset))
+    age = when - birth
+    process_age_ms = (age.days * 86400 + age.seconds) * 1000 + age.microseconds // 1000
     payload = dict(
-        schema=2,
+        schema=3,
+        process_age_ms=process_age_ms,
         fingerprint="",
         report_sha256=hashlib.sha256(raw).hexdigest(),
         occurred_at=when.isoformat(),
@@ -467,10 +470,17 @@ def _validate_payload(payload):
     if (
         type(payload) is not dict
         or type(payload.get("schema")) is not int
-        or payload["schema"] not in (1, 2)
-        or set(payload) != (_KEYS | {"diagnostics"} if payload["schema"] == 2 else _KEYS)
+        or payload["schema"] not in (1, 2, 3)
+        or set(payload)
+        != (
+            _KEYS
+            | ({"diagnostics"} if payload["schema"] >= 2 else set())
+            | ({"process_age_ms"} if payload["schema"] == 3 else set())
+        )
     ):
         raise CrashReportError("invalid payload keys")
+    if payload["schema"] == 3 and _uint(payload["process_age_ms"]) is None:
+        raise CrashReportError("invalid process age")
     for name in ("fingerprint", "report_sha256", "game_executable_sha256"):
         _hash(payload[name], required=True)
     for name in ("archive_sha256", "variant_id", "scenario_key"):
@@ -516,7 +526,7 @@ def _validate_payload(payload):
             raise CrashReportError("invalid image UUID")
         if frame["offset"] is not None and _uint(frame["offset"]) is None:
             raise CrashReportError("invalid frame offset")
-    if payload["schema"] == 2:
+    if payload["schema"] >= 2:
         try:
             validate_details(payload["diagnostics"])
         except (ValueError, TypeError, RecursionError) as exc:
@@ -701,6 +711,9 @@ class CrashStore:
                     current = dict(payload)
                     previous.pop("fingerprint")
                     current.pop("fingerprint")
+                    if previous["schema"] < 3 and current["schema"] == 3:
+                        current.pop("process_age_ms")
+                        current["schema"] = 2
                     if previous["schema"] == 1 and current["schema"] == 2:
                         current.pop("diagnostics")
                         current["schema"] = 1
@@ -748,7 +761,7 @@ class CrashStore:
     def _state_name(entry):
         return (
             "incident-" + entry["incident_id"]
-            if entry["payload"]["schema"] == 2
+            if entry["payload"]["schema"] >= 2
             else entry["fingerprint"]
         ) + ".publication"
 
