@@ -10,7 +10,7 @@ The application has no Python runtime dependencies. Development and app-build
 requirements are separate.
 
 ```sh
-python3 -m venv .venv
+python3.12 -m venv .venv
 .venv/bin/python -m pip install -e . -r requirements-dev.txt
 .venv/bin/python scripts/check_session.py
 .venv/bin/python scripts/check_quality.py
@@ -19,6 +19,10 @@ python3 -m venv .venv
 
 Choose the relevant test file. Use discovery: some legacy files define tests below
 their direct-execution entry point. The complete suite is:
+
+On macOS, `python3` may still be 3.9. Use the Python 3.12 environment above for
+tests and CI/release helpers, which use `tomllib`. Install Homebrew `python@3.12`
+and `python-tk@3.12` if the development interpreter or Tk is missing.
 
 ```sh
 .venv/bin/python -m unittest discover -s tests -v

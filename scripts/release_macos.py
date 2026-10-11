@@ -12,6 +12,7 @@ import time
 import tomllib
 
 from release_policy import Commit, ReleasePoint, plan_release, release_notes
+from change_policy import changed_impact
 
 REPO = "Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon"
 REPO_ID = 1404818508
@@ -228,14 +229,20 @@ def commits_since(base: str, head: str) -> tuple[Commit, ...]:
     shas = output("git", "rev-list", "--reverse", revision, "--").splitlines()
     if len(shas) > 10000 or any(not re.fullmatch(r"[0-9a-f]{40}", sha) for sha in shas):
         raise RuntimeError("Release commit range exceeds its bound or contains invalid identities")
-    return tuple(Commit(sha, output("git", "show", "-s", "--format=%B", sha, "--")) for sha in shas)
+    commits = []
+    for sha in shas:
+        parents = output("git", "rev-list", "--parents", "-n", "1", sha, "--").split()[1:]
+        impact = changed_impact(parents[0] if parents else "", sha,
+                                read=lambda *args: output("git", *args))
+        commits.append(Commit(sha, output("git", "show", "-s", "--format=%B", sha, "--"), impact.app))
+    return tuple(commits)
 
 
 def _notes_path(sha: str) -> Path:
     return Path(os.environ["RUNNER_TEMP"]) / ("smr-release-notes-" + sha + ".md")
 
 
-def prepare() -> None:
+def prepare(*, write_files: bool = True) -> None:
     sha = guard()
     subprocess.run(["git", "fetch", "origin", "--tags"], check=True)
     published, reservations = release_history()
@@ -259,10 +266,11 @@ def prepare() -> None:
             latest_sha = tag_target(latest["tag_name"])
             if latest_sha is None or not is_ancestor(sha, latest_sha):
                 raise RuntimeError("New source would regress the published release version")
-        notes = _notes_path(sha)
-        notes.write_text(release_notes(plan, REPO, sha, os.environ["GITHUB_RUN_ID"]), encoding="utf-8")
-        notes_file = str(notes)
-        stamp_version(Path.cwd(), version)
+        if write_files:
+            notes = _notes_path(sha)
+            notes.write_text(release_notes(plan, REPO, sha, os.environ["GITHUB_RUN_ID"]), encoding="utf-8")
+            notes_file = str(notes)
+            stamp_version(Path.cwd(), version)
     with open(os.environ["GITHUB_OUTPUT"], "a") as stream:
         stream.write(f"release_required={str(plan.required).lower()}\n"
                      f"skip_reason={'' if plan.required else plan.reason}\n"
@@ -326,4 +334,4 @@ def publish() -> None:
 
 
 if __name__ == "__main__":
-    {"prepare": prepare, "publish": publish}[sys.argv[1]]()
+    {"plan": lambda: prepare(write_files=False), "prepare": prepare, "publish": publish}[sys.argv[1]]()

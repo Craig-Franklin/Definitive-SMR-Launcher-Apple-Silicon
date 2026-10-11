@@ -33,6 +33,7 @@ def bump_version(version: str, bump: str) -> str:
 class Commit:
     sha: str
     message: str
+    app_changed: bool = True
 
     @property
     def subject(self) -> str:
@@ -45,6 +46,8 @@ class Commit:
 
     @property
     def bump(self) -> str:
+        if not self.app_changed:
+            return ""
         header = _HEADER.fullmatch(self.subject)
         if (header and header["breaking"]) or _BREAKING.search(self.message):
             return "major"
@@ -100,7 +103,7 @@ def plan_release(head: str, published: Sequence[ReleasePoint],
     commits = tuple(commits_since(base_sha, head))
     bump = max((commit.bump for commit in commits), key=lambda value: _ORDER[value], default="")
     if not bump:
-        return ReleasePlan(False, "", "No feat, fix, perf, or breaking change since the published baseline",
+        return ReleasePlan(False, "", "No feat, fix, perf, or breaking app change since the published baseline",
                            base_version, base_sha, commits=commits)
     candidate = bump_version(base_version, bump)
     # Resume a tag already assigned to this exact source after an interrupted publish.
@@ -130,6 +133,8 @@ def release_notes(plan: ReleasePlan, repository: str, head: str, run_id: str) ->
         "Performance": [], "Other changes": [],
     }
     for commit in plan.commits:
+        if not commit.app_changed:
+            continue
         section = ("Breaking changes" if commit.bump == "major" else
                    {"feat": "Features", "fix": "Fixes", "perf": "Performance"}.get(commit.kind, "Other changes"))
         sections[section].append(commit)

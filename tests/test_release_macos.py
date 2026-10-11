@@ -145,15 +145,18 @@ class ReleaseTests(unittest.TestCase):
                 return subprocess.check_output(["git", "-C", str(root), *args], input=input,
                                                text=True, env=env).strip()
             tree = git("hash-object", "-w", "-t", "tree", "--stdin", input="")
-            def commit(message, *parents):
-                args = ["-c", "commit.gpgsign=false", "commit-tree", tree]
+            blob = git("hash-object", "-w", "--stdin", input="value = 1\n")
+            git("update-index", "--add", "--cacheinfo", "100644", blob, "src/smr_launcher/example.py")
+            app_tree = git("write-tree")
+            def commit(message, *parents, tree_id=tree):
+                args = ["-c", "commit.gpgsign=false", "commit-tree", tree_id]
                 for parent in parents:
                     args.extend(["-p", parent])
                 return git(*args, input=message)
             baseline = commit("chore: baseline")
-            feature = commit("feat: add maps", baseline)
+            feature = commit("feat: add maps", baseline, tree_id=app_tree)
             docs = commit("docs: explain maps", baseline)
-            head = commit("Merge feature branch", docs, feature)
+            head = commit("Merge feature branch", docs, feature, tree_id=app_tree)
             unrelated = commit("chore: independent history")
             def ancestor(left, right):
                 return subprocess.run(["git", "-C", str(root), "merge-base", "--is-ancestor", left, right],
@@ -268,6 +271,23 @@ class ReleaseTests(unittest.TestCase):
             notes = Path(directory) / ("smr-release-notes-" + head + ".md")
             self.assertIn("## Features", notes.read_text())
             self.assertIn("add map details", notes.read_text())
+
+    def test_read_only_plan_keeps_source_and_notes_unchanged(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = Path(directory) / "outputs"
+            with (patch.object(release, "guard", return_value="a" * 40),
+                  patch.object(release.subprocess, "run"),
+                  patch.object(release, "release_history", return_value=([], {})),
+                  patch.object(release, "plan_release", return_value=ReleasePlan(True, "0.14.0", "minor")),
+                  patch.object(release, "tag_target", return_value=None),
+                  patch.object(release, "api", return_value=None),
+                  patch.object(release, "stamp_version") as stamp,
+                  patch.object(release, "_notes_path") as notes,
+                  patch.dict(release.os.environ, GITHUB_OUTPUT=str(result))):
+                release.prepare(write_files=False)
+            stamp.assert_not_called()
+            notes.assert_not_called()
+            self.assertIn("release_required=true", result.read_text())
 
     def test_release_history_reserves_drafts_and_legacy_without_treating_them_as_baseline(self):
         def pages(path):

@@ -15,7 +15,8 @@ verification. These rules apply to every AI session. Read relevant sections of
 3. Make one coherent change. Reuse existing helpers and standard-library facilities.
    Improve touched code when useful; create an issue for larger cleanup.
 4. Run focused checks first. Expand them for a concrete remaining risk. **Build only
-   when needed.** Follow the verification matrix in CONTRIBUTING.
+   when needed.** Follow the verification matrix in CONTRIBUTING. Use the Python 3.12
+   development environment for tests and CI/release helpers; macOS `python3` may be 3.9.
 5. Review the final diff. Get independent AI review before publishing changes to
    saves, activation/restoration, deletion, crash-report privacy, release/publication
    safeguards, substantial architecture, or **any new dependency**, including tools.

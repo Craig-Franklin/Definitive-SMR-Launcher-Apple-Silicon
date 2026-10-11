@@ -10,15 +10,71 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  plan:
     if: github.repository == 'Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon'
+    runs-on: ubuntu-24.04
+    outputs:
+      quality: ${{ steps.checks.outputs.quality }}
+      tests: ${{ steps.checks.outputs.tests }}
+      build: ${{ steps.checks.outputs.build }}
+      release: ${{ steps.checks.outputs.release }}
+      base: ${{ steps.checks.outputs.base }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Plan release without stamping or building
+        id: release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SMR_RESERVED_VERSIONS: 0.3.7,0.3.8
+        run: python3 scripts/release_macos.py plan
+      - name: Select relevant checks
+        id: checks
+        env:
+          SMR_RELEASE_REQUIRED: ${{ steps.release.outputs.release_required }}
+        run: python3 scripts/change_policy.py plan
+
+  quality:
+    needs: plan
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Check documentation
+        run: python3 scripts/check_quality.py --docs
+      - name: Check Python correctness and adopted formatting
+        if: needs.plan.outputs.quality == 'true'
+        env:
+          SMR_BASE: ${{ needs.plan.outputs.base }}
+        run: |
+          python3 -m venv .quality-venv
+          .quality-venv/bin/python -m pip install --only-binary=:all: --no-deps -r requirements-dev.txt
+          .quality-venv/bin/python scripts/check_quality.py --base "$SMR_BASE"
+
+  tests:
+    needs: plan
+    if: needs.plan.outputs.tests == 'true'
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install test Python and Tk
+        run: brew install python@3.12 python-tk@3.12
+      - name: Run full existing synthetic suite
+        run: /opt/homebrew/bin/python3.12 -m unittest discover -s tests -v
+      - name: Run research evidence helper suite
+        run: /opt/homebrew/bin/python3.12 -m unittest discover -s scripts/research/rea -p test_evidence.py -v
+
+  build:
+    needs: [plan, quality, tests]
+    if: needs.plan.outputs.build == 'true'
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v7
       - name: Install arm64 build dependencies
         run: brew install python@3.12 python-tk@3.12
-      - name: Run synthetic tests
-        run: /opt/homebrew/bin/python3.12 -m unittest discover -s tests -v
       - name: Build development app
         run: ./scripts/build_macos.sh
       - name: Build development disk image
@@ -29,9 +85,20 @@ jobs:
           codesign --verify --deep --strict "$app"
           test "$(lipo -archs "$app/Contents/MacOS/Definitive SMR Launcher Apple Silicon")" = arm64
 
+  checks:
+    if: always() && github.repository == 'Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon'
+    needs: [plan, quality, tests, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Require every planned check to pass
+        env:
+          SMR_NEEDS: ${{ toJSON(needs) }}
+        run: python3 scripts/change_policy.py gate
+
   release:
-    if: github.repository == 'Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: build
+    if: needs.plan.outputs.release == 'true' && github.repository == 'Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [plan, checks]
     runs-on: macos-26
     concurrency:
       group: macos-stable-release
@@ -45,14 +112,17 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: Install arm64 build dependencies
-        run: brew install python@3.12 python-tk@3.12
+      - name: Install release planner Python
+        run: brew install python@3.12
       - name: Prepare exact source release and unique version
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
           SMR_RESERVED_VERSIONS: 0.3.7,0.3.8
         run: /opt/homebrew/bin/python3.12 scripts/release_macos.py prepare
+      - name: Install app build dependencies
+        if: steps.release.outputs.release_required == 'true' && steps.release.outputs.published != 'true'
+        run: brew install python-tk@3.12
       - name: Install 1Password CLI
         if: steps.release.outputs.release_required == 'true' && steps.release.outputs.published != 'true'
         uses: 1password/install-cli-action@v4
