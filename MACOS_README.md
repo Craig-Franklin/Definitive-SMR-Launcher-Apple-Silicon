@@ -329,6 +329,11 @@ fresh-Mac installation and VoiceOver validation remain separate QA steps.
 
 ## Development checks
 
+Before engine-dependent changes, crash diagnosis or map scans, use the
+[game knowledge reference and verification workflow](docs/rea-research/KNOWLEDGE_USE.md)
+and [repository instructions](AGENTS.md). Record matching-build evidence,
+applied rules and coverage gaps; static/synthetic results do not establish gameplay compatibility.
+
 On macOS with Python 3.12:
 
 ```sh

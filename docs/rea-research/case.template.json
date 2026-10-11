@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "case_id": "EXAMPLE-001",
+  "question": "One falsifiable question",
+  "status": "planned",
+  "rights_status": "user-authorized-local-extraction; third-party rights not adjudicated",
+  "disclosure_mode": "local-only",
+  "target": {
+    "sha256": null,
+    "image_uuid": null,
+    "architecture": null,
+    "edition": null
+  },
+  "map": {
+    "archive_sha256": null,
+    "variant_sha256": null,
+    "scenario": null
+  },
+  "environment": {
+    "source_commit": null,
+    "rea_version": null,
+    "ghidra_version": null,
+    "jdk_version": null,
+    "analysis_options": {}
+  },
+  "evidence": [],
+  "observations": [],
+  "hypotheses": [],
+  "counterexamples": [],
+  "unknowns": [],
+  "acceptance_criterion": null,
+  "result": null,
+  "usage": {
+    "actual_model": null,
+    "actual_effort": null,
+    "input_tokens": null,
+    "output_tokens": null,
+    "elapsed_seconds": null,
+    "query_count": 0,
+    "cache_hits": 0,
+    "escalation_reason": null
+  },
+  "publication": {
+    "approved": false,
+    "reviewer": null,
+    "candidate_files": []
+  },
+  "knowledge_use": {
+    "status": "not_checked",
+    "knowledge_revision": null,
+    "corpus_identity": null,
+    "target_match": {
+      "sha256": null,
+      "image_uuid": null,
+      "architecture": null,
+      "matches": null
+    },
+    "consulted_finding_ids": [],
+    "applied_rule_ids": [],
+    "rejected_rules": [],
+    "coverage_gaps": [],
+    "verification_evidence_ids": []
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "smr-rea-research",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Pinned optional local research tooling; excluded from the launcher runtime.",
+  "license": "MIT",
+  "dependencies": {
+    "rea-agents": "6.4.0"
+  }
+}

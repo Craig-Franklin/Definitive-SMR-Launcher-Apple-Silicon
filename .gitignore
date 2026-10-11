@@ -36,3 +36,13 @@ __pycache__/
 .DS_Store
 .env
 .env.*
+
+# Optional REA dependency installation and local analysis databases
+node_modules/
+*.gpr
+*.rep/
+*.gzf
+*.hop
+*.hop64
+*.i64
+*.idb
