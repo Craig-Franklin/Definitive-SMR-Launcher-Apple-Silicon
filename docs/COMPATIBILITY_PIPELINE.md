@@ -184,6 +184,24 @@ the edition stays Not verified. Static Oil/Power Plant dependency and custom-eve
 registration concerns remain. This exact-asset experiment does not authorize
 blanket conversion of older models.
 
+The current source candidate can reproduce the combined Arizona experiment from
+local exact original inputs. It compiles the four industry aliases together with
+all four typed ownership references and the bounded bank conversion. The complete
+archive, resource inventory, build, XML inputs/outputs, registry slots and unique
+loose bank provider are checked. Unsupported or ambiguous providers refuse.
+Synthetic tests cover coupled ownership, complete converted bytes, preservation,
+resource timestamps, idempotence and refusal. A private check of the complete
+130-file original reproduces the three historical postimages exactly and leaves
+127 files unchanged. Raw assets are neither bundled nor published.
+
+This candidate is withheld from player recipe choices and remains on a task branch
+until applicable finite runtime and preservation acceptance. Its byte equality
+reuses the earlier experiment's content evidence; it does not establish the
+current installed resource winner, identify #193's faulting model, resolve the
+Oil/Power Plant or event concerns, or fix the other three captured incidents.
+See [#188](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/188)
+and [#193](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/193).
+
 ### Asset timestamps and reproducibility
 
 Inspection of this build's file catalog shows that ordinary duplicate entries
