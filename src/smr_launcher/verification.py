@@ -165,6 +165,7 @@ class VerificationSummary:
     historical: tuple[GameplayVerification, ...] = ()
     scope: str = "Scenario coverage; missing actions remain unknown."
     limited: tuple[LimitedScenarioObservation, ...] = ()
+    local_issues: tuple[dict, ...] = ()
 
     @property
     def issue(self):
@@ -172,12 +173,15 @@ class VerificationSummary:
         warnings = [r.issue for r in self.historical if r.issue]
         return "\n".join([*("Observed issue: " + s for s in failures),
                            *("Historical unscoped issue: " + x for x in warnings),
-                           *(item.issue for item in self.limited if item.issue)])
+                           *(item.issue for item in self.limited if item.issue),
+                           *("Local failure · " + item["occurred_at"] + ": " + item["detail"]
+                             for item in self.local_issues)])
 
     def as_json(self):
         return dict(status=self.status, scenarios=[s.as_json() for s in self.scenarios],
                     historical=[dict(record=r.as_json(), limitation="Unscoped limited observation")
-                                for r in self.historical], scope=self.scope, limited=[r.as_json() for r in self.limited])
+                                for r in self.historical], scope=self.scope, limited=[r.as_json() for r in self.limited],
+                    local_issues=list(self.local_issues))
 
 
 def reduce_verification(records, scenarios, context, *, historical=()):

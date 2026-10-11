@@ -1001,6 +1001,8 @@ class LauncherWindow:
             return "No local gameplay result recorded. Scenario coverage remains unknown."
         if isinstance(result, VerificationSummary):
             lines = [result.status, result.scope]
+            for issue in result.local_issues:
+                lines.extend(["", "Local failure · " + issue["occurred_at"], issue["detail"]])
             for scenario in result.scenarios:
                 lines.extend(["", scenario.scenario_path + " · " + scenario.status])
                 lines.extend(action.replace("_", " ").title() + ": " + outcome.replace("_", " ")
@@ -1330,6 +1332,15 @@ class LauncherWindow:
     def _poll(self) -> None:
         if getattr(self, "crash_monitor", None) is not None:
             self.crash_status.set(self.crash_monitor.status)
+            revision = self.crash_monitor.issue_revision
+            if revision != getattr(self, "_crash_issue_revision", 0) and not self.busy:
+                self._crash_issue_revision = revision
+                if self.view == "maps":
+                    self._render_gallery()
+            for event in self.crash_monitor.take_events():
+                self.status.set(event)
+                self._log("Game resource protection", "Stopped", event)
+                messagebox.showwarning("Railroads memory protection", event, parent=self.root)
         speech = self.speech_process
         if speech is not None and speech.done:
             self.speech_process = None
@@ -1459,17 +1470,22 @@ class LauncherWindow:
         ttk.Label(panel, wraplength=540, justify="left", text=(
             "Complete macOS crash reports stay in a private folder on this Mac. "
             "Reports arriving after you close the launcher are checked when it next opens. "
-            "A normal game exit is never reported as a crash."
+            "Confirmed crashes are recorded against the active map edition as known issues. "
+            "Memory protection stops a runaway game above 8 GiB for five seconds, or 16 GiB immediately. "
+            "This includes compressed and swapped memory. A normal game exit is never reported as a crash."
         )).pack(anchor="w", pady=(10, 14))
         monitor = self.crash_monitor
         enabled = tk.BooleanVar(value=monitor.enabled if monitor else False)
         automatic = tk.BooleanVar(value=monitor.automatic_reporting if monitor else False)
+        protection = tk.BooleanVar(value=monitor.protect_resources if monitor else True)
         def configure():
             try:
-                monitor.configure(enabled=enabled.get(), automatic_reporting=automatic.get())
+                monitor.configure(enabled=enabled.get(), automatic_reporting=automatic.get(),
+                                  protect_resources=protection.get())
             except Exception:
                 self.crash_status.set("Crash reporting preferences could not be saved; you can still play.")
         for label, variable in (("Monitor game crashes", enabled),
+                                ("Stop Railroads if its memory use runs away", protection),
                                 ("Automatically report sanitized crashes to GitHub", automatic)):
             ttk.Checkbutton(panel, text=label, variable=variable, command=configure,
                             state="normal" if monitor else "disabled").pack(anchor="w", pady=4)

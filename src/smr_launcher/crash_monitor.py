@@ -1,4 +1,4 @@
-"""Passive, local-first crash monitoring. This module never controls the game."""
+"""Local crash collection and exact-process resource protection."""
 from __future__ import annotations
 
 import ctypes
@@ -19,6 +19,8 @@ import time
 from typing import Callable
 
 from .activation import _assert_no_symlink_ancestor
+from .game_health import ResourceGuard
+from .map_issues import MapIssueStore
 
 MAX_REPORT_BYTES = 4 * 1024 * 1024
 MAX_SCAN_ENTRIES = 4096
@@ -165,12 +167,19 @@ class CrashMonitor:
 
     def __init__(self, app, launcher_version: str, *, reports_directory=None,
                  process_probe: Callable = running_game, store=None, parser=None,
-                 publisher=None, now=None, image_uuid_reader=executable_image_uuid) -> None:
+                 publisher=None, now=None, image_uuid_reader=executable_image_uuid,
+                 resource_guard=None) -> None:
         from .crash_reports import CrashStore, parse_crash_report
         from .crash_reporting import GitHubCrashPublisher
         self.app, self.launcher_version = app, launcher_version
         self.root = app.library / "crash-reports"
         self.store = store if store is not None else CrashStore(self.root)
+        self.map_issues = MapIssueStore(app.library)
+        self.resource_guard = resource_guard if resource_guard is not None else ResourceGuard()
+        self.health_lock = Lock()
+        self.health_thread = None
+        self.events = []
+        self.issue_revision = 0
         self.parser = parser if parser is not None else parse_crash_report
         source_root = Path(__file__).resolve().parents[2]
         checkout = source_root if (source_root / ".git").exists() else None
@@ -187,6 +196,7 @@ class CrashMonitor:
         self.owner_fd = None
         self.status = "Crash collection ready; keep the launcher open while playing."
         self.enabled, self.automatic_reporting = True, False
+        self.protect_resources = True
         self.session = None
         self.sessions = {}
         self.seen = set()
@@ -198,6 +208,9 @@ class CrashMonitor:
             if value.get("schema") != 1 or any(type(value.get(k)) is not bool for k in ("enabled", "automatic_reporting")):
                 raise ValueError("Crash monitor preferences need inspection")
             self.enabled, self.automatic_reporting = value["enabled"], value["automatic_reporting"]
+            self.protect_resources = value.get("protect_resources", True)
+            if type(self.protect_resources) is not bool:
+                raise ValueError("Resource protection preference needs inspection")
         self.sessions_directory = self.root / "sessions"
         self.sessions_directory.mkdir(mode=0o700, exist_ok=True)
         _assert_no_symlink_ancestor(self.sessions_directory)
@@ -212,15 +225,106 @@ class CrashMonitor:
                 self.sessions[path.stem] = value
         if self.sessions:
             self.session = max(self.sessions.values(), key=lambda item: item["started_at"])
+        # Upgrade existing local crash history into map warnings, including
+        # already published incidents; network availability is irrelevant.
+        try:
+            for entry in self.store._entries():
+                self._record_crash_issue(entry["payload"])
+        except (OSError, ValueError):
+            self.status = "Local crash history needs inspection; memory protection remains available."
 
-    def configure(self, *, enabled: bool, automatic_reporting: bool) -> None:
+    def configure(self, *, enabled: bool, automatic_reporting: bool, protect_resources=None) -> None:
         if type(enabled) is not bool or type(automatic_reporting) is not bool:
             raise ValueError("Crash monitoring choices must be booleans")
         with self.lock:
+            if protect_resources is None:
+                protect_resources = self.protect_resources
+            if type(protect_resources) is not bool:
+                raise ValueError("Resource protection choice must be a boolean")
             _private_json(self.preferences, dict(schema=1, enabled=enabled,
-                                               automatic_reporting=automatic_reporting))
+                                               automatic_reporting=automatic_reporting,
+                                               protect_resources=protect_resources))
             self.enabled, self.automatic_reporting = enabled, automatic_reporting
+            self.protect_resources = protect_resources
             self.next_publish = 0
+
+    def _record_crash_issue(self, payload):
+        issue = self.map_issues.record(payload, incident_id=payload["report_sha256"],
+            occurred_at=payload["occurred_at"], kind="crash",
+            detail="Confirmed game crash: " + payload["exception_type"] + " / " + payload["signal"]
+                   + ". The active map edition is known; the selected scenario and crash cause may be unknown.")
+        if issue:
+            self.issue_revision += 1
+
+    def take_events(self):
+        with self.lock:
+            events, self.events = self.events, []
+            return events
+
+    def _retain_resource_failure(self, process, footprint):
+        with self.lock:
+            if not self.session or self.session.get("process") != process:
+                raise ValueError("Resource failure session changed")
+            # Use a stable per-incarnation identity so restart cannot duplicate it.
+            incident = hashlib.sha256(json.dumps(process, sort_keys=True).encode()).hexdigest()
+            path = self.root / ("resource-" + incident + ".json")
+            if path.exists():
+                evidence = json.loads(_read_regular(path, 65536))
+            else:
+                evidence = dict(schema=1, session=self.session, footprint_bytes=footprint,
+                                occurred_at=self.now().isoformat(), load_state="unknown",
+                                reason="physical_footprint_limit")
+                _private_json(path, evidence)
+            self.map_issues.record(evidence["session"]["context"], incident_id=incident,
+                occurred_at=evidence["occurred_at"], kind="resource_limit",
+                detail="Game exceeded the memory protection limit (physical footprint "
+                       + f"{evidence['footprint_bytes'] / 1024**3:.1f} GiB). "
+                       + "Map loading or gameplay failed; completion of map loading was not confirmed.")
+            self.issue_revision += 1
+
+    def poll_health_once(self):
+        # Separate from diagnostic scans and network publication, so either can
+        # stall without allowing a runaway game to consume resources unchecked.
+        if not self.health_lock.acquire(blocking=False):
+            return
+        try:
+            with self.lock:
+                if not self.protect_resources:
+                    self.resource_guard.over_since = None
+                    return
+            process = self.process_probe(str(self.app.installation.executable))
+            with self.lock:
+                if process and (not self.session or self.session.get("process") != process):
+                    try:
+                        self.arm(self.app.profiles.active_profile(), process=process)
+                    except Exception:
+                        # Protect the exact observed process even if its session
+                        # cannot be persisted. Do not guess the associated map.
+                        self.session = dict(schema=1, executable=process["executable"], process=process,
+                            started_at=datetime.fromtimestamp(process["birth_us"] / 1000000, timezone.utc).isoformat(),
+                            context=dict(game_executable_sha256=self.app.installation.executable_sha256))
+            try:
+                footprint = self.resource_guard.observe(process, self._retain_resource_failure)
+            except Exception:
+                if self.resource_guard.handled:
+                    with self.lock:
+                        self.events.append("Railroads exceeded the memory limit, but stopping the game "
+                                           "could not be confirmed. Check the game process. "
+                                           + ("The failure could not be saved locally." if self.resource_guard.retention_failed
+                                              else "The failure was saved locally."))
+                raise
+            if footprint is not None:
+                with self.lock:
+                    map_warning = ("The active custom map edition has been marked as a known issue."
+                                   if self.session["context"].get("variant_id") else
+                                   "No custom map was identified for this session.")
+                    retained = ("The failure could not be saved locally; check available disk space."
+                                if self.resource_guard.retention_failed else
+                                "Diagnostics were saved locally. " + map_warning)
+                    self.events.append("Railroads was stopped after excessive memory use "
+                        + f"({footprint / 1024**3:.1f} GiB). " + retained)
+        finally:
+            self.health_lock.release()
 
     def arm(self, profile_id: str | None = None, *, process=None) -> None:
         """Called inside the existing guarded launch callback, before open."""
@@ -325,6 +429,7 @@ class CrashMonitor:
                                                   context=session["context"])
                             if payload is not None:
                                 self.store.collect(raw, payload)
+                                self._record_crash_issue(payload)
                                 break
                         if payload is None:
                             self._retain_unconfirmed(raw)
@@ -433,6 +538,14 @@ class CrashMonitor:
             os.close(owner_fd)
             raise
         self.owner_fd = owner_fd
+        def health_work():
+            while not self.stop_event.is_set():
+                try:
+                    self.poll_health_once()
+                except Exception:
+                    self.status = "Game resource observation needs inspection; crash collection continues."
+                self.stop_event.wait(1)
+        self.health_thread = Thread(target=health_work, daemon=True, name="smr-resource-guard")
         def work():
             try:
                 while not self.stop_event.is_set():
@@ -444,13 +557,18 @@ class CrashMonitor:
             finally:
                 os.close(owner_fd)
                 self.owner_fd = None
-        self.thread = Thread(target=work, daemon=True, name="smr-passive-crash-monitor")
+        self.thread = Thread(target=work, daemon=True, name="smr-crash-monitor")
         try:
             self.thread.start()
         except Exception:
             os.close(owner_fd)
             self.owner_fd = None
             self.thread = None
+            raise
+        try:
+            self.health_thread.start()
+        except Exception:
+            self.stop_event.set()
             raise
 
     def close(self) -> None:
