@@ -53,6 +53,23 @@ checked applicability rule covering build, resource/model structure, dependencie
 provider resolution and operation. Preserve input identities, originals, features
 and saves. Static matches and runtime repair acceptance remain separate results.
 
+## Private preparation provenance
+
+New private session records include optional `catalogue_preparation` when the
+supplied profile matches a catalogue entry. Its `game_executable_sha256` is the
+build recorded at preparation; `recipe_receipt_sha256` identifies the existing
+compiled-recipe receipt when present. Both accept only lowercase SHA-256 values;
+missing or malformed identities are `null`. Ordinary preparations have no recipe
+receipt. Archive and variant identity remain in the existing session context.
+
+These are catalogue claims captured with the session, not fresh receipt integrity
+checks, dependency scans, observed engine providers or proof of scenario selection.
+The running executable identity remains separate. A delayed report can reuse the
+retained session after catalogue changes. Older sessions remain readable without
+this optional member. Existing incidents are not retroactively enriched. The
+snapshot stays in private session files; it adds no public payload fields and does
+not alter report/family fingerprints or publication grouping.
+
 ## Next useful collection work
 
 Track delivery and remaining work in

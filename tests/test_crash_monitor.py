@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock
 
+from smr_launcher.application import MapRecord
 from smr_launcher.crash_monitor import CrashMonitor
 
 START = datetime(2026, 1, 2, 12, tzinfo=timezone.utc)
@@ -229,6 +230,104 @@ class MonitorControls(unittest.TestCase):
         monitor = self.monitor()
         monitor.poll_once()
         self.assertEqual(monitor.store.pending(), [])
+
+
+class PreparationProvenanceControls(unittest.TestCase):
+    setUp = MonitorControls.setUp
+    monitor = MonitorControls.monitor
+    write_report = MonitorControls.write_report
+
+    def preparation_record(self, **changes):
+        values = dict(
+            name="PRIVATE_NAME_CANARY",
+            archive_sha256="b" * 64,
+            variant_id="c" * 64,
+            profile_id="synthetic-profile",
+            scenarios=("PRIVATE_SCENARIO_CANARY",),
+            prepared_directory="/PRIVATE_PATH_CANARY",
+            game_executable_sha256="d" * 64,
+            recipe_receipt_sha256="e" * 64,
+        )
+        values.update(changes)
+        return MapRecord(**values)
+
+    def test_catalogue_preparation_is_private_durable_and_not_runtime_build(self):
+        record = self.preparation_record()
+        self.app.catalogue = lambda: [record]
+        first = self.monitor()
+        first.arm(record.profile_id, process=PROCESS)
+        expected = dict(game_executable_sha256="d" * 64, recipe_receipt_sha256="e" * 64)
+        self.assertEqual(first.session["catalogue_preparation"], expected)
+        self.assertEqual(first.session["context"]["game_executable_sha256"], "a" * 64)
+        files = list(first.sessions_directory.glob("*.json"))
+        self.assertEqual(len(files), 1)
+        saved = files[0].read_bytes()
+        self.assertEqual(json.loads(saved)["catalogue_preparation"], expected)
+        self.assertEqual(files[0].stat().st_mode & 0o777, 0o600)
+        self.assertNotIn(b"CANARY", saved)
+        first.close()
+        # Retained evidence survives catalogue removal and a delayed crash.
+        self.app.catalogue = lambda: []
+        second = self.monitor()
+        self.assertEqual(second.session["catalogue_preparation"], expected)
+        self.write_report()
+        second.configure(enabled=True, automatic_reporting=True)
+        second.poll_once()
+        payload = second.store._entries()[0]["payload"]
+        from smr_launcher.crash_reports import parse_crash_report
+
+        baseline = parse_crash_report(
+            report(),
+            expected_executable=EXE,
+            expected_pid=123,
+            session_started_at=START,
+            context=second.session["context"],
+        )
+        self.assertEqual(payload, baseline)
+        self.assertEqual(self.publisher.publish.call_args.args[0], baseline)
+        self.assertNotIn("catalogue_preparation", payload)
+        self.assertNotIn("recipe_receipt_sha256", payload)
+        self.assertIsNone(payload["scenario_key"])
+        self.assertEqual(files[0].read_bytes(), saved)
+
+    def test_ordinary_preparation_has_no_recipe_claim(self):
+        record = self.preparation_record(recipe_receipt_sha256="")
+        self.app.catalogue = lambda: [record]
+        monitor = self.monitor()
+        monitor.arm(record.profile_id)
+        self.assertEqual(
+            monitor.session["catalogue_preparation"],
+            dict(
+                game_executable_sha256="d" * 64,
+                recipe_receipt_sha256=None,
+            ),
+        )
+
+    def test_unknown_or_original_profile_does_not_borrow_preparation(self):
+        self.app.catalogue = lambda: [self.preparation_record()]
+        monitor = self.monitor()
+        for profile in (None, "original", "missing-profile"):
+            with self.subTest(profile=profile):
+                monitor.arm(profile)
+                self.assertNotIn("catalogue_preparation", monitor.session)
+
+    def test_malformed_preparation_digests_remain_unknown(self):
+        monitor = self.monitor()
+        for invalid in ("PRIVATE_PATH_CANARY", "A" * 64, "a" * 63, None, ["e" * 64]):
+            with self.subTest(invalid=invalid):
+                record = self.preparation_record(
+                    game_executable_sha256=invalid,
+                    recipe_receipt_sha256=invalid,
+                )
+                self.app.catalogue = lambda: [record]
+                monitor.arm(record.profile_id)
+                self.assertEqual(
+                    monitor.session["catalogue_preparation"],
+                    dict(
+                        game_executable_sha256=None,
+                        recipe_receipt_sha256=None,
+                    ),
+                )
 
 
 class RedactionCorrelationControls(unittest.TestCase):

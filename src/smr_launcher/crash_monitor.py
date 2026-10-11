@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import stat
 import struct
 import uuid
@@ -534,12 +535,23 @@ class CrashMonitor:
                     "/Users/USER/Library/Application Support/Steam/*/"
                     + str(executable.relative_to(executable.parents[3]))
                 )
+            preparation = None
             if profile_id:
                 record = next((r for r in self.app.catalogue() if r.profile_id == profile_id), None)
                 if record:
                     context.update(
                         archive_sha256=record.archive_sha256, variant_id=record.variant_id
                     )
+                    # Catalogue claims are private preparation provenance, not
+                    # observed engine providers or the currently running build.
+                    preparation = {}
+                    for field in ("game_executable_sha256", "recipe_receipt_sha256"):
+                        value = getattr(record, field, None)
+                        preparation[field] = (
+                            value
+                            if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value)
+                            else None
+                        )
             started = self.now()
             if process:
                 started = datetime.fromtimestamp(process["birth_us"] / 1000000, timezone.utc)
@@ -550,6 +562,8 @@ class CrashMonitor:
                 process=process,
                 context=context,
             )
+            if preparation is not None:
+                self.session["catalogue_preparation"] = preparation
             identity = hashlib.sha256(json.dumps(self.session, sort_keys=True).encode()).hexdigest()
             _private_json(self.sessions_directory / (identity + ".json"), self.session)
             self.sessions[identity] = self.session
