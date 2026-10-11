@@ -8,12 +8,15 @@ from typing import Callable, Optional
 from datetime import datetime
 import getpass
 import math
+import time
 import re
 import subprocess
 import webbrowser
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from .gallery import gallery_snapshot, filter_snapshot
+from .ui_work import Mailbox, DownloadEvents
 from .crash_monitor import CrashMonitor
 from .activity import ActivityLog
 from .map_updates import find_map_updates
@@ -23,7 +26,7 @@ from .voices import list_voices, speak, open_voice_settings
 from .verification import CHECKS, VerificationSummary
 from .activation import ORIGINAL
 from .application import LauncherApplication, MapRecord
-from .collection import RemoteMap, download_all_maps, download_map, fetch_catalogue
+from .collection import RemoteMap, download_all_maps, download_map, fetch_catalogue, read_cached_catalogue, write_cached_catalogue
 from .map_metadata import safe_source_url
 from .community import CommunityError, fetch_community_index, read_cached_community_index
 from . import APP_VERSION
@@ -84,7 +87,18 @@ class LauncherWindow:
         self._search_refresh_after_id = None
         self._search_refresh_generation = 0
         self.results: Queue[tuple[bool, object, Optional[Callable[[object], None]]]] = Queue()
-        self.download_events: Queue[tuple[RemoteMap, str, int, int, str]] = Queue()
+        self.download_events = DownloadEvents()
+        self.background_results = Mailbox()
+        self._startup_generation = 0
+        self._collection_generation = 0
+        self._gallery_generation = 0
+        self._gallery_after_id = None
+        self._gallery_snapshot = ()
+        self._gallery_app = None
+        self.initializing = True
+        self.collection_refreshing = False
+        self.collection_saved = False
+        self.collection_notice = ""
         self.download_states: dict[str, tuple[str, int, int, str]] = {}
         self.bulk_cancel = Event()
         self.bulk_active = False
@@ -99,22 +113,13 @@ class LauncherWindow:
         self.update_library = Path.home() / "Library/Application Support/Definitive SMR Launcher Apple Silicon"
         self.activity = ActivityLog(self.update_library)
         self.language_preferences = LanguagePreferences(self.update_library)
-        try:
-            self.language_preferences.load()
-        except Exception:
-            pass
-        set_language(self.language_preferences.language)
         self.voices = ()
-        self.community_index = read_cached_community_index(self.update_library / "community-index.json")
+        self.community_index = {}
         self.community_notice = ""
         self.imported_names = set()
         self.update_preferences = UpdatePreferences(self.update_library)
-        try:
-            automatic = self.update_preferences.automatic()
-            initial_update_status = "No update check yet."
-        except Exception as exc:
-            automatic = False
-            initial_update_status = "Update settings need inspection: " + str(exc)
+        automatic = False
+        initial_update_status = "No update check yet."
         self.auto_updates = tk.BooleanVar(value=automatic)
         self.update_status = tk.StringVar(value=initial_update_status)
         self.available_update: Optional[Release] = None
@@ -129,6 +134,8 @@ class LauncherWindow:
         self.status = tk.StringVar(value="Checking the Steam Mac game…")
         self.images: dict[str, tk.PhotoImage] = {}
         self.columns = 0
+        self.cards = {}
+        self._maps_scroll = 0.0
 
         self.background = self.root.cget("background")
         dark = sum(self.root.winfo_rgb(self.background)) < 3 * 32768
@@ -138,35 +145,125 @@ class LauncherWindow:
         self.border = "#454549" if dark else "#d7d8da"
         self.accent = "#3b91e8" if dark else "#1265a8"
 
-        self._menu()
-        self._layout()
-        try:
-            self.app = LauncherApplication.discover()
-            if self.app.profiles.state_file.exists():
-                self.status.set("Your library is ready. Select a map, view its details, or play Original Game.")
-            else:
-                self.status.set("Steam Mac game found. Get started to prepare your map library.")
-        except Exception as exc:
-            self.status.set("Steam Mac game unavailable: " + str(exc))
-        if self.app is not None:
-            self._start_crash_monitor()
-        try:
-            if trusted_team_from_bundle():
-                self.pending_update = pending_install(self.update_library, current_app_bundle(), APP_VERSION)
-                if self.pending_update:
-                    self.pending_update_manual = pending_install_manual(self.pending_update)
-                    if self.pending_update_manual or automatic:
-                        self.update_status.set("A staged update is ready; it will be rechecked when you quit to install it.")
-                    else:
-                        self.update_status.set("A staged update is ready. Automatic installation is off.")
-        except Exception as exc:
-            self.update_status.set("Pending update needs inspection: " + str(exc))
-        self._show(self._initial_view())
-        self.root.after(100, self._poll)
+        # Independently authored native shell; no discovery or history IO here.
+        self.loading_shell = ttk.Frame(self.root, padding=48)
+        self.loading_shell.pack(fill="both", expand=True)
+        ttk.Label(self.loading_shell, text="Definitive SMR", font=("Helvetica Neue", 26, "bold")).pack(anchor="w")
+        ttk.Label(self.loading_shell, text="Opening your library…", padding=(0, 20)).pack(anchor="w")
         self.root.protocol("WM_DELETE_WINDOW", self._close)
         self.root.createcommand("::tk::mac::Quit", self._close)
-        if automatic and self.pending_update is None:
-            self.root.after(1500, self.check_for_updates)
+        self.root.after(10, self._poll)
+        self.root.after(0, self._begin_startup)
+
+    def _background(self, operation, finished, *, dispose=None):
+        mailbox = self.background_results
+        def worker():
+            try:
+                result = (True, operation(), finished)
+            except Exception as exc:
+                result = (False, exc, finished)
+            mailbox.put(result, (lambda item: dispose(item[1]) if item[0] else None) if dispose else None)
+        Thread(target=worker, daemon=True).start()
+
+    def _background_latest(self, lane, operation, finished):
+        # At most one worker and one replacement request per maintenance lane.
+        if not hasattr(self, "_maintenance_running"):
+            self._maintenance_running = set()
+            self._maintenance_pending = {}
+        if lane in self._maintenance_running:
+            self._maintenance_pending[lane] = (operation, finished)
+            return
+        self._maintenance_running.add(lane)
+        def ready(ok, value):
+            self._maintenance_running.discard(lane)
+            try:
+                finished(ok, value)
+            finally:
+                pending = self._maintenance_pending.pop(lane, None)
+                if pending and not self.closed:
+                    self._background_latest(lane, *pending)
+        self._background(operation, ready)
+
+    @staticmethod
+    def _dispose_bootstrap(result):
+        monitor = result.get("monitor")
+        if monitor is not None:
+            monitor.close()
+
+    def _bootstrap(self, discover):
+        # Only plain data/services cross to Tk. Preferences and history IO run here.
+        data = dict(app=None, monitor=None, discovery_error="", monitor_error=False,
+                    pending=None, pending_manual=False, automatic=False, update_status="No update check yet.")
+        try:
+            self.language_preferences.load()
+        except Exception:
+            pass
+        data["language"] = self.language_preferences.language
+        data["imported_names"] = set()
+        data["community"] = read_cached_community_index(self.update_library / "community-index.json")
+        try:
+            data["automatic"] = self.update_preferences.automatic()
+            if trusted_team_from_bundle():
+                data["pending"] = pending_install(self.update_library, current_app_bundle(), APP_VERSION)
+                if data["pending"]:
+                    data["pending_manual"] = pending_install_manual(data["pending"])
+                    data["update_status"] = "A staged update is ready; it will be rechecked when you quit to install it."
+        except Exception as exc:
+            data["update_status"] = "Update settings need inspection: " + str(exc)
+        try:
+            data["app"] = discover()
+            data["enrolled"] = data["app"].profiles.state_file.exists()
+            data["imported_names"] = {r.archive_filename for r in data["app"].catalogue()}
+        except Exception as exc:
+            data["discovery_error"] = str(exc)
+        if data["app"] is not None:
+            try:
+                data["monitor"] = CrashMonitor(data["app"], APP_VERSION)
+                data["monitor"].start()
+            except Exception:
+                self._dispose_bootstrap(data)
+                data["monitor"] = None
+                data["monitor_error"] = True
+        return data
+
+    def _begin_startup(self):
+        if self.closed:
+            return
+        generation = self._startup_generation
+        self._background(lambda: self._bootstrap(LauncherApplication.discover),
+                         lambda ok, value: self._startup_ready(generation, ok, value),
+                         dispose=self._dispose_bootstrap)
+
+    def _startup_ready(self, generation, successful, data):
+        if self.closed or generation != self._startup_generation:
+            if successful:
+                self._dispose_bootstrap(data)
+            return
+        self.initializing = False
+        if successful:
+            self.app = data["app"]
+            self.crash_monitor = data["monitor"]
+            self.community_index = data["community"]
+            self.imported_names = data["imported_names"]
+            set_language(data["language"])
+            self.sort_order.set("Name A–Z")
+            self.map_filter.set("All maps")
+            self.auto_updates.set(data["automatic"])
+            self.pending_update = data["pending"]
+            self.pending_update_manual = data["pending_manual"]
+            self.update_status.set(data["update_status"])
+            if data["monitor_error"]:
+                self.crash_status.set("Crash monitoring needs inspection; you can still play.")
+            self.status.set("Your library is ready. Select a map or play Original Game." if self.app else
+                            "Steam Mac game unavailable: " + data["discovery_error"])
+        else:
+            self.status.set("Startup needs inspection: " + str(data))
+        self.loading_shell.destroy()
+        self._menu()
+        self._layout()
+        self._show(self._initial_view())
+        if self.auto_updates.get() and self.pending_update is None:
+            self.root.after(1500, lambda: None if self.closed else self.check_for_updates())
 
     def _menu(self) -> None:
         menu = tk.Menu(self.root)
@@ -190,6 +287,7 @@ class LauncherWindow:
 
     def _close(self) -> None:
         self._cancel_search_refresh()
+        self._cancel_gallery()
         if self.busy or self.bulk_active:
             self.close_when_idle = True
             if self.bulk_active:
@@ -211,8 +309,14 @@ class LauncherWindow:
                     return
         if getattr(self, "crash_monitor", None) is not None:
             self.crash_monitor.close()
-        self.root.destroy()
         self.closed = True
+        self._startup_generation = getattr(self, "_startup_generation", 0) + 1
+        self._collection_generation = getattr(self, "_collection_generation", 0) + 1
+        if hasattr(self, "background_results"):
+            self.background_results.close()
+        if hasattr(self, "download_events") and hasattr(self.download_events, "close"):
+            self.download_events.close()
+        self.root.destroy()
         self._stop_speech()
 
     def _layout(self) -> None:
@@ -288,7 +392,12 @@ class LauncherWindow:
         self._submit("Looking for the Steam Mac game…", LauncherApplication.discover, self._library_chosen)
 
     def _show(self, view: str) -> None:
+        if self.view == "maps" and hasattr(self, "canvas") and self.canvas.winfo_exists():
+            position = self.canvas.yview()
+            if position:
+                self._maps_scroll = position[0]
         self._cancel_search_refresh()
+        self._cancel_gallery()
         self.view = view
         self._clear_content()
         if view == "welcome":
@@ -337,11 +446,15 @@ class LauncherWindow:
                   foreground=self.secondary).pack(anchor="w", pady=(8, 0))
 
     def _maps_view(self) -> None:
-        records = self._records()
+        self._gallery_snapshot = ()
+        self._maps_dirty = True
+        self.cards = {}
+        self._gallery_restore_scroll = getattr(self, "_maps_scroll", 0.0)
         top = ttk.Frame(self.content, padding=(24, 20, 24, 12))
         top.pack(fill="x")
         ttk.Label(top, text="Map Library", font=("Helvetica Neue", 21, "bold")).pack(side="left")
-        ttk.Label(top, text=f"{len(records)} imported", foreground=self.secondary).pack(side="left", padx=(12, 0))
+        self.gallery_count = ttk.Label(top, text="Loading maps…", foreground=self.secondary)
+        self.gallery_count.pack(side="left", padx=(12, 0))
         self.play_button = ttk.Button(top, text="Play Selected", command=self.play_selected)
         self.play_button.pack(side="right")
         self.import_button = ttk.Button(top, text="Import Map…", command=self.import_map)
@@ -368,7 +481,7 @@ class LauncherWindow:
         holder = ttk.Frame(self.content)
         holder.pack(fill="both", expand=True)
         self.canvas = tk.Canvas(holder, background=self.background, highlightthickness=0)
-        bar = ttk.Scrollbar(holder, orient="vertical", command=self.canvas.yview)
+        bar = ttk.Scrollbar(holder, orient="vertical", command=self._gallery_yview)
         self.canvas.configure(yscrollcommand=bar.set)
         bar.pack(side="right", fill="y")
         self.canvas.pack(side="left", fill="both", expand=True)
@@ -413,14 +526,14 @@ class LauncherWindow:
         return sorted(records, key=lambda r: ((self._metadata(r).author or "~").casefold() if order == "Author" else "", r.name.casefold()))
 
     def _metadata(self, record: MapRecord):
-        if record.variant_id not in self.metadata_cache:
-            self.metadata_cache[record.variant_id] = self.app.map_metadata(record)
-        return self.metadata_cache[record.variant_id]
+        # Details always read secure current bytes, including missing-to-present.
+        return self.app.map_metadata(record)
 
     def _search_changed(self) -> None:
         if self.closed:
             return
         self._cancel_search_refresh()
+        self._cancel_gallery()
         generation = self._search_refresh_generation
         self._search_refresh_after_id = self.root.after(
             200, lambda: self._run_search_refresh(generation))
@@ -451,8 +564,8 @@ class LauncherWindow:
         top = ttk.Frame(self.content, padding=(24, 20, 24, 12))
         top.pack(fill="x")
         ttk.Label(top, text="Collection", font=("Helvetica Neue", 21, "bold")).pack(side="left")
-        count = f"{len(self.remote_records)} maps online" if self.collection_loaded else "Internet Archive"
-        ttk.Label(top, text=count, foreground=self.secondary).pack(side="left", padx=(12, 0))
+        self.collection_count = ttk.Label(top, text=self._collection_caption(), foreground=self.secondary)
+        self.collection_count.pack(side="left", padx=(12, 0))
         actions = ttk.Frame(self.content, padding=(24, 0, 24, 12))
         actions.pack(fill="x")
         self.download_button = ttk.Button(actions, text="Download & Import Selected", command=self._download_selected)
@@ -486,29 +599,33 @@ class LauncherWindow:
         self.collection_list.bind("<<TreeviewSelect>>", self._collection_selected)
         self._collection_rows()
         self._controls()
-        if not self.collection_loaded and not self.busy:
-            self._refresh_collection()
+        if not self.collection_loaded and not getattr(self, "collection_refreshing", False):
+            self._load_saved_collection()
 
     def _collection_rows(self) -> None:
         if not hasattr(self, "collection_list") or not self.collection_list.winfo_exists():
             return
+        position = self.collection_list.yview()[0] if hasattr(self.collection_list, "yview") and self.collection_list.yview() else 0
         selected_names = {item.name for item in self.selected_remotes}
         for child in self.collection_list.get_children():
             self.collection_list.delete(child)
         self.remote_rows.clear()
-        self.imported_names = {r.archive_filename for r in self._records()}
+        self.remote_row_ids = {}
         query = self.search.get().strip().casefold()
         for index, item in enumerate(self.remote_records):
             if query not in item.name.casefold():
                 continue
             key = str(index)
             self.remote_rows[key] = item
+            self.remote_row_ids[item.name] = key
             size = f"{item.size / (1024 * 1024):.1f} MB"
             self.collection_list.insert("", "end", iid=key,
                                         values=(_display_name(item.name[:-3]),
                                                 self._download_label(item.name), size))
         keys = [key for key, item in self.remote_rows.items() if item.name in selected_names]
         self.collection_list.selection_set(keys)
+        if hasattr(self.collection_list, "yview_moveto"):
+            self.collection_list.yview_moveto(position)
         self._collection_selected(None)
         self._controls()
 
@@ -539,43 +656,135 @@ class LauncherWindow:
         self.download_events.put((record, state, count, total, detail))
 
     def _update_download_rows(self) -> None:
-        try:
-            while True:
+        changed = set()
+        deadline = time.monotonic() + .004
+        for _ in range(64):
+            if time.monotonic() >= deadline:
+                break
+            try:
                 record, state, count, total, detail = self.download_events.get_nowait()
-                previous = self.download_states.get(record.name)
-                if state in ("Imported", "Failed", "Canceled") and (not previous or previous[0] != state):
-                    self._log(record.name, state, detail)
-                self.download_states[record.name] = (state, count, total, detail)
-                if self.view == "collection" and hasattr(self, "collection_list") and self.collection_list.winfo_exists():
-                    key = next((key for key, item in self.remote_rows.items() if item.name == record.name), None)
-                    if key is not None:
-                        self.collection_list.set(key, "progress", self._download_label(record.name))
-                    if self.selected_remote == record:
-                        self._collection_selected(None)
-        except Empty:
-            pass
+            except Empty:
+                break
+            previous = self.download_states.get(record.name)
+            if state in ("Imported", "Failed", "Canceled") and (not previous or previous[0] != state):
+                self._log(record.name, state, detail)
+            self.download_states[record.name] = (state, count, total, detail)
+            changed.add(record.name)
+        visible = self.view == "collection" and hasattr(self, "collection_list") and self.collection_list.winfo_exists()
+        if visible:
+            for name in changed:
+                key = getattr(self, "remote_row_ids", {}).get(name)
+                if key is not None:
+                    self.collection_list.set(key, "progress", self._download_label(name))
+            if self.selected_remote is not None and self.selected_remote.name in changed:
+                self._collection_selected(None)
+        if not self.download_events.empty() and not getattr(self, "_progress_after_id", None):
+            self._progress_after_id = self.root.after(1, self._continue_download_rows)
+
+    def _continue_download_rows(self):
+        self._progress_after_id = None
+        if not self.closed:
+            self._update_download_rows()
+
+    def _collection_caption(self):
+        if not self.collection_loaded:
+            return "Internet Archive"
+        label = "saved catalogue" if getattr(self, "collection_saved", False) else "maps online"
+        return f"{len(self.remote_records)} {label}" + getattr(self, "collection_notice", "")
+
+    def _load_saved_collection(self):
+        self.collection_refreshing = True
+        generation = self._collection_generation
+        def loaded(ok, saved):
+            if self.closed or generation != self._collection_generation:
+                return
+            self.collection_refreshing = False
+            if ok and saved is not None:
+                self.collection_saved = True
+                self.collection_notice = " · saved " + saved.fetched_at[:10] + "; Refresh to check online"
+                self._collection_loaded(saved.records)
+            else:
+                self._refresh_collection()
+        path = self.update_library / "collection-catalogue.json"
+        self._background(lambda: read_cached_catalogue(path), loaded)
 
     def _refresh_collection(self) -> None:
-        def operation():
-            records = fetch_catalogue()
-            if self.app:
-                self.app.match_collection_sources(records)
-            try:
-                self.community_index = fetch_community_index(self.update_library / "community-index.json")
+        if getattr(self, "collection_refreshing", False) or self.closed:
+            return
+        self._collection_generation += 1
+        generation = self._collection_generation
+        app = self.app
+        self.collection_refreshing = True
+        self.collection_notice = " · refreshing…"
+        self._publish_collection_caption()
+        def loaded(ok, records):
+            if self.closed or generation != self._collection_generation or self.app is not app:
+                return
+            self.collection_refreshing = False
+            if not ok:
+                self.collection_notice = " · refresh failed; showing saved list" if self.collection_loaded else " · refresh failed"
+                self.status.set("Collection refresh unavailable: " + str(records))
+                self._publish_collection_caption()
+                return
+            self.collection_saved = False
+            self.collection_notice = ""
+            self._collection_loaded(records)
+            # Publication is independent of cache persistence, provenance and community IO.
+            self._collection_maintenance(generation, app, records)
+        self._background(fetch_catalogue, loaded)
+
+    def _publish_collection_caption(self):
+        if self.view == "collection" and hasattr(self, "collection_count") and self.collection_count.winfo_exists():
+            self.collection_count.configure(text=self._collection_caption())
+
+    def _collection_maintenance(self, generation, app, records):
+        library = self.update_library
+        def valid():
+            return not self.closed and generation == self._collection_generation and self.app is app
+        def cache_done(ok, value):
+            if valid() and not ok:
+                self.collection_notice += " · saved catalogue could not be updated"
+                self.status.set("Collection cache needs inspection: " + str(value))
+                self._publish_collection_caption()
+        self._background_latest("collection-cache", lambda: write_cached_catalogue(library / "collection-catalogue.json", records), cache_done)
+        if app:
+            def matched(ok, value):
+                if not valid():
+                    return
+                if not ok:
+                    self.collection_notice += " · local source matching needs inspection"
+                    self.status.set("Collection source matching needs inspection: " + str(value))
+                else:
+                    self.imported_names = value
+                    if self.view == "collection":
+                        self._collection_rows()
+                self._publish_collection_caption()
+            def match():
+                app.match_collection_sources(records)
+                return {r.archive_filename for r in app.catalogue()}
+            self._background_latest("collection-sources", match, matched)
+        def community_done(ok, value):
+            if not valid():
+                return
+            if ok:
+                self.community_index = value
                 self.community_notice = ""
-            except CommunityError:
-                self.community_notice = " Community refresh unavailable; using any saved community information."
-            return records
-        self._submit("Loading the Internet Archive map collection…",
-                     operation, self._collection_loaded)
+            else:
+                self.community_notice = " Community refresh unavailable; using saved community information."
+                self.collection_notice += " · community refresh unavailable"
+                self.status.set("Community refresh unavailable: " + str(value))
+            self._publish_collection_caption()
+        self._background_latest("collection-community", lambda: fetch_community_index(library / "community-index.json"), community_done)
 
     def _collection_loaded(self, result: object) -> None:
         assert isinstance(result, tuple)
         self.remote_records = result
         self.collection_loaded = True
         if self.view == "collection":
-            self.status.set(f"{len(self.remote_records)} maps available in the collection." + getattr(self, "community_notice", ""))
-            self._show("collection")
+            self.status.set(self._collection_caption() + getattr(self, "community_notice", ""))
+            # Reuse existing native controls, selection and scroll position.
+            self._collection_rows()
+            self._publish_collection_caption()
 
     def _download_selected(self) -> None:
         if self.app is None or self.selected_remote is None:
@@ -583,14 +792,19 @@ class LauncherWindow:
         if len(self.selected_remotes) > 1:
             self._download_all(self.selected_remotes)
             return
+        if self.busy or self.closed:
+            return
         record = self.selected_remote
+        app = self.app
+        self.download_events.begin((record,))
+        self.download_states[record.name] = ("Queued", 0, record.size, "")
         def operation() -> MapRecord:
             try:
-                path = download_map(record, self.app.library / "downloads",
+                path = download_map(record, app.library / "downloads",
                                     progress=lambda count, total: self._download_event(
                                         record, "Downloading", count, total, ""))
                 self._download_event(record, "Archive verified", record.size, record.size, "")
-                result = self.app.import_archive(path, original_filename=record.name, remote=record)
+                result = app.import_archive(path, original_filename=record.name, remote=record)
                 self._download_event(record, "Imported", record.size, record.size, "")
                 return result
             except Exception as exc:
@@ -621,15 +835,17 @@ class LauncherWindow:
             parent=self.root,
         ):
             return
+        self.download_events.begin(records)
+        app = self.app
         self.bulk_cancel.clear()
         self.bulk_active = True
         for record in records:
             self.download_states[record.name] = ("Queued", 0, record.size, "")
         self._collection_rows()
         self._submit(f"Downloading and importing {len(records)} maps with four parallel downloads…",
-                     lambda: download_all_maps(records, self.app.library / "downloads",
+                     lambda: download_all_maps(records, app.library / "downloads",
                                                self._download_event, self.bulk_cancel,
-                                               importer=lambda record, path: self.app.import_archive(
+                                               importer=lambda record, path: app.import_archive(
                                                    path, original_filename=record.name, remote=record)),
                      self._download_all_finished)
 
@@ -649,77 +865,164 @@ class LauncherWindow:
             self.columns = columns
             self._render_gallery()
 
+    def _gallery_yview(self, *args):
+        self.canvas.yview(*args)
+        self._remember_gallery_scroll()
+
+    def _remember_gallery_scroll(self):
+        position = self.canvas.yview()
+        if position:
+            self._maps_scroll = position[0]
+            self._gallery_scroll = position[0]
+
     def _scroll_gallery(self, event: tk.Event) -> None:
         self.canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+        self._remember_gallery_scroll()
 
-    def _art(self, record: MapRecord) -> Optional[tk.PhotoImage]:
-        if record.variant_id in self.images:
-            return self.images[record.variant_id]
-        if self.app is None:
+    def _art(self, item) -> Optional[tk.PhotoImage]:
+        if not item.art:
             return None
-        source = self.app.map_icon(record)
-        if source is None:
-            return None
+        if item.art_key in self.images:
+            return self.images[item.art_key]
         try:
-            original = tk.PhotoImage(file=str(source))
+            original = tk.PhotoImage(data=item.art, format="png")
             factor = max(1, math.ceil(max(original.width(), original.height()) / 184))
             photo = original.subsample(factor)
-            self.images[record.variant_id] = photo
+            self.images[item.art_key] = photo
             return photo
         except tk.TclError:
             return None
 
+    def _cancel_gallery(self):
+        self._gallery_generation = getattr(self, "_gallery_generation", 0) + 1
+        cancel = getattr(self, "_gallery_cancel", None)
+        if cancel is not None:
+            cancel.set()
+        self._gallery_pending = None
+        after_id = getattr(self, "_gallery_after_id", None)
+        self._gallery_after_id = None
+        if after_id is not None:
+            try:
+                self.root.after_cancel(after_id)
+            except tk.TclError:
+                pass
+
     def _render_gallery(self) -> None:
-        if not hasattr(self, "grid_frame") or not self.grid_frame.winfo_exists():
+        if self.closed or self.busy or self.view != "maps" or self.app is None or not hasattr(self, "grid_frame") or not self.grid_frame.winfo_exists():
             return
-        previous = self.canvas.yview()[0] if self.canvas.yview() else 0
-        for child in self.grid_frame.winfo_children():
-            child.destroy()
+        self._cancel_gallery()
+        generation = self._gallery_generation
+        self._gallery_pending = (generation, self.app)
+        self._maps_dirty = False
+        self._start_gallery_snapshot()
+
+    def _start_gallery_snapshot(self):
+        # One producer per window. A replacement request cancels, then waits for
+        # the previous plain-data worker; search cannot spawn an unbounded fleet.
+        if getattr(self, "_gallery_loading", False) or not self._gallery_pending:
+            return
+        generation, app = self._gallery_pending
+        self._gallery_pending = None
+        cancel = Event()
+        self._gallery_cancel = cancel
+        self._gallery_loading = True
+        def loaded(ok, snapshot):
+            self._gallery_loading = False
+            if self.closed:
+                return
+            if generation == self._gallery_generation and app is self.app and self.view == "maps" and not self.busy:
+                if ok:
+                    self._gallery_snapshot = snapshot
+                    self.imported_names = {item.record.archive_filename for item in snapshot}
+                    self._gallery_app = app
+                    self.gallery_count.configure(text=f"{len(snapshot)} imported")
+                    for item in snapshot:
+                        if item.notice:
+                            self.status.set(item.notice)
+                            break
+                    self._begin_gallery_batches(generation)
+                else:
+                    self.status.set("Local map catalogue needs inspection: " + str(snapshot))
+            self._start_gallery_snapshot()
+        self._background(lambda: gallery_snapshot(app, cancel), loaded)
+
+    def _begin_gallery_batches(self, generation):
+        if generation != self._gallery_generation or self.closed or self.view != "maps":
+            return
+        restore = getattr(self, "_gallery_restore_scroll", None)
+        self._gallery_scroll = restore if restore is not None else (self.canvas.yview()[0] if self.canvas.yview() else 0)
+        self._gallery_restore_scroll = None
+        self._gallery_old_cards = list(self.grid_frame.winfo_children())
         self.cards = {}
-        records = self._filtered()
-        if not records:
-            message = "Import a map archive to start your library." if not self.search.get().strip() else "No matching maps."
-            ttk.Label(self.grid_frame, text=message, padding=24, foreground=self.secondary).grid(row=0, column=0, sticky="w")
-        for index, record in enumerate(records):
-            selected = record.profile_id == self.selected_profile
-            border = self.accent if selected else self.border
-            card = tk.Frame(self.grid_frame, width=190, height=305, background=self.surface,
-                            highlightbackground=border, highlightthickness=2 if selected else 1,
-                            takefocus=True)
-            card.grid(row=index // max(1, self.columns), column=index % max(1, self.columns),
-                      padx=8, pady=8, sticky="n")
-            card.pack_propagate(False)
-            self.cards[record.profile_id] = card
-            artwork = tk.Canvas(card, width=184, height=183, background=self.surface, highlightthickness=0)
-            artwork.pack(fill="x")
-            photo = self._art(record)
-            if photo is None:
-                artwork.create_text(92, 91, text="▦", fill=self.secondary, font=("Helvetica Neue", 34))
-            else:
-                artwork.create_image(92, 91, image=photo)
-            label = tk.Label(card, text=_display_name(record.name), background=self.surface,
-                             foreground=self.text, font=("Helvetica Neue", 12, "bold"),
-                             anchor="nw", justify="left", height=2, wraplength=174)
-            label.pack(fill="x", padx=10)
-            state = self._verification_text(record)
-            badge = tk.Label(card, text=state, background=self.surface, foreground=self.secondary,
-                             font=("Helvetica Neue", 10), anchor="w")
-            badge.pack(fill="x", padx=10, pady=(2, 0))
-            metadata = self._metadata(record)
-            byline = tk.Label(card, text=f"{metadata.author or 'Author not provided'}\nCreated {metadata.created or 'date not provided'}",
-                              background=self.surface, foreground=self.secondary, anchor="w", justify="left",
-                              font=("Helvetica Neue", 10), wraplength=174)
-            byline.pack(fill="x", padx=10, pady=(3, 0))
-            for widget in (card, artwork, label, badge, byline):
-                widget.bind("<Button-1>", lambda _, item=record: self._select(item))
-                widget.bind("<Double-Button-1>", lambda _, item=record: self._map_details(item))
-                widget.bind("<MouseWheel>", self._scroll_gallery)
-            card.bind("<Return>", lambda _, item=record: self._select(item))
-            card.bind("<space>", lambda _, item=record: self._select(item))
-        self.grid_frame.update_idletasks()
+        self._gallery_items = filter_snapshot(self._gallery_snapshot, self.search.get(), self.map_filter.get(), self.sort_order.get())
+        self._gallery_index = 0
+        self._gallery_batch(generation)
+
+    def _gallery_batch(self, generation):
+        self._gallery_after_id = None
+        if self.closed or self.view != "maps" or generation != self._gallery_generation:
+            return
+        deadline = time.monotonic() + .008
+        count = 0
+        # Destruction is batched too; a previous large gallery must not block Tk.
+        while self._gallery_old_cards and count < 8 and time.monotonic() < deadline:
+            self._gallery_old_cards.pop().destroy()
+            count += 1
+        while not self._gallery_old_cards and self._gallery_index < len(self._gallery_items) and count < 8 and time.monotonic() < deadline:
+            index = self._gallery_index
+            self._create_gallery_card(index, self._gallery_items[index])
+            self._gallery_index += 1
+            count += 1
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        self.canvas.yview_moveto(previous)
-        self._selection_details()
+        if self._gallery_old_cards or self._gallery_index < len(self._gallery_items):
+            self._gallery_after_id = self.root.after(1, lambda: self._gallery_batch(generation))
+        else:
+            if not self._gallery_items:
+                message = "Import a map archive to start your library." if not self.search.get().strip() else "No matching maps."
+                ttk.Label(self.grid_frame, text=message, padding=24, foreground=self.secondary).grid(row=0, column=0, sticky="w")
+            used = {item.art_key for item in self._gallery_items if item.art_key}
+            self.images = {key: value for key, value in self.images.items() if key in used}
+            self.canvas.yview_moveto(self._gallery_scroll)
+            self._selection_details()
+
+    def _create_gallery_card(self, index, item):
+        record = item.record
+        selected = record.profile_id == self.selected_profile
+        border = self.accent if selected else self.border
+        card = tk.Frame(self.grid_frame, width=190, height=305, background=self.surface,
+                        highlightbackground=border, highlightthickness=2 if selected else 1,
+                        takefocus=True)
+        card.grid(row=index // max(1, self.columns), column=index % max(1, self.columns),
+                  padx=8, pady=8, sticky="n")
+        card.pack_propagate(False)
+        self.cards[record.profile_id] = card
+        artwork = tk.Canvas(card, width=184, height=183, background=self.surface, highlightthickness=0)
+        artwork.pack(fill="x")
+        photo = self._art(item)
+        if photo is None:
+            artwork.create_text(92, 91, text="▦", fill=self.secondary, font=("Helvetica Neue", 34))
+        else:
+            artwork.create_image(92, 91, image=photo)
+        label = tk.Label(card, text=_display_name(record.name), background=self.surface,
+                         foreground=self.text, font=("Helvetica Neue", 12, "bold"),
+                         anchor="nw", justify="left", height=2, wraplength=174)
+        label.pack(fill="x", padx=10)
+        state = item.verification
+        badge = tk.Label(card, text=state, background=self.surface, foreground=self.secondary,
+                         font=("Helvetica Neue", 10), anchor="w")
+        badge.pack(fill="x", padx=10, pady=(2, 0))
+        metadata = item.metadata
+        byline = tk.Label(card, text=f"{metadata.author or 'Author not provided'}\nCreated {metadata.created or 'date not provided'}",
+                          background=self.surface, foreground=self.secondary, anchor="w", justify="left",
+                          font=("Helvetica Neue", 10), wraplength=174)
+        byline.pack(fill="x", padx=10, pady=(3, 0))
+        for widget in (card, artwork, label, badge, byline):
+            widget.bind("<Button-1>", lambda _, item=record: self._select(item))
+            widget.bind("<Double-Button-1>", lambda _, item=record: self._map_details(item))
+            widget.bind("<MouseWheel>", self._scroll_gallery)
+        card.bind("<Return>", lambda _, item=record: self._select(item))
+        card.bind("<space>", lambda _, item=record: self._select(item))
+        self._localize_widgets(card)
 
     def _select(self, record: MapRecord) -> None:
         self.selected_profile = record.profile_id
@@ -730,12 +1033,12 @@ class LauncherWindow:
         self._selection_details()
 
     def _selection_details(self) -> None:
-        record = next((item for item in self._records() if item.profile_id == self.selected_profile), None)
-        if record is None:
+        item = next((item for item in self._gallery_snapshot if item.record.profile_id == self.selected_profile), None)
+        if item is None:
             self.detail.set("Choose a map to see its scenario and source details.")
         else:
-            info = self._metadata(record)
-            self.detail.set(f"{_display_name(record.name)} · {record.source_label}\nCreated: {info.created or 'Not provided'} · Updated: {info.updated or 'Not provided'} · {self._verification_text(record)}")
+            record, info = item.record, item.metadata
+            self.detail.set(f"{_display_name(record.name)} · {record.source_label}\nCreated: {info.created or 'Not provided'} · Updated: {info.updated or 'Not provided'} · {item.verification}")
         self._controls()
 
     def _selected_details(self) -> None:
@@ -1166,10 +1469,12 @@ class LauncherWindow:
             self._submit("Loading macOS voices…", list_voices, loaded)
 
     def _check_map_updates(self) -> None:
+        app = self.app
         def operation():
             remotes = fetch_catalogue()
-            if self.app: self.app.match_collection_sources(remotes)
-            return remotes, find_map_updates(self._records(), remotes)
+            if app:
+                app.match_collection_sources(remotes)
+            return remotes, find_map_updates(app.catalogue() if app else (), remotes)
         def finished(result):
             self.remote_records, candidates = result
             self.collection_loaded = True
@@ -1309,9 +1614,11 @@ class LauncherWindow:
             self.install_update_button.configure(state="normal" if ready else "disabled")
 
     def _submit(self, label: str, operation: Callable[[], object], finished: Optional[Callable[[object], None]] = None) -> None:
-        if self.busy:
+        if self.busy or getattr(self, "initializing", False) or self.closed:
             return
         self.busy = True
+        self._maps_dirty = True
+        self._cancel_gallery()
         self._log(label, "Started")
         self.status.set(label)
         self._controls()
@@ -1328,6 +1635,21 @@ class LauncherWindow:
         Thread(target=worker, daemon=True).start()
 
     def _poll(self) -> None:
+        if self.closed:
+            return
+        if hasattr(self, "background_results"):
+            for _ in range(16):
+                try:
+                    ok, value, finished = self.background_results.get_nowait()
+                except Empty:
+                    break
+                try:
+                    finished(ok, value)
+                except Exception as exc:
+                    self._log("Display background result", "Failed", str(exc))
+                    self.status.set("Background result needs inspection: " + str(exc))
+                if self.closed:
+                    return
         if getattr(self, "crash_monitor", None) is not None:
             self.crash_status.set(self.crash_monitor.status)
         speech = self.speech_process
@@ -1337,10 +1659,15 @@ class LauncherWindow:
                 self.status.set("Speech stopped: " + speech.error)
                 self._log("Read briefing", "Failed", speech.error)
         self._update_download_rows()
+        # A completion cannot overtake terminal row/activity delivery.
+        if hasattr(self, "download_events") and not self.download_events.empty():
+            self.root.after(10, self._poll)
+            return
         try:
             while True:
                 successful, value, finished = self.results.get_nowait()
                 self.busy = False
+                self._gallery_app = None
                 if successful:
                     if finished:
                         try:
@@ -1354,6 +1681,8 @@ class LauncherWindow:
                     messagebox.showerror("Railroads launcher", str(value), parent=self.root)
                 if self.closed:
                     return
+                if self.view == "maps" and not self.busy and getattr(self, "_maps_dirty", False):
+                    self._render_gallery()
                 self._controls()
         except Empty:
             pass
@@ -1362,9 +1691,11 @@ class LauncherWindow:
             self._close()
             if not self.root.winfo_exists():
                 return
-        self.root.after(100, self._poll)
+        self.root.after(10 if getattr(self, "initializing", False) else 100, self._poll)
 
     def choose_steam_library(self) -> None:
+        if self.busy or getattr(self, "initializing", False):
+            return
         location = filedialog.askdirectory(parent=self.root, title="Choose the steamapps folder, not Steam.app")
         if location:
             self._submit("Checking the selected Steam library…",
@@ -1372,7 +1703,21 @@ class LauncherWindow:
 
     def _library_chosen(self, result: object) -> None:
         assert isinstance(result, LauncherApplication)
+        self._cancel_gallery()
+        self._collection_generation = getattr(self, "_collection_generation", 0) + 1
+        self.collection_refreshing = False
+        self._gallery_snapshot = ()
+        self.images = {}
+        self.metadata_cache = {}
+        self.selected_profile = None
+        self._maps_scroll = 0.0
+        self.imported_names = set()
+        self.download_states.clear()
+        if getattr(self, "crash_monitor", None) is not None:
+            self.crash_monitor.close()
+            self.crash_monitor = None
         self.app = result
+        self._start_crash_monitor_async()
         self.status.set("Steam Mac game found in the selected library.")
         self._show(self._initial_view() if self.view == "welcome" else self.view)
 
@@ -1422,6 +1767,31 @@ class LauncherWindow:
         self._submit("Switching profile and starting Railroads…",
                      lambda: self._play_with_crash_monitor(profile_id),
                      lambda _: self.status.set("Railroads launched. Quit it before changing maps."))
+
+    def _start_crash_monitor_async(self):
+        self.busy = True
+        app = self.app
+        def create():
+            monitor = CrashMonitor(app, APP_VERSION)
+            try:
+                monitor.start()
+            except Exception:
+                monitor.close()
+                raise
+            return monitor
+        def ready(ok, monitor):
+            if self.closed or self.app is not app:
+                if ok:
+                    monitor.close()
+                return
+            self.busy = False
+            self.crash_monitor = monitor if ok else None
+            self._controls()
+            if self.view == "maps":
+                self._render_gallery()
+            if not ok:
+                self.crash_status.set("Crash monitoring needs inspection; you can still play.")
+        self._background(create, ready, dispose=lambda monitor: monitor.close())
 
     def _start_crash_monitor(self) -> None:
         try:
