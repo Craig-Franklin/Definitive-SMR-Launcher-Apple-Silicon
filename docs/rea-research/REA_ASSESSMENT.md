@@ -34,17 +34,21 @@ This is a focused integration review, not an exhaustive security or correctness 
 
 ## Recommended operating mode
 
-Use the deterministic local CLI and existing private indexes first. Query one function or reference set at a time. After legal/disclosure scope is resolved, a single persistent MCP session can reduce repeated provider imports for a sequence of new questions. Save its exact-query snapshot on close. Verify the active provider and cleanup receipt.
+Use the deterministic local CLI and existing private indexes first. Query one function or reference set at a time. Craig has now authorized local extraction. A separately scoped local-only persistent integration can reduce repeated provider imports for a sequence of new questions. Save its exact-query snapshot on close. Verify the active provider and cleanup receipt.
 
-Do not enable the whole MCP surface in a cloud agent just to get convenience. Tool annotations are useful descriptions, not an enforced sandbox. Build a bounded query/export interface as REA-04 if proprietary analysis is admitted. For strict local-only analysis, use manual CLI/Ghidra or a separately evaluated on-device model without external fallback; cloud Codex sees tool results it is given.
+Do not enable the whole MCP surface in a cloud agent just to get convenience. Tool annotations are useful descriptions, not an enforced sandbox. Build the private query/export interface as REA-04 under the current local-extraction authorization. For strict local-only analysis, use manual CLI/Ghidra or a separately evaluated on-device model without external fallback; cloud Codex sees tool results it is given.
 
-The initial installed-package smoke test produced zero snapshot cache entries; see [the validation record](VALIDATION.md). Cache acceleration is unproven on this setup. REA snapshots are intended as query caches, not substitutes for persistent Ghidra projects. Retain the existing exporter for large reusable indexes and reserve REA for questions not answered by those indexes. Neither workflow should automatically publish its output.
+The initial installed-package smoke test produced zero snapshot cache entries; see [the validation record](VALIDATION.md). A later document-bound installed-API query demonstrated one primitive cache hit; the built-in decompile CLI still omits that binding. Workflow caching remains unproven. REA snapshots are intended as query caches, not substitutes for persistent Ghidra projects. Retain the existing exporter for large reusable indexes and reserve REA for questions not answered by those indexes. Neither workflow should automatically publish its output.
 
 ## Alternatives and adoption decision
 
 - Existing Ghidra/export workflow: lowest integration cost; best for already-indexed functions and deterministic searches. Retain it.
 - REA + Ghidra: recommended targeted addition; original synthetic smoke test is the initial acceptance step.
 - Hopper or IDA: optional later only if a demonstrated Ghidra limitation blocks an important question and licensing/cost are agreed. No purchase is needed for the initial plan.
-- Complete engine reconstruction or broad automatic agent swarms: disproportionate scope for improving one crash family. Defer.
+- Full local corpus: now the chosen baseline for future building/debugging/crash work, using the existing resumable exporter. This does not mean recovered original source, a replacement engine or an agent swarm.
 
 Reassess adoption after one bounded investigation. Keep REA if it reduces analyst effort or reveals materially better evidence. Record a failure honestly if it only adds import time and tool-output volume.
+
+## Revised decision — 11 October 2026
+
+Create the broad reusable local corpus first, then use targeted REA queries for missing evidence. Preserve build/coverage accounting and reusable original knowledge notes. A single representative crash is a later use case, not a prerequisite. Second-machine replay, additional commercial providers and exhaustive cache tests are optional follow-ups when a concrete need appears.

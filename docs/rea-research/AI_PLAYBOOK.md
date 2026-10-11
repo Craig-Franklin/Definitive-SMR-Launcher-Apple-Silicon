@@ -2,7 +2,7 @@
 
 ## Resume capsule
 
-Read `README.md`, `VALIDATION.md`, this file and the current Project item first. Retrieve other documents by need. Initial objective: reproducible local tools and a reviewable research plan. Proprietary game analysis has an unresolved rights/disclosure prerequisite. Existing compatibility automation is paused. No initial game repair or compatibility claim is made.
+Read `README.md`, `VALIDATION.md`, this file and the current Project item first. Retrieve other documents by need. Current objective: a complete local corpus of installed game native modules and reusable original knowledge for future building, debugging and crash analysis. Craig authorized local decompilation on 11 October 2026; REA-03 records that settled decision and is not a license-resolution gate. Raw game-derived content remains local. Existing compatibility automation is paused.
 
 Repository writes belong only in `Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon`, on the research branch or a scoped child branch. Explicitly pass the repository to GitHub CLI commands: this fork's default CLI repository can resolve to upstream. Preserve the main checkout's unrelated dirty documents and unaccepted source. Never mutate the shared compatibility handoff or resume its workers from this research plan.
 
@@ -23,13 +23,13 @@ Do not default to high/xhigh for setup, discovery, project administration or rou
 
 ## Context and tool budget
 
-- One case, one question and one executable identity per investigation packet.
+- Bulk corpus work covers all distinct in-scope native modules/slices, sequentially and with per-module checkpoints. Later interpretation uses one question and one matching build per packet.
 - Initial packet target: at most 3,000 tokens of task/evidence references. Tool output target: 2,000 tokens per response. These are soft project limits; retain full evidence privately and label truncated views explicitly.
-- Query existing indexed metadata before decompilation. Retrieve one function and bounded neighbors, not an entire program. Increase scope only to test an explicit hypothesis.
-- Default initial pass: at most 12 new analysis queries or 20 minutes of active investigation, whichever comes first. Stop with findings and a precise next input; do not loop on uncertainty. A larger batch needs a documented scope/budget decision, not repeated automatic retries.
+- Reuse existing imports/exports after identity and coverage checks. Bulk export belongs to persistent Ghidra plus ExportEngine.java; do not issue one isolated REA CLI import per function. After corpus creation, retrieve only relevant functions and bounded neighbors locally.
+- The 12-query/20-active-minute limit applies to exploratory interpretation, not the authorized full bulk export. Bulk jobs use explicit module manifests, per-function timeout, bounded sequential resource use, progress receipts and resumable checkpoints. Stop a failing module, preserve its evidence and continue independent modules; never loop automatic retries.
 - Reuse one provider session for related new queries after approved integration. Store successful snapshots and cache by binary SHA-256, provider/version/profile and exact query. Never infer cache validity from a filename.
 - Preserve full output locally; summarize with deterministic projections. Do not print package manifests, full doctor catalogs or broad handoff state into every model context.
-- Reuse accepted test results until a relevant change invalidates them. Run a meaningful failing regression, implement the change, then focused and required checks.
+- Reuse accepted test results until a relevant change invalidates them. Run focused checks for changed code. Do not rerun the synthetic doctor/compile/decompile smoke, second-machine replay, broad provider/profile tests or dependency audits as routine blockers. Recheck an identity/version only when its inputs change or evidence is missing.
 
 ## Evidence contract
 
@@ -48,12 +48,12 @@ Address rules: distinguish runtime virtual address, image-relative offset, prefe
 
 A provider timeout can leave analysis running. Preserve the exact response, session ID and cleanup state. `cleanup_incomplete` is not success. Do not blindly retry or broaden a process kill. Retain ownership and resolve only the session's resources.
 
-## Conditional investigation protocol
+## Corpus and investigation protocol
 
-After REA-03 permits the exact activity:
+Local extraction is authorized; proceed without another license/scope interview:
 
-1. Verify the current accepted case evidence and matching immutable input; reuse the original Ghidra index if available and complete.
-2. State one falsifiable question. Inspect minimal callers/callees and relevant references. Keep game pseudocode/disassembly local under the disclosure decision.
+1. Inventory both installed app locations, deduplicate native modules/slices, preserve independent input copies and hash/UUID/tool identities. Reuse current private exports after digest and coverage checks. Extend the existing exporter/runner rather than starting a parallel decompiler.
+2. Build the full private export with per-module completion and failure accounting. Then state a falsifiable question for each analysis task, inspect the relevant local neighborhood and preserve the observations privately. Keep pseudocode/disassembly out of cloud tool results.
 3. Seek a counterexample and reconcile contradictory evidence. Stop at a missing resource/provider binding instead of inventing the asset identity.
 4. Describe behavior in original prose. Write an original synthetic regression from the independently stated condition; retain how it was specified.
 5. Prefer a diagnostic or narrowly applicable prepared-copy transformation over executable patching. Refuse unknown build/asset identities. Preserve features, originals and saves; require idempotence and rollback.
@@ -62,10 +62,18 @@ After REA-03 permits the exact activity:
 
 ## Publication and CI
 
-No proprietary input, derived function export, REA snapshot or raw trace in commits, issue bodies, PR attachments, Actions logs/caches/artifacts, model prompts or shared Pages. The initial helper accepts only its built-in original fixture. Future export tooling must fail closed on fields/paths outside an explicit allowlist and must be tested against disguised text/JSON payloads, symlinks and wrong roots.
+No proprietary input, derived function export, REA snapshot or raw trace in commits, issue bodies, PR attachments, Actions logs/caches/artifacts, cloud model prompts or shared Pages. The current Python helper accepts only its built-in original fixture; extend it for game module/slice provenance without pretending that support already exists. Use strict output projections for cloud-visible operation receipts; raw local queries may stay expressive. Publish reviewed original analysis and original tools through explicit candidate-file review. Retain disguised payload, symlink/root and output-preservation regressions when changing the boundary.
 
 A publication scanner supports human review; it does not establish intellectual-property rights. Preserve original attribution and dependency licenses. Use signed commits, exact fork guards and remote readback. No automatic merge/release follows from this research plan.
 
 ## Required result format
 
 Return a brief user summary: what was learned, what it changes, confidence/limits, and the next useful action. Put technical detail in the case record: inputs, command/query, observations, hypotheses, counterexamples, tests, resource use, status and open questions. Use standard English rather than long strings of internal gate labels.
+
+## Avoidable work removed
+
+No rights-resolution prerequisite, second-machine requirement before using this Mac, repeated passed smoke checks, all-provider/cache-profile campaign, autonomous workers, broad agent registration or requirement to finish a particular crash before building the corpus. REA cache replay is optional acceleration, not a prerequisite for persistent exports. Keep identity/input-preservation, useful failure/timeout accounting and exact publication review because they prevent wasted or unsafe output.
+
+## AI session handoff
+
+Maintain two views: the private detailed corpus and compact original knowledge notes. Each note states the question/subsystem in original language, matching build reference, evidence IDs, observation versus hypothesis, confidence, counterexamples and remaining unknowns. A future cloud session receives only reviewed original notes and safe operational metadata. It asks a local deterministic query to locate evidence without receiving raw code. Raw semantic inspection remains local; do not promise that a cloud model can inspect the full local corpus without disclosure. Preserve a short local resume record after each completed module or accepted finding.

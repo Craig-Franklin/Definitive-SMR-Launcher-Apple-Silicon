@@ -1,6 +1,6 @@
 # Private evidence index and publication projection
 
-The original Python standard-library helper `scripts/research/rea/evidence.py` implements the REA-04 synthetic slice. It does not analyze executables or establish rights. Only the built-in `synthetic-bounded-index` case is supported. Its target identity is the SHA-256 of our fixture source; its tool identity is the SHA-256 of `toolchain.json`. These are source/configuration identities, **not a compiled executable identity**. A game case requires a separate design and REA-03 resolution.
+The original Python standard-library helper `scripts/research/rea/evidence.py` implements the REA-04 synthetic slice. It does not analyze executables or establish rights. Only the built-in `synthetic-bounded-index` case is supported. Its target identity is the SHA-256 of our fixture source; its tool identity is the SHA-256 of `toolchain.json`. These are source/configuration identities, **not a compiled executable identity**. Game-corpus support is the next REA-04 implementation under the current local-extraction authorization; it requires module/slice identities and private output handling, not another REA-03 decision.
 
 Use an existing absolute private directory outside every Git worktree. Put original synthetic query outputs there. Never pass proprietary evidence to this workflow under the present authorization. Example commands (replace the private root):
 

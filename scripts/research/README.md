@@ -1,7 +1,7 @@
 # Engine research and map diagnostics
 
 For the optional pinned REA toolchain, original-fixture smoke test, research roadmap
-and private-data boundary, start with [Reproducible stability research](../../docs/rea-research/README.md).
+and private-data boundary, start with [Local game knowledge base](../../docs/rea-research/README.md).
 
 ## Broader per-scenario audit
 
@@ -71,7 +71,7 @@ python3 -m unittest discover -s tests -p test_industry_registry_audit.py -v
 
 `ExportEngine.java` is an original Ghidra postscript for a privately owned, independently copied executable. It exports the current analyzed program without patching its code or changing its function definitions. Decompiled output is reconstructed pseudocode; it is not recovered original source.
 
-Keep executable copies, Ghidra projects, logs, generated indexes and pseudocode outside the public checkout or in an ignored private evidence directory. The exporter script itself contains no game bytes.
+Keep executable copies, Ghidra projects, logs, generated indexes and pseudocode outside every Git worktree in the private local research directory. The exporter script itself contains no game bytes. The REA project now authorizes bulk local extraction of all distinct installed game native modules/slices; raw output must not be returned to cloud model tools. Use a bounded operational projection and private logs. Review original analysis separately for publication.
 
 ## Run
 
@@ -85,7 +85,7 @@ analyzeHeadless /absolute/private/projects EngineResearch \
   -max-cpu 4
 ```
 
-Ghidra project paths cannot contain dot-prefixed path components. A nonhidden private project directory works; ordinary export files may be placed in an ignored `.handoff` directory. Configure Ghidra's JVM memory limit separately when processing a large executable.
+Ghidra project paths cannot contain dot-prefixed path components. Use a nonhidden private project directory outside Git for projects and exports; do not write research output into the paused compatibility `.handoff`. Configure Ghidra's JVM memory limit separately when processing a large executable.
 
 To export an already analyzed program or resume an interrupted export:
 

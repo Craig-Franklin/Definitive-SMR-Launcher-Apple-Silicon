@@ -2,7 +2,7 @@
 
 ## Scope
 
-This setup validates REA on our original C fixture. It does not import, decompile, launch or modify the game. It does not register an MCP server or install agent instructions globally. Tool installation uses the network; native fixture analysis runs locally. No paid provider or API key is required.
+The commands in this setup validate REA on our original C fixture and remain synthetic-only. The project now also authorizes full local game extraction using the existing Ghidra/exporter workflow; see README.md. Do not make smoke.py accept a game target. No global MCP registration, game execution or mutation is part of setup. No paid provider or API key is required. First-machine acceptance is already recorded: do not rerun the smoke for routine sessions.
 
 ## Prerequisites
 
@@ -40,7 +40,7 @@ The helper checks scoped provider readiness, builds our x86-64 fixture, decompil
 
 Each step records elapsed time and exit status. The fixture lane sets a 512 MiB JVM heap and 120-second provider startup deadline. The heap does not cap total RSS and the startup deadline does not bound every operation. The helper has no external whole-process watchdog: if REA stalls beyond its documented deadline, retain the run and inspect its owned processes; do not restart automatically or kill unrelated Java processes. Production investigation limits belong in REA-04.
 
-## Local directory layout for future admitted research
+## Private corpus directory layout
 
 ```text
 SMR Research/
@@ -59,12 +59,18 @@ Use a separate clone/worktree for publication. Never point broad agent indexing,
 
 ## Optional AI integration, after the disclosure decision
 
-Use REA's pinned CLI for local manual work first. Do not run global `rea setup` as part of this initial setup. When MCP becomes appropriate, inspect the pinned setup dry-run and select only the intended client/profile, preserve its prior configuration, use absolute pinned binary/provider paths, verify effective registrations, and restart that client. Record rollback instructions from the actual diff. REA tool results sent to a cloud assistant leave the machine even when the provider runs locally.
+Use REA's pinned CLI for local manual work first. Do not run global `rea setup` as part of this initial setup. If a separately scoped local-only integration becomes useful, inspect the pinned setup dry-run and select only the intended client/profile, preserve its prior configuration, use absolute pinned binary/provider paths, verify effective registrations, and restart that client. Record rollback instructions from the actual diff. REA tool results sent to a cloud assistant leave the machine even when the provider runs locally.
 
-For genuinely local-only proprietary analysis, use manual Ghidra/CLI or evaluate an on-device model separately with network/external fallbacks disabled and verified. This project has not installed or benchmarked such a model.
+For raw local-only analysis, use local Ghidra/CLI/manual inspection. An on-device model is optional later work with network/external fallbacks disabled and verified; it is not required to create/search the corpus. This project has not installed or benchmarked such a model.
 
 ## Reproduce and roll back
 
-A second machine should check out this branch, install the specified tools, run `npm ci`, run the fixture helper and compare structured behavior and observed versions. Exact timings are not acceptance criteria. Preserve each receipt independently.
+As a later portability check, a second machine should check out this branch, install the specified tools, run `npm ci`, run the fixture helper and compare structured behavior and observed versions. Exact timings are not acceptance criteria. Preserve each receipt independently.
 
 To stop using this setup, leave the optional directory unused or remove only its generated `node_modules` after confirming the exact path. No global agent configuration or launcher runtime was changed. Retain private receipts and any future authorized evidence according to the chosen retention policy; do not delete them as a routine cleanup side effect.
+
+## Bulk extraction implementation path
+
+Use the existing persistent Ghidra project and ExportEngine.java instructions in scripts/research/README.md. First reconcile private existing exports with the module manifest; do not reimport a valid completed module. A small original runner must check private roots and copies, assign one output identity per module/slice/tool profile, redirect all provider output to private logs, preserve progress/completion/failure receipts and expose only allowlisted operational fields to cloud orchestration. Inspect exporter assumptions before admitting game output; it is not itself a publication gate. Keep all code, function metadata, strings, raw inventories and databases private.
+
+Bulk extraction may take longer than an exploratory 20-minute analysis pass. Checkpoint per module and report progress without repeatedly restarting imports. The next implementation is this runner plus actual module/slice index support; no completed game corpus is claimed by these setup instructions.

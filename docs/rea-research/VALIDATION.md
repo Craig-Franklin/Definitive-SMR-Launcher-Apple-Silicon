@@ -1,6 +1,16 @@
 # Validation and current status
 
-Checked 11 October 2026 in the isolated research worktree. These results apply to tooling and original synthetic code, not the game.
+Updated 11 October 2026 in the isolated research worktree. The current project scope below supersedes the initial synthetic-only plan. Historical test results remain evidence of what was actually run.
+
+## Current scope and next work
+
+Craig authorized full local game decompilation and asked for a reusable knowledge base for future building, debugging and crash analysis. REA-03 now records that authorization and the raw-local/reviewed-original-publication boundary; license resolution is no longer a project dependency. First-machine toolchain acceptance is sufficient to proceed. Second-machine replay, exhaustive provider/cache testing and a broad dependency audit are follow-ups rather than blockers. No local game corpus is claimed complete.
+
+A fresh metadata-only inventory inspected both known app locations without decompilation or execution. The small Applications bundle contained three regular files and no native modules. The Steam app contained 536 regular files, six distinct native module hashes and three symlinks excluded from traversal. Architecture/UUID metadata tools succeeded for all six modules; observed architecture sets were x86_64 and i386+x86_64. Slice/dependency/symlink classification remains part of REA-04. Private paths, module identifiers and full inventories stay in the local receipt.
+
+The next ready implementation is the private module/slice manifest and a small resumable runner around the existing ExportEngine.java, reusing any matching completed exports. Then build original subsystem notes and compact AI session handoffs. See README.md for acceptance. Keep compatibility automation paused and raw outputs out of cloud tool responses. No new smoke checks were needed for this documentation revision.
+
+## Historical synthetic validation — before scope expansion
 
 ## Observed results
 
@@ -26,15 +36,13 @@ A second run of the final helper also passed: first query 6.191 s, repeat 5.448 
 
 ## Cache finding and decision
 
-Upstream source/docs describe exact-query caching, but the installed 6.4.0 CLI decompilation test produced a snapshot with no executable cache bindings. A snapshot file's existence therefore cannot be used as evidence of saved import time. The source review and npm build have not been proven equivalent. The root cause of the missing cache entries is not established.
+Upstream source/docs describe exact-query caching, but the installed 6.4.0 CLI decompilation test produced a snapshot with no executable cache bindings. A snapshot file's existence therefore cannot be used as evidence of saved import time. The source review and npm build have not been proven equivalent. At this point the cause was not established; the later document-bound investigation below explains the installed CLI limitation.
 
-Keep this result as a concrete acceptance item in REA-04. Test the pinned CLI/MCP operation and profile before relying on caching; collect entry counts, replay evidence and provider-start observations. Do not upgrade or change providers just to obtain a favorable result. Reuse the existing private export/index in the meantime. The optional REA adoption recommendation does not depend on claiming a cache win.
+The later bounded investigation below addressed this acceptance item with entry counts, exact replay and bridge-event evidence. Additional cache-profile testing is not a corpus prerequisite. Do not upgrade or change providers just to obtain a favorable result. Reuse the existing private export/index in the meantime. The optional REA adoption recommendation does not depend on claiming a cache win.
 
-## Limitations and next work
+## Earlier limitations and next-work decision (superseded)
 
-Game-analysis rights and AI disclosure scope are unresolved. A full dependency security audit and exhaustive review of REA are not complete. The synthetic-only evidence index and closed publication projection are implemented; see EVIDENCE_INDEX.md. Proprietary-case support remains future, rights-dependent work. JVM heap is bounded for the fixture, but total memory and whole-run time are not hard-capped by the helper.
-
-The next useful tasks are REA-03 (rights decision) and a second-machine REA-02 replay. Original-source diagnostics and publication-check development can be scoped independently. Game-specific investigation remains conditional; existing compatibility automation remains paused.
+The initial plan deferred game extraction and prioritized rights resolution and another-machine replay. The current authorization and roadmap replace that ordering. Technical limitations remain: the evidence helper is synthetic-only, a full dependency audit has not been performed, and the fixture JVM heap limit does not cap total RSS or whole-run time. These observations do not require repeating the passed tests.
 
 ## REA-04 synthetic implementation (11 October 2026)
 
@@ -48,4 +56,4 @@ The initial CLI zero-entry result remains valid: built-in decompile caching is l
 
 Effective session evidence: gpt-6.1-sol, low effort, approval never, sandbox danger-full-access, from the current session turn_context. Token usage unavailable. No additional workers, paid APIs, cloud registrations or game access.
 
-Resume: original REA-04 tooling is ready for draft review. Keep Project REA-04 In Progress for review and broader acceptance (including timeout/cleanup fault injection); REA-03 is unresolved and REA-02 still needs another machine. Do not resume compatibility automation. Private cache receipts are under the existing synthetic receipt directory in a cache-probe-bound-document subdirectory; no raw receipt is published.
+Earlier resume instruction, superseded by the current scope above: original REA-04 tooling was ready for draft review while rights and portability were pending. The synthetic helper remains useful but needs real module/slice support for the corpus. Private cache receipts are under the existing synthetic receipt directory in a cache-probe-bound-document subdirectory; no raw receipt is published.
