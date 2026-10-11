@@ -24,6 +24,12 @@ also lack a termination object and typed numeric VM information. A larger upload
 cannot supply facts absent from the source. #195 was manually submitted and does
 not establish automatic reporting. #193 has separate controlled-operation
 evidence; that evidence does not make its collector scenario field known.
+Separately joined archived process/save/publication receipts now bind #195 to
+the original Balkans save attempt. Its exact executable/module/slice and all
+18 ordered supported game frames match the earlier accepted source path in
+[#106](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/106#issuecomment-6062494966).
+The original fault instruction and target remain unknown. A stale prospective
+root-observation placeholder was excluded from that join.
 
 ## Family signature version 1
 
@@ -52,6 +58,33 @@ share a mechanism. Reusing a fix requires a diagnosed defect and an independentl
 checked applicability rule covering build, resource/model structure, dependencies,
 provider resolution and operation. Preserve input identities, originals, features
 and saves. Static matches and runtime repair acceptance remain separate results.
+
+## Offline comparison command
+
+Compare explicitly selected sanitized payload JSON files from the source checkout:
+
+```sh
+PYTHONPATH=src .venv/bin/python -m smr_launcher.crash_evidence payload-a.json payload-b.json
+```
+
+The command reads at most 32 files, 1 MiB per file and 8 MiB total. It rejects
+leaf symlinks, nonregular files, changed/short reads, duplicate JSON fields and
+invalid payloads. It performs no report discovery, raw report parsing, collection,
+publication, network access or game action. Output appears only after all inputs
+pass; failures return exit code 1 with a fixed error that excludes input paths.
+
+Version-1 comparison JSON groups family-v1 keys and retains each incident's
+coverage and limits. Identical payload duplicates count once; conflicting
+payloads for one report digest refuse the entire comparison. Unknown signatures
+remain unclassified. `cross_archive_match` requires at least two distinct known
+archive hashes; a different variant or unknown archive does not satisfy it.
+This reports observed signature matches across archives, not a map count,
+shared cause or permission to reuse a repair. Different keys can share a defect.
+
+The output includes only report/archive/variant/scenario digests, derived keys,
+fixed evidence labels and counts. It excludes diagnostic frames/registers,
+timestamps, process ages, paths and arbitrary source text. Original report
+payloads, issue grouping and family-v1 semantics remain unchanged.
 
 ## Process age and payload versions
 
