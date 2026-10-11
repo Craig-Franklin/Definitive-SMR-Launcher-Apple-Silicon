@@ -27,6 +27,7 @@ if [[ -n "${SMR_RELEASE_IDENTITY:-}" ]]; then
   signing=(--codesign-identity "$SMR_RELEASE_IDENTITY")
 fi
 mkdir -p build
+xcrun swiftc -parse-as-library -swift-version 5 -target arm64-apple-macosx13.0 -O src/native/*.swift -o build/SMRLauncher
 xcrun swiftc -parse-as-library -target arm64-apple-macosx13.0 -O scripts/translate_macos.swift -o build/smr-translate
 ./scripts/create_macos_icon.sh
 print -r -- "{\"schema\":1,\"team_id\":\"${SMR_APPLE_TEAM_ID:-}\",\"repository\":\"Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon\",\"bundle_id\":\"com.craigfranklin.smrlauncher.applesilicon\"}" > build/release-policy.json
@@ -46,14 +47,37 @@ print -r -- "{\"schema\":1,\"team_id\":\"${SMR_APPLE_TEAM_ID:-}\",\"repository\"
 
 bundle="$dist_root/Definitive SMR Launcher Apple Silicon.app"
 test -d "$bundle"
+cp build/SMRLauncher "$bundle/Contents/MacOS/SMRLauncher"
+plutil -replace CFBundleExecutable -string SMRLauncher "$bundle/Contents/Info.plist"
+plutil -replace LSMinimumSystemVersion -string 13.0 "$bundle/Contents/Info.plist"
 version=$("$python" -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')
 plutil -replace CFBundleShortVersionString -string "$version" "$bundle/Contents/Info.plist"
 plutil -replace CFBundleVersion -string "$version" "$bundle/Contents/Info.plist"
 if [[ -n "${SMR_RELEASE_IDENTITY:-}" ]]; then
+  codesign --force --options runtime --timestamp --sign "$SMR_RELEASE_IDENTITY" "$bundle/Contents/MacOS/Definitive SMR Launcher Apple Silicon"
+  codesign --force --options runtime --timestamp --sign "$SMR_RELEASE_IDENTITY" "$bundle/Contents/MacOS/SMRLauncher"
   codesign --force --options runtime --timestamp --sign "$SMR_RELEASE_IDENTITY" "$bundle"
 else
+  codesign --force --sign - "$bundle/Contents/MacOS/Definitive SMR Launcher Apple Silicon"
+  codesign --force --sign - "$bundle/Contents/MacOS/SMRLauncher"
   codesign --force --sign - "$bundle"
 fi
+lipo -archs "$bundle/Contents/MacOS/SMRLauncher" | grep -qx arm64
 lipo -archs "$bundle/Contents/MacOS/Definitive SMR Launcher Apple Silicon" | grep -qx arm64
 codesign --verify --deep --strict "$bundle"
+.venv/bin/python - "$bundle" <<'PY'
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+helper = Path(sys.argv[1]) / "Contents/MacOS/Definitive SMR Launcher Apple Silicon"
+probe = subprocess.run(
+    [str(helper), "--native-protocol-check"],
+    input='{"id":"package-check","method":"ping"}\n',
+    text=True, capture_output=True, check=True, timeout=20,
+)
+if json.loads(probe.stdout) != {"id": "package-check", "ok": True, "data": {"protocol": 1}}:
+    raise RuntimeError("The packaged services did not preserve their JSON pipes")
+PY
 print "Built: $bundle"

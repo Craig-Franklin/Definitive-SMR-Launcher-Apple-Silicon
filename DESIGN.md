@@ -119,6 +119,7 @@ CLI is a partial bridge, not a complete frontend API. Native preview evidence an
 the migration boundary are recorded in the review record. The current Tk feasibility
 table remains useful baseline evidence; it no longer constrains the selected frontend.
 
-This package changes no production app source or evidence contract. #218–#221
+Craig subsequently requested implementation. The [native implementation record](docs/ui-workflow/IMPLEMENTATION.md)
+describes the production frontend, retained service boundary and verification limits. #218–#221
 inherit B and these shared rules. #222 records the selected composition and
 review evidence; implementation acceptance remains in the existing follow-ups.

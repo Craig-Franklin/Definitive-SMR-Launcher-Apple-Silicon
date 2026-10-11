@@ -117,14 +117,14 @@ Ruff is pinned in `requirements-dev.txt`; correctness and unused-code rules live
 local Markdown links. Maintained Mac code, tests and ordinary tooling now follow the
 formatter, with the exceptions below. Keep unrelated formatting out of subsequent changes.
 
-Of the 36 entries in `.ruff-format-baseline`, 32 preserve source identities: native-capture
+Of the 34 entries in `.ruff-format-baseline`, 32 preserve source identities: native-capture
 and individual-stop bundles, closed runtime paths, and analyzer/resource modules
 whose bytes are bound into research receipts. They are not a general style backlog.
 Changes to those files need the applicable authority and evidence review before
 adopting a new identity; formatting cannot silently renew their acceptance. Narrow
 lint exceptions preserve existing declarations in those sources. Do not add exemptions.
-The other four entries are packaging helpers: `backend_entry.py`, `dmg_settings.py`,
-`launcher_entry.py` and `verify_dmg.py` in `scripts/`. Adopt their formatting with the
+The other two entries are packaging helpers: `backend_entry.py` and `dmg_settings.py`
+in `scripts/`. Native frontend packaging adopted `launcher_entry.py` and `verify_dmg.py`. Adopt their formatting with the
 next required packaging change, avoiding a package build solely for style changes.
 The inherited Windows launcher remains outside the maintained lint/format scope.
 

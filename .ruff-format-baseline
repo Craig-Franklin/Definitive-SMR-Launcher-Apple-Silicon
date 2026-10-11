@@ -3,7 +3,6 @@
 # See CONTRIBUTING.md for scope. New exemptions remain forbidden.
 scripts/backend_entry.py
 scripts/dmg_settings.py
-scripts/launcher_entry.py
 scripts/research/audit_map_library.py
 scripts/research/batch_smoke.py
 scripts/research/check_industry_registry.py
@@ -33,7 +32,6 @@ scripts/research/native_window_capture/tests/test_geometry_fake.py
 scripts/research/native_window_capture/tests/test_independent_fake.py
 scripts/research/orca_load_driver.py
 scripts/research/runner_journal.py
-scripts/verify_dmg.py
 src/smr_launcher/industry_registry.py
 src/smr_launcher/live_run_authority.py
 src/smr_launcher/resource_identity.py

@@ -178,9 +178,21 @@ def save_digest(path):
 
 
 def confirm_checkpoint(
-    store, ctx, kind, attempt_id, *, game="", save_id="", failure=None, checkpoint="", at=None
+    store,
+    ctx,
+    kind,
+    attempt_id,
+    *,
+    game="",
+    save_id="",
+    failure=None,
+    checkpoint="",
+    at=None,
+    continued=False,
 ):
-    """One explicit confirmation, optionally binding a new/resumed game first."""
+    """One explicit confirmation, optionally binding a game or confirming continuation atomically."""
+    if type(continued) is not bool or (continued and kind != "save_reopened"):
+        raise HistoryError("Continued play can only accompany an exact save reopened confirmation")
     rows = store.records()
     when = at or utcnow()
     batch, game_id = [], ""
@@ -214,6 +226,8 @@ def confirm_checkpoint(
             if failure:
                 when = failure["at"]
         batch.append(store.event(ctx, kind, at=when, **fields))
+        if continued:
+            batch.append(store.event(ctx, "continued_play", at=when, **fields))
     return store.append(*batch)
 
 

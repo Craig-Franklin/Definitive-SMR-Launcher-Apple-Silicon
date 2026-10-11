@@ -8,7 +8,8 @@ collect missing details/images and record play or problem observations. He repor
 repeated reloads, a heavy interface and tedious information entry. Success means a
 stable browsing context, less repeated input and clear, trustworthy evidence.
 
-The current product is a macOS desktop application written in Python/Tk. Familiar Mac
+The approved frontend is a macOS desktop application using SwiftUI/AppKit, with
+Python services and advanced Tk tools retained. Familiar Mac
 navigation, system typography, keyboard operation and native controls take priority
 over visual novelty. The application runtime has no Python dependencies. An HTML
 wireframe is a review artifact.
@@ -39,3 +40,7 @@ The supplied brief resolves the discovery questions; no repeated interview is
 needed. Proposed window sizes, density and information grouping are hypotheses for
 wireframe review. Actual task timings, library scale, action reductions and native
 accessibility require later implementation evidence in #218–#221.
+
+Craig approved the SMR Native Design Review for implementation. The
+[native implementation record](docs/ui-workflow/IMPLEMENTATION.md) describes the
+built frontend and remaining acceptance evidence.
