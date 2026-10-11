@@ -39,7 +39,7 @@ Local native benchmarks used optimized Swift 5 language mode with Apple Swift 6.
 | Same generated PNG: thumbnail creation plus PNG encoding | p95 10.68 ms; excludes file access and larger images |
 | 250 image-bearing MapItem constructions, 20 samples | p95 119.31 ms; model work already runs off the main actor |
 
-Separate Python in-memory benchmarks used fictional event dictionaries and mocked annotation reads. Each history approach had three samples; projections had four and scalar/deep-copy comparison five. These are diagnostic measurements with limited sample counts, not acceptance targets:
+Separate Python in-memory benchmarks used fictional event dictionaries and mocked annotation reads. Each history approach had three timed samples; snapshot projection and JSON emission had three, and scalar/deep-copy comparison five. A fourth, untimed snapshot call supplies the reported total annotation-read count. These are diagnostic measurements with limited sample counts, not acceptance targets:
 
 - 1,000 exact map contexts and 10,000 events: current repeated summary scan median 3,156.193 ms; grouping once then running the unchanged reducer median 13.103 ms. Complete outputs matched.
 - 1,000 cached maps with 32 KiB art: native projection median 38.914 ms, excluding annotation disk access. Four projections still made 4,000 annotation-load calls.
