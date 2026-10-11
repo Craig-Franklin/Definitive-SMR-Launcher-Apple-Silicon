@@ -90,6 +90,21 @@ Advanced-tool Quit requests pass through the native draft warning. Closing the
 advanced window hides it. If an existing update dialog cancels shutdown, later
 quit requests require fresh approval. Disconnected native drafts still warn.
 
+The hidden Python/Tk service uses the macOS accessory activation policy so it does
+not appear as a second ordinary app in the Dock or app switcher. Tk establishes its
+own application object before the service requires that policy. Explicitly showing
+the existing advanced window temporarily restores regular policy and its menus;
+hiding it restores accessory policy. Both the policy setter result and readback are
+checked. A local isolated Tk fixture, without launcher initialization or personal
+data, confirmed accessory → regular → accessory through public NSWorkspace reads.
+
+Craig subsequently requested that all advanced tools join the main native design.
+The separate Tk window is a migration boundary, not the intended final interface.
+Integrate these workflows into the relevant native destinations and contextual
+inspectors, preserving validation and explicit consent. Remove Tk ownership once
+its remaining UI and event-loop responsibilities have native replacements. A full
+Python service rewrite is not a prerequisite for this interface integration.
+
 ## Verification and limits
 
 Local full suite before the final quit correction: **977 tests passed** on Apple

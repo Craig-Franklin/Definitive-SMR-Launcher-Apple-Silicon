@@ -1,6 +1,7 @@
 """Synthetic bridge, private presentation, history and lifecycle checks; no game."""
 
 import base64
+import ctypes
 from dataclasses import replace
 import io
 import os
@@ -11,13 +12,18 @@ from tempfile import TemporaryDirectory, gettempdir
 from threading import Event
 from types import SimpleNamespace
 from unittest import TestCase
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 import zlib
 
 from smr_launcher.annotations import AnnotationStore, validate_image
 from smr_launcher.application import MapRecord
 from smr_launcher.map_metadata import MapMetadata
-from smr_launcher.native_backend import NativeBackendWindow, NativeLibrary, main
+from smr_launcher.native_backend import (
+    NativeBackendWindow,
+    NativeLibrary,
+    main,
+    set_activation_policy,
+)
 from smr_launcher.play_history import HistoryError, PlayHistoryStore, context, digest
 
 
@@ -451,7 +457,79 @@ class NativeLibraryTests(TestCase):
         fetch.assert_not_called()
 
 
+class NativeActivationPolicyTests(TestCase):
+    def test_non_mac_does_not_load_appkit(self):
+        with (
+            patch("smr_launcher.native_backend.sys.platform", "linux"),
+            patch("smr_launcher.native_backend.ctypes.CDLL") as load,
+        ):
+            set_activation_policy()
+            set_activation_policy(advanced=True)
+        load.assert_not_called()
+
+    def test_policy_uses_typed_calls_and_checks_apple_result_and_readback(self):
+        for advanced, accepted, actual in (
+            (False, True, 1),
+            (True, True, 0),
+            (False, False, 1),
+            (False, True, 0),
+        ):
+            with self.subTest(advanced=advanced, accepted=accepted, actual=actual):
+                objc = Mock()
+                objc.sel_registerName.side_effect = lambda name: name
+                change, current = Mock(return_value=accepted), Mock(return_value=actual)
+                with (
+                    patch("smr_launcher.native_backend.sys.platform", "darwin"),
+                    patch("smr_launcher.native_backend.ctypes.CDLL", return_value=objc),
+                    patch.object(ctypes.c_void_p, "in_dll", return_value=ctypes.c_void_p(123)),
+                    patch(
+                        "smr_launcher.native_backend.ctypes.CFUNCTYPE",
+                        side_effect=[Mock(return_value=change), Mock(return_value=current)],
+                    ) as signature,
+                ):
+                    if accepted and actual == (0 if advanced else 1):
+                        set_activation_policy(advanced=advanced)
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, "macOS refused"):
+                            set_activation_policy(advanced=advanced)
+                change.assert_called_once_with(123, b"setActivationPolicy:", 0 if advanced else 1)
+                current.assert_called_once_with(123, b"activationPolicy")
+                self.assertEqual(
+                    signature.call_args_list,
+                    [
+                        call(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_long),
+                        call(ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p),
+                    ],
+                )
+
+    def test_pre_tk_missing_app_is_allowed_but_post_tk_missing_app_fails(self):
+        with (
+            patch("smr_launcher.native_backend.sys.platform", "darwin"),
+            patch("smr_launcher.native_backend.ctypes.CDLL") as load,
+            patch.object(ctypes.c_void_p, "in_dll", return_value=ctypes.c_void_p()),
+            patch("smr_launcher.native_backend.ctypes.CFUNCTYPE") as message,
+        ):
+            set_activation_policy(allow_uninitialized=True)
+            with self.assertRaisesRegex(RuntimeError, "Tk did not initialize"):
+                set_activation_policy()
+        message.assert_not_called()
+        self.assertEqual(load.call_count, 2)  # AppKit only; no ObjC calls create an application.
+
+    def test_missing_framework_has_actionable_error(self):
+        with (
+            patch("smr_launcher.native_backend.sys.platform", "darwin"),
+            patch("smr_launcher.native_backend.ctypes.CDLL", side_effect=OSError("Synthetic")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Cannot set.*Synthetic"):
+                set_activation_policy()
+
+
 class NativeProtocolTests(TestCase):
+    def setUp(self):
+        policy = patch("smr_launcher.native_backend.set_activation_policy")
+        self.activation_policy = policy.start()
+        self.addCleanup(policy.stop)
+
     def test_real_hidden_owner_startup_protocol_and_close_with_isolated_fakes(self):
         import json
         import tkinter as tk
@@ -507,6 +585,10 @@ class NativeProtocolTests(TestCase):
                         raise
                     self.skipTest("Native Tk display unavailable: " + str(exc))
                 self.assertEqual(owner.root.state(), "withdrawn")
+                self.assertEqual(
+                    self.activation_policy.call_args_list,
+                    [call(allow_uninitialized=True), call()],
+                )
                 expired = []
 
                 def watchdog():
@@ -697,6 +779,7 @@ class NativeProtocolTests(TestCase):
         w = window()
         w._show = Mock()
         w._native_workflow(dict(action="preferences"))
+        self.activation_policy.assert_called_once_with(advanced=True)
         name, red_close = w.root.protocol.call_args.args
         self.assertEqual(name, "WM_DELETE_WINDOW")
         with patch("smr_launcher.native_backend.LauncherWindow._close") as guarded_close:
@@ -704,6 +787,7 @@ class NativeProtocolTests(TestCase):
             guarded_close.assert_not_called()
         self.assertFalse(w._native_advanced)
         w.root.withdraw.assert_called_once_with()
+        self.assertEqual(self.activation_policy.call_args_list, [call(advanced=True), call()])
         w._native_output, w._native_output_lock = Mock(), Lock()
         w._native_output.write.side_effect = BrokenPipeError("Synthetic disconnected parent")
         NativeBackendWindow._emit_native(w, dict(event="status", data={}))
@@ -711,6 +795,14 @@ class NativeProtocolTests(TestCase):
         with patch("smr_launcher.native_backend.LauncherWindow._close") as guarded_close:
             w._close()
             guarded_close.assert_called_once_with()
+
+    def test_failed_regular_policy_does_not_reveal_advanced_window(self):
+        w = window()
+        self.activation_policy.side_effect = RuntimeError("Synthetic policy refusal")
+        with self.assertRaisesRegex(RuntimeError, "Synthetic policy refusal"):
+            w._native_workflow(dict(action="preferences"))
+        self.assertFalse(getattr(w, "_native_advanced", False))
+        w.root.deiconify.assert_not_called()
 
     def test_quit_and_play_use_existing_guarded_paths(self):
         w = window()

@@ -8,6 +8,7 @@ are session caches, never validation authority for a game operation.
 from collections import OrderedDict
 from dataclasses import asdict, fields
 import base64
+import ctypes
 import json
 from pathlib import Path
 from queue import Empty, Full, Queue
@@ -42,6 +43,45 @@ from .play_history import (
 MAX_REQUEST_BYTES = 1500 * 1024
 # Keep output below the native reader limit even with unusually large source text.
 MAX_RESPONSE_BYTES = 96 * 1024 * 1024
+
+
+def set_activation_policy(advanced=False, *, allow_uninitialized=False):
+    """Keep the hidden Mac service out of the Dock; expose advanced Tk menus.
+
+    Read NSApp rather than creating NSApplication before Tk: Tk must create its
+    own application subclass. All callers run on the Tk owner/main thread.
+    """
+    if sys.platform != "darwin":
+        return
+    policy = 0 if advanced else 1  # NSApplicationActivationPolicyRegular / Accessory.
+    try:
+        appkit = ctypes.CDLL("/System/Library/Frameworks/AppKit.framework/AppKit")
+        application = ctypes.c_void_p.in_dll(appkit, "NSApp").value
+        if not application:
+            if allow_uninitialized:
+                return
+            raise RuntimeError("Tk did not initialize the macOS application")
+        objc = ctypes.CDLL("/usr/lib/libobjc.A.dylib")
+        objc.sel_registerName.argtypes = [ctypes.c_char_p]
+        objc.sel_registerName.restype = ctypes.c_void_p
+        # objc_msgSend needs a distinct ABI-correct signature for each selector.
+        change = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_long)(
+            ("objc_msgSend", objc)
+        )
+        current = ctypes.CFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p)(
+            ("objc_msgSend", objc)
+        )
+        accepted = change(application, objc.sel_registerName(b"setActivationPolicy:"), policy)
+        actual = current(application, objc.sel_registerName(b"activationPolicy"))
+        if not accepted or actual != policy:
+            raise RuntimeError(
+                f"macOS refused launcher activation policy {policy} "
+                f"(accepted={bool(accepted)}, actual={actual})"
+            )
+    except (OSError, AttributeError, ValueError) as exc:
+        raise RuntimeError(
+            "Cannot set the launcher's macOS activation policy: " + str(exc)
+        ) from exc
 
 
 def text(params, key, default=""):
@@ -308,8 +348,10 @@ class NativeBackendWindow(LauncherWindow):
         self._native_inflight = None
         self._native_last_status = None
         self._native_voice_notice = ""
+        set_activation_policy(allow_uninitialized=True)
         super().__init__()
         self.root.withdraw()
+        set_activation_policy()
         Thread(
             target=self._read_native_requests,
             args=(input_stream or getattr(sys.stdin, "buffer", sys.stdin),),
@@ -622,6 +664,7 @@ class NativeBackendWindow(LauncherWindow):
             self._native_advanced = False
             self.view = "maps"
             self.root.withdraw()
+            set_activation_policy()
             return dict(accepted=True)
         if action == "play":
             if self.app is None or not self.app.profiles.state_file.exists():
@@ -696,6 +739,7 @@ class NativeBackendWindow(LauncherWindow):
                 "advanced",
             }:
                 raise ValueError("Unknown workflow: " + action)
+            set_activation_policy(advanced=True)
             self._native_advanced = True
             self.root.deiconify()
             self.root.title("SMR Launcher — Advanced Tools")
