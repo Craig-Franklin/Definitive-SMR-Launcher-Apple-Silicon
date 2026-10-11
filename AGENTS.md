@@ -49,6 +49,10 @@ verification. These rules apply to every AI session. Read relevant sections of
 
 ## Use the game knowledge base
 
+For the engine-dependent tasks below, load the repository skill
+[smr-game-knowledge](.agents/skills/smr-game-knowledge/SKILL.md). Codex discovers it
+from `.agents/skills`; agents without skill discovery should read that file directly.
+
 For game behavior, compatibility, resource resolution, map validation/preparation, crash analysis or an engine-dependent code change, first read [knowledge use and verification](docs/rea-research/KNOWLEDGE_USE.md) and the current-scope section of [VALIDATION.md](docs/rea-research/VALIDATION.md). Use the relevant original knowledge notes and matching private evidence before making a behavior claim. The corpus covers the installed native slices with explicit failures and discovery limits; never imply missing coverage was checked.
 
 Match executable hash, module UUID and architecture/slice; match map archive/prepared/dependency identities where relevant. Reuse existing analysis after digest/coverage checks. Start with the original `knowledge-catalog.json`, `FINDINGS.md` and the developer guide in `docs/rea-research`; use `corpus.py` for bounded private lookup. Pass `--corpus-root` to research auditors to record matching evidence. Keep unknown builds, untranslated Rosetta frames and unresolved resource precedence explicit. Do not transfer an inferred rule to every build or map.
