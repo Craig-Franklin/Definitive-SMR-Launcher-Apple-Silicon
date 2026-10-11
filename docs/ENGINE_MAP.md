@@ -1,5 +1,10 @@
 # Mac engine investigation map
 
+**Research snapshot for the recorded executable.** Preserve these findings and
+their limits. [Knowledge verification](rea-research/KNOWLEDGE_USE.md) and the
+current-scope section of [Validation](rea-research/VALIDATION.md) route newer
+module coverage and evidence; this file does not grant compatibility execution.
+
 This document records original analysis of the installed Mac game. Whole-main-
 executable Ghidra analysis and a function-by-function pseudocode export support
 a **partial engine map**; generated pseudocode is not original source. The purpose is to improve map diagnostics and develop narrowly

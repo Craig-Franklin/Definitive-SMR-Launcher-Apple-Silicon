@@ -12,6 +12,14 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def repository_files(*patterns, root=ROOT):
+    output = subprocess.check_output(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", *patterns],
+        cwd=root,
+    ).decode()
+    return sorted({name for name in output.split("\0") if name and (root / name).is_file()})
+
+
 def baseline_errors(base, baseline, root=ROOT):
     """Allow the first baseline only for files already present in valid history."""
 
@@ -43,13 +51,20 @@ def baseline_errors(base, baseline, root=ROOT):
     )
 
 
-def documentation_errors():
+def documentation_errors(root=ROOT):
     errors = []
-    for name in ("AGENTS.md", "CONTRIBUTING.md", "docs/ARCHITECTURE.md"):
-        path = ROOT / name
-        if not path.is_file():
+    required = {
+        "README.md",
+        "AGENTS.md",
+        "CONTRIBUTING.md",
+        "docs/README.md",
+        "docs/ARCHITECTURE.md",
+    }
+    for name in sorted(required):
+        if not (root / name).is_file():
             errors.append(f"Missing {name}")
-            continue
+    for name in repository_files("*.md", root=root):
+        path = root / name
         text = path.read_text()
         for target in re.findall(r"\]\(([^\s)]+)\)", text):
             if "://" in target or target.startswith("#"):
@@ -57,7 +72,7 @@ def documentation_errors():
             target = target.split("#", 1)[0]
             if not (path.parent / target).exists():
                 errors.append(f"{name}: missing link target {target}")
-    if (ROOT / "AGENTS.md").is_file() and (ROOT / "AGENTS.md").stat().st_size > 32 * 1024:
+    if (root / "AGENTS.md").is_file() and (root / "AGENTS.md").stat().st_size > 32 * 1024:
         errors.append("AGENTS.md exceeds the default Codex instruction discovery budget.")
     return errors
 
@@ -95,26 +110,7 @@ def main():
     if installed != expected:
         print(f"Expected Ruff {expected}; found {installed}.", file=sys.stderr)
         return 1
-    files = (
-        subprocess.check_output(
-            [
-                "git",
-                "ls-files",
-                "--cached",
-                "--others",
-                "--exclude-standard",
-                "-z",
-                "--",
-                "src",
-                "tests",
-                "scripts",
-            ],
-            cwd=ROOT,
-        )
-        .decode()
-        .split("\0")
-    )
-    files = sorted({name for name in files if name.endswith(".py") and (ROOT / name).is_file()})
+    files = [name for name in repository_files("src", "tests", "scripts") if name.endswith(".py")]
     baseline_path = ".ruff-format-baseline"
     baseline = {
         line

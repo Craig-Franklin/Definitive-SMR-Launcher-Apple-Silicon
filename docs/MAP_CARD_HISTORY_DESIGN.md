@@ -1,6 +1,9 @@
 # Map card play history — issue #203 interview
 
-Status: interview and Roomier layout approved; implemented in this worktree; offline and native UI validation complete. No game testing or deployment performed.
+**Decision and validation record.** The feature was delivered through PR #209;
+[#203](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/203)
+carries completion and release evidence. The checks below describe the original
+offline/native UI validation and establish no actual gameplay result.
 
 Issue: <https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/203>
 
@@ -185,8 +188,8 @@ plain data and retain cancellable, incremental creation and destruction from the
 launcher performance work. The integration check verifies the ledger read stays
 off the UI thread, current-build isolation, and visible handling of corrupt history.
 
-Run the offline suite with `PYTHONPATH=src python3 -m unittest discover -s tests`.
-Preview the actual components with `python3 scripts/preview_map_history.py` using
+Run the offline suite with `.venv/bin/python -m unittest discover -s tests`.
+Preview the actual components with `.venv/bin/python scripts/preview_map_history.py` using
 a Python with native Tk (Homebrew Python 3.12 on the development machine). This
 standalone preview creates only a temporary fictional library, offers 14 examples,
 and performs no application discovery, process observation, game launch, network

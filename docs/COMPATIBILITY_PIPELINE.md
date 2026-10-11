@@ -1,8 +1,13 @@
 # Map compatibility preparation and testing
 
-For the current corpus-wide findings, additional goods/car/annex failure paths,
-and prioritized implementation gates, see the
-[compatibility audit and implementation plan](COMPATIBILITY_AUDIT_PLAN.md).
+**Technical reference and recorded observations.** Current compatibility scope,
+status and acceptance live in [issue #1](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/1)
+and assigned issues. Execution is paused; historical commands and passed checks
+do not grant runtime authority. Any resumption also requires applicable private authority.
+
+The [historical compatibility audit](COMPATIBILITY_AUDIT_PLAN.md) preserves
+corpus findings and proposed gates. Use [knowledge verification](rea-research/KNOWLEDGE_USE.md)
+for current evidence routing and exact-build limits.
 
 The Mac launcher prepares map data for Feral's Intel Mac game running under
 Rosetta. It does not replace Rosetta, patch the game executable, or rewrite an
@@ -35,7 +40,7 @@ allocation. Packed-asset references and implicit train-car filename variants
 need resolver-specific handling; naive file existence checks can produce false
 alarms. A recent map or archive date does not establish Mac compatibility.
 
-## Current investigation: loading allocation runaway
+## Historical investigation: loading allocation runaway
 
 A Corn and Cattle: Nebraska Rails loading attempt on Feral build 222106.42031
 remained running for about five minutes and reported roughly 94 GB physical

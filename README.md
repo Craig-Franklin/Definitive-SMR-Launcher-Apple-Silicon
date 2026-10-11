@@ -1,63 +1,50 @@
-# Definitive-SMR-Launcher
+# Definitive SMR Launcher — Apple Silicon
 
-> **Apple Silicon Mac fork:** See [Mac build, setup, and current verification status](MACOS_README.md).
-> The Windows features described below are inherited from the
-> [original project](https://github.com/ageekhere/Definitive-SMR-Launcher);
-> they are not claims about the Mac app.
+A native Mac launcher for the Steam edition of **Sid Meier's Railroads!** on
+Apple Silicon. The launcher manages community maps, independent profiles and
+saved games. The game itself runs through Rosetta.
 
-For AI-assisted development, crash analysis and custom-map checks, start with
-[repository instructions](AGENTS.md) and [knowledge use and verification](docs/rea-research/KNOWLEDGE_USE.md).
+**This fork develops and releases the Mac app only.** The inherited Windows
+launcher remains in the repository for upstream provenance and comparison;
+Windows development, testing and releases are outside this fork's scope.
 
-<img width="1914" height="996" alt="interface" src="https://github.com/user-attachments/assets/bcd5bcad-4acf-408c-a1d4-504c0a8f4c7b" />
+## Install and use
 
-All aboard, aspiring tycoon! Definitive-SMR-Launcher puts the full power of the rails in your hands, taking your Sid Meier’s Railroads! experience to the next level. Whether you’re laying your first tracks or expanding a sprawling empire, this launcher keeps your engines running smoothly and your journeys exciting:
+Download the installer from the [latest Mac release](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/releases/latest).
+Open the `.dmg` and drag the app into Applications. A Steam copy of the game is
+required; the launcher does not include the commercial game or personal maps.
 
-•	🗺️ Custom Maps Express – Tap into the extensive Sid Meier’s Railroads Custom Maps Collection on the Internet Archive https://archive.org/details/sid-meiers-railroads-custom-maps-collection. Instantly download new routes and challenges crafted by the community, and keep your network growing without ever leaving the launcher.
+The [Mac user guide](MACOS_README.md) covers setup, map imports, play history,
+updates and save preservation. The app can:
 
-•	⚙️ OpenSpy Engine Upgrade – Upgrade your game to play online with OpenSpy servers. The launcher makes your game large-address aware (LAA), letting it use more memory and run bigger, more complex maps without derailments.
+- Browse and import community maps into a private library.
+- Keep original archives and separate map profiles, with their own saves.
+- Show map details, community reports and explicitly recorded Mac test results.
+- Recover interrupted profile switches and install verified app updates.
 
-•	🚦 Harder Difficulty Junction – Craving a real challenge? Activate advanced difficulty levels to put your management and strategy skills to the ultimate test. Can you keep your trains on time under pressure?
+The app is still in development. A successful download, static check or map load
+does not prove gameplay or save/reload compatibility. See the
+[feature comparison and remaining validation](docs/FEATURE_PARITY.md).
 
-•	🎮 One-Click Departure – Browse and select maps directly within the launcher, and roll straight into the action. No detours, no extra stops—just pure railroading fun.
+## Development
 
-•	📦 Streamlined Operations – From downloading community maps to enabling key patches, Definitive-SMR-Launcher automates the tedious tasks so you can focus on building the most profitable, sprawling rail empire the world has ever seen.
+Start with [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks, review and delivery.
+AI sessions follow [AGENTS.md](AGENTS.md). The [code map](docs/ARCHITECTURE.md) and
+[documentation index](docs/README.md) explain where to look next.
 
-Whether you’re competing online, exploring new maps, or mastering the toughest routes, Definitive-SMR-Launcher ensures your trains are always on schedule.
-Hop on, fire up your engines, and let your rail adventure steam ahead! 
+Checks follow the changed files. Build only when needed. GitHub issues carry
+current scope and acceptance; historical plans are reference material. The
+[compatibility programme](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/1)
+has separate execution authority and is currently paused.
 
-Join the Sid Meier's Railroads Discord and learn how you can submit your own maps to the Internet Archive collection or organize a multiple game https://discord.gg/Th8MBdYW5v
+## Upstream and licensing
 
-Supports Steam and Disk versions
+This remains a fork of [ageekhere/Definitive-SMR-Launcher](https://github.com/ageekhere/Definitive-SMR-Launcher).
+Its Windows source, assets and history retain their upstream provenance. The
+[inherited Windows README](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/blob/90fc6dd910c6b0942e875f0aadd195814a4295e3/README.md)
+is preserved in Git history. Upstream changes can be reviewed and incorporated
+without treating Windows features as Mac support claims.
 
-News update 22/09/2025
-
-First release of Definitive-SMR-Launcher, maps within the Internet Archive are slowly being added and I am in the process of applying for a collection. I am still working out the way people can submit new maps, follow the discord to stay up to date. 
-
-The map folder structure is as follows:
-```
-Name_Of_Map_v1_00.7z
-- CustomAssets
-- UserMaps
-- mapIcon.jpg
-- mapInfo.txt
-```
-File name has no spaces, capital at the start of each word, ends with lower case v with the version number, use 7zip to make a 7z file.
-
-All Custom Assets go in the CustomAssets folder
-
-All map data goes in UserMaps
-
-512x512 jpg of the map named mapIcon.jpg
-
-Example of mapInfo.txt
-```
-Map Name: NAME OF MAP
-Map Version: V1.00
-Date Created: 2026/01/01
-Date Updated: 2026/01/01
-Author: NAME
-Modified by: HELPERS 
-Type: Multiplayer OR Single player
-
-About your map
-```
+New Mac code lives in `src/smr_launcher/`. See the
+[Mac code license](APPLE_SILICON_LICENSE.md) and
+[inherited asset attribution](docs/UPSTREAM_ASSETS.md).

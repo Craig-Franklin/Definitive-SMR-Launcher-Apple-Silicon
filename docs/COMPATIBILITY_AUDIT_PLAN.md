@@ -1,5 +1,12 @@
 # Compatibility audit and implementation plan
 
+**Historical research and proposal.** This preserves the recorded audit, hypotheses
+and original implementation gates. Current scope and acceptance live in
+[issue #1](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/1)
+and its assigned issues. Compatibility execution is paused. See the
+[pipeline reference](COMPATIBILITY_PIPELINE.md) for later named-recipe integration;
+the broader research audit is not a blanket repair or gameplay acceptance.
+
 Research snapshot: 4 October 2026, local date. Target: Feral Mac build
 222106.42031, executable SHA-256
 `981ca7180759d8578babf54cd9a4f76b93db503b33a7f1938c6b1427b95680f0`.
@@ -17,8 +24,9 @@ car and annex failure paths. Solving the industry-ID problem alone cannot certif
 the whole library. A successful loading screen transition cannot certify later
 construction, transport, era transitions or saved-game reconstruction.
 
-This is a plan and a completed static research audit. The new analysis is not yet
-integrated into Import or Play, and no new repair is approved for automatic use.
+At this checkpoint, the new analysis was not yet integrated into Import or Play,
+and no new repair was approved for automatic use. The stages below retain that
+checkpoint's proposed ordering; they are not a second active work queue.
 
 ## Evidence and coverage
 

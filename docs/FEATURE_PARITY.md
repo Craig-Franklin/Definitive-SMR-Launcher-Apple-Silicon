@@ -2,7 +2,8 @@
 
 This comparison comes from the inherited Windows source in this checkout and
 the current Mac implementation. It is not a claim that the Windows executable
-was run on this Mac. Full feature parity remains a project goal.
+was run on this Mac. Portable feature parity remains a project goal. This fork
+develops and releases the Mac app only; Windows-specific work stays upstream.
 
 | User task | Mac status | Notes |
 | --- | --- | --- |

@@ -3,6 +3,8 @@
 This personal project prioritizes quick iteration, readable code and proportionate
 verification. These rules apply to every AI session. Read relevant sections of
 [CONTRIBUTING.md](CONTRIBUTING.md) as needed, rather than every historical document.
+Development targets the Mac app. Preserve inherited Windows material for upstream
+provenance and comparison; this fork does not develop or release Windows software.
 
 ## Code-change workflow
 

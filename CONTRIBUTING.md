@@ -2,6 +2,7 @@
 
 Favor quick, complete changes with clear verification. [AGENTS.md](AGENTS.md) contains
 mandatory AI rules. [Architecture](docs/ARCHITECTURE.md) maps the Mac implementation.
+The [documentation index](docs/README.md) separates current guides from historical records.
 
 ## Setup and commands
 
@@ -30,7 +31,8 @@ The complete suite is:
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-Build only when needed. [MACOS_README.md](MACOS_README.md) describes build requirements.
+Build only when needed. [Build and release operations](docs/RELEASING.md) describes
+build prerequisites and the existing signed-release configuration.
 
 ```sh
 ./scripts/build_macos.sh
@@ -110,11 +112,21 @@ helpers before adding another implementation. Introduce abstractions for demonst
 reuse or separation of responsibilities. Preserve validation, errors and data integrity.
 A review suggestion should identify a concrete correctness or maintenance benefit.
 
-Ruff is pinned in `requirements-dev.txt`; narrow correctness rules live in
-`pyproject.toml`. `scripts/check_quality.py` checks project Python and formatting for
-new/adopted files. `.ruff-format-baseline` lists legacy files still awaiting formatting.
-Remove a path after formatting that file in a focused change. Do not add new exemptions
-or mass-format unrelated files. The inherited Windows launcher is outside this scope.
+Ruff is pinned in `requirements-dev.txt`; correctness and unused-code rules live in
+`pyproject.toml`. `scripts/check_quality.py` checks maintained Python, formatting and
+local Markdown links. Maintained Mac code, tests and ordinary tooling now follow the
+formatter, with the exceptions below. Keep unrelated formatting out of subsequent changes.
+
+Of the 36 entries in `.ruff-format-baseline`, 32 preserve source identities: native-capture
+and individual-stop bundles, closed runtime paths, and analyzer/resource modules
+whose bytes are bound into research receipts. They are not a general style backlog.
+Changes to those files need the applicable authority and evidence review before
+adopting a new identity; formatting cannot silently renew their acceptance. Narrow
+lint exceptions preserve existing declarations in those sources. Do not add exemptions.
+The other four entries are packaging helpers: `backend_entry.py`, `dmg_settings.py`,
+`launcher_entry.py` and `verify_dmg.py` in `scripts/`. Adopt their formatting with the
+next required packaging change, avoiding a package build solely for style changes.
+The inherited Windows launcher remains outside the maintained lint/format scope.
 
 ## Issues, PRs and continuity
 
@@ -152,6 +164,18 @@ available and identify partial or unavailable measurements.
 
 The startup helper enforces its own checks. Agent instructions govern subsequent tool
 choice. GitHub cannot observe arbitrary local commands; this is not a host tool firewall.
+
+## Upstream inheritance
+
+This fork develops, tests and releases the Mac app only. Preserve the inherited
+Windows source/assets and their provenance for comparison with upstream. Windows
+features are reference points, not claims of Mac support or a Windows work queue.
+
+For an intentional upstream update, inspect its source revision and changed files,
+retain attribution, and identify effects on shared assets and Mac behavior. Port
+applicable behavior through the existing Mac services and verification process.
+Do not bulk-reformat inherited source or push to upstream. Keep delivery to this
+fork consistent with the linear-history and signed-commit rules below.
 
 ## Publication safeguards
 

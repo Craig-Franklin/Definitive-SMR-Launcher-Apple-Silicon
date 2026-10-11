@@ -3,12 +3,14 @@
 The original Windows launcher is in `Definitive-SMR-Launcher/`. The independently
 implemented Mac app lives in `src/smr_launcher/`; changes here should preserve its
 Python compatibility and dependency-free runtime.
+This fork maintains the Mac app only. Inherited Windows files support provenance
+and upstream comparison, not an active Windows development target.
 
 | Area | Starting points | Responsibility |
 | --- | --- | --- |
 | Entry points | `gui.py`, `cli.py`, `__main__.py`; `scripts/launcher_entry.py` | Tk interface, command-line interface and packaged startup |
 | Application operations | `application.py`, `ui_work.py`, `activity.py` | Coordinate services and background work; keep blocking work out of UI callbacks |
-| Catalogue and packages | `collection.py`, `packages.py`, `extraction.py`, `map_metadata.py` | Discover/download/import packages and inspect metadata |
+| Catalogue and packages | `collection.py`, `packages.py`, `extraction.py`, `map_metadata.py`, `cache_files.py` | Discover/download/import packages, inspect metadata and share safe cache-file mechanics |
 | Prepared variants and rules | `variants.py`, `rules.py`, `compatibility_recipes.py`, `recipe_service.py` | Prepare reproducible copies; preserve originals and recipe provenance |
 | Resources and validation | `resource_context.py`, `resource_identity.py`, `import_checks.py`, `model_checks.py`, `industry_registry.py` | Resolve exact resources and validate supported data contracts |
 | Activation and saves | `activation.py`, `removal.py`, `steam.py`, `live_run_authority.py` | Journalled profile switching, preservation, process checks and explicit runtime authority |

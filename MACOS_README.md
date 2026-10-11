@@ -5,7 +5,7 @@ Windows launcher and its history remain upstream work. New Mac services live in
 `src/smr_launcher/`; their license is scoped in
 [`APPLE_SILICON_LICENSE.md`](APPLE_SILICON_LICENSE.md).
 
-## Current status
+## Product status and recorded validation
 
 An arm64 Mac app can now be built from this checkout. It finds a Steam Mac
 installation, preserves a clean Original Game profile, imports a local map
@@ -16,7 +16,7 @@ verify them before private import. The app is **still in development**:
 San Francisco passed a short user gameplay/manual-save/reload check on the
 tested Steam build. Alternate Balkans crashed during initial track/train play;
 its cause is unresolved. Arizona and Africa Diamonds still need gameplay checks.
-Signed and notarized releases are published; downloaded v0.3.8 passed archive,
+Signed and notarized releases are published. Historical checks of v0.3.8 passed archive,
 publisher and Gatekeeper checks, and an isolated v0.3.0-to-v0.3.8 update passed.
 No extended campaign result is claimed. Map tiles without a recorded gameplay
 check remain “Not verified.”
@@ -49,43 +49,17 @@ installing an app update does not require repeating setup.
 The ZIP asset is retained for the built-in updater. Use the DMG for a new
 installation; GitHub's source-code downloads are for development.
 
-Every push to `main` builds and runs tests. Conventional Commits determine
-whether to publish: `feat` adds a minor release, `fix`/`perf` add a patch, and
-breaking changes add a major release. Documentation, tests and chores alone do
-not create a release. A qualifying push releases its exact head after signing
-and notarization; failed checks leave the last working release available.
+Qualifying app changes release automatically after the required checks, signing
+and notarization. Failed checks leave the last published release available.
 
 The personal fork's [`main` access and protection policy](docs/REPOSITORY_ACCESS.md)
 records who may push or merge into `main` and how to verify the live GitHub rule.
 
 ## Build from source
 
-1. Install **Sid Meier’s Railroads!** from Steam on its default public branch.
-   Launch the stock Mac game once. Play a stock scenario, make a manual save,
-   quit, reopen, and load it before setting up the launcher.
-2. Install [Homebrew](https://brew.sh/) if necessary, then install the arm64
-   Python and Tk packages:
-
-   ```sh
-   brew install python@3.12 python-tk@3.12
-   ```
-
-3. Install Xcode 26 or newer and select its developer tools with `xcode-select`.
-   The build compiles an Apple Translation helper; the launcher reports a clear
-   limitation when translation is unavailable on an older Mac.
-4. Clone this fork on the Mac and build the app:
-
-   ```sh
-   git clone https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon.git
-   cd Definitive-SMR-Launcher-Apple-Silicon
-   ./scripts/build_macos.sh
-   open "dist/Definitive SMR Launcher Apple Silicon.app"
-   ```
-
-The script creates a local `.venv` and a `dist/` app bundle; both are ignored
-by Git. It checks the arm64 executable and local ad hoc code signature. This
-development build is not notarized. Use the published release for automatic
-updates.
+Use the [development setup and checks](CONTRIBUTING.md#setup-and-commands), then
+follow the [Mac build prerequisites](docs/RELEASING.md#build-from-source) when an
+app build is needed. Source checks do not require playing or modifying the game.
 
 ## First run and maps
 
@@ -269,63 +243,10 @@ user can write, such as `~/Applications`. A source-built or ad hoc signed app
 does not automatically replace itself. If an update is staged while another
 launcher operation is active, it waits for a later idle quit.
 
-The personal fork's `.github/workflows/macos-app.yml` runs tests and builds a
-development app for every main push and pull request. A successful main push
-creates a signed release only when Conventional Commits since the last release
-require one:
-
-- `fix:` and `perf:` increment the patch version.
-- `feat:` increments the minor version.
-- `!` or a `BREAKING CHANGE:` footer increments the major version, including
-  while the project is below 1.0.
-- Documentation, tests, chores and other non-release commits still run CI, but
-  do not publish a release by themselves.
-
-The highest required bump wins when several commits land together. Release notes
-are generated from those commits. Existing published tags and reserved legacy
-versions are respected during migration from workflow-run numbering. Tags point
-to the exact GitHub-Verified source commit; CI stamps the release number into the
-app without creating a bot commit. Release jobs queue rather than cancel one
-another. The build uses a macOS 26 SDK for the optional Apple translation helper;
-the helper checks runtime availability before using translation.
-
-Uploads are checked in a draft before publication. Rerunning an already
-published build verifies and preserves its existing artifacts; a delayed older
-build cannot replace a higher version as the latest update. The app's optional
-automatic update setting consumes this fork's latest stable release.
-
-Signing and notarization credentials come from 1Password. Put the Developer ID
-Application `.p12` attachment, its export password in a concealed field, the
-Apple team ID, and a **team** App Store Connect API `.p8` attachment with its
-key and issuer IDs in a dedicated 1Password release vault. A 1Password service
-account needs **read-only** access to that vault. Built-in Personal, Private,
-Employee and default Shared vaults cannot be granted to a service account.
-
-Configure only `OP_SERVICE_ACCOUNT_TOKEN` as a GitHub Actions secret in the
-exact personal fork. Configure these GitHub Actions **variables** as 1Password
-`op://` references; the references point to credentials in the dedicated
-vault and contain no credential values:
-
-| Variable | 1Password target |
-| --- | --- |
-| `SMR_CERT_P12_REF` | `.p12` file attachment |
-| `SMR_CERT_PASSWORD_REF` | Concealed `.p12` export password field |
-| `SMR_APPLE_TEAM_ID_REF` | Apple team ID field |
-| `SMR_NOTARY_KEY_P8_REF` | Team API `.p8` file attachment |
-| `SMR_NOTARY_KEY_ID_REF` | Team API key ID field |
-| `SMR_NOTARY_ISSUER_ID_REF` | Team API issuer ID field |
-
-The workflow uses 1Password CLI to load attachments straight into temporary
-files on the release runner and reads the four fields at release time. It
-imports Apple's public Developer ID G2 intermediate, creates a temporary
-signing keychain, and deletes it after packaging. The repository's built-in
-`GITHUB_TOKEN` publishes the release; no separate GitHub release credential is
-needed. Missing references or credentials stop the release. Signing,
-notarization, stapling, and macOS assessment must pass; there is no unsigned
-fallback. The release archive also receives a GitHub artifact attestation.
-The actual signed updater has replaced an isolated v0.3.0 app with v0.3.8,
-retaining the previous signed app and a private save sentinel. A fresh Mac and
-fresh-Mac installation and VoiceOver validation remain separate QA steps.
+Release automation and maintainer credentials are documented in
+[build and release operations](docs/RELEASING.md). The workflow runs relevant
+checks and builds only when needed; internal docs/tests/tooling alone do not
+create an app release.
 
 ## Development checks
 
@@ -334,10 +255,10 @@ Before engine-dependent changes, crash diagnosis or map scans, use the
 and [repository instructions](AGENTS.md). Record matching-build evidence,
 applied rules and coverage gaps; static/synthetic results do not establish gameplay compatibility.
 
-On macOS with Python 3.12:
+Use the Python 3.12 environment from [CONTRIBUTING](CONTRIBUTING.md):
 
 ```sh
-python3 -m unittest discover -s tests -v
+.venv/bin/python -m unittest discover -s tests -v
 ```
 
 The tests use synthetic profiles and archives. They do not require a Steam

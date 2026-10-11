@@ -1,5 +1,9 @@
 # Launcher performance analysis and implementation plan
 
+**Historical baseline and proposal.** The resulting implementation and measurements
+are in [Performance results](PERFORMANCE_RESULTS.md). Retain the observations below
+for comparison; their original execution instructions are not an active work queue.
+
 Analysis date: 11 October 2026. Starting source: `0fdd684c591f23b6a85ccf89af62fd2bfef87c70`, app source version 0.3.0. Scope: [analysis issue #197](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/197), [Performance project #3](https://github.com/users/Craig-Franklin/projects/3). Craig authorized implementation after this analysis through an independently reviewed PR to the personal fork's main. No merge, release or game launch is part of this work.
 
 ## Method and evidence limits
