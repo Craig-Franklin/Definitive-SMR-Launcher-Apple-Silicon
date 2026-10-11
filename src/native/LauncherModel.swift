@@ -97,7 +97,7 @@ final class ScrollMemory { var point: NSPoint? }
     let fixture: Bool
     let gridScroll = ScrollMemory()
     var detailScroll: [String: ScrollMemory] = [:]
-    private let backend = Backend()
+    private let backend: Backend
     private var quitting = false
     private var started = false
     private var pendingRefresh = false
@@ -125,10 +125,11 @@ final class ScrollMemory { var point: NSPoint? }
         }
     }
 
-    init(fixture: Bool) {
+    init(fixture: Bool, backend: Backend? = nil) {
         self.fixture = fixture
-        backend.event = { [weak self] name, data in self?.event(name, data) }
-        backend.stopped = { [weak self] message in
+        self.backend = backend ?? Backend()
+        self.backend.event = { [weak self] name, data in self?.event(name, data) }
+        self.backend.stopped = { [weak self] message in
             guard let self, !self.quitting else { return }
             self.connected = false; self.error = message; self.busy = false
         }
@@ -181,7 +182,7 @@ final class ScrollMemory { var point: NSPoint? }
         }
     }
 
-    func request(_ method: String, _ params: [String: Any] = [:], success: (([String: Any]) -> Void)? = nil) async {
+    func request(_ method: String, _ params: [String: Any] = [:], success: (([String: Any]) async -> Void)? = nil) async {
         while busy {
             do { try await Task.sleep(nanoseconds: 20_000_000) } catch { return }
         }
@@ -192,7 +193,7 @@ final class ScrollMemory { var point: NSPoint? }
             return
         }
         busy = true
-        do { let value = try await backend.call(method, params); success?(value) }
+        do { let value = try await backend.call(method, params); await success?(value) }
         catch { self.error = error.localizedDescription }
         busy = false
         if pendingRefresh && !serviceBusy {
@@ -204,7 +205,9 @@ final class ScrollMemory { var point: NSPoint? }
     func refresh() async {
         await request("snapshot", ["refresh": true]) { value in
             do {
-                let replacement = try value.rows("maps").map(MapItem.init)
+                let replacement = try await Task.detached(priority: .userInitiated) {
+                    try value.rows("maps").map(MapItem.init)
+                }.value
                 guard Set(replacement.map(\.id)).count == replacement.count else { throw NativeError.message("The library contains duplicate identities. Existing presentation retained.") }
                 let old = Dictionary(uniqueKeysWithValues: self.maps.map { ($0.id, $0.archive + $0.variant) })
                 for map in replacement where old[map.id] != nil && old[map.id] != map.archive + map.variant {
