@@ -21,7 +21,7 @@ Updated 11 October 2026. Craig authorized full local extraction, original tools/
 | Narrow map screen | 236 variants, 221 directories; 131 with static membership risk, 120 with explicit-placement risk, 10 unresolved; no broken-map/crash count implied |
 | Broader map screen | 221 imports, 227 scenarios, 2,579 XML files; catalog/rule references attached; inherited models retain partial knowledge status |
 | Map preservation | Before/after hashes matched for 2,716 XML/catalogue inputs; no repair or runtime checks |
-| Synthetic source checks | Integrated branch passed 838 tests in 53.111 seconds under Python 3.12; 54 focused research tests passed under Python 3.9 after final provider-build/provenance hardening |
+| Synthetic source checks | Integrated checkpoint passed 838 tests in 53.111 seconds under Python 3.12; 55 focused research tests and 10 separate synthetic evidence-helper tests passed under Python 3.9 after final build/provenance/CLI hardening; exact latest-main integration checked by PR CI |
 
 The closed publication candidate contains only fixed labels, integer counts, preservation and human-review-required markers. Original code/tests, the finding catalog and authored explanations were reviewed separately. No raw code, game tables/strings, private source paths, snapshots, databases, diagnostics or map names are publication inputs. A scanner is not legal clearance and a review marker does not authenticate human approval.
 

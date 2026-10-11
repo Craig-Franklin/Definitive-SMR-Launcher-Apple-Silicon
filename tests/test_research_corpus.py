@@ -3,6 +3,8 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+import subprocess
+import sys
 from unittest.mock import patch
 
 PATH=Path(__file__).resolve().parents[1]/'scripts/research/corpus.py'
@@ -103,6 +105,13 @@ class CorpusTests(unittest.TestCase):
                 with c.owned(self.root):pass
         for indices,seconds in (([9],60),([],60),([0],0)):
             with self.assertRaises(c.Refusal):c.run(self.root,indices,seconds)
+    def test_argument_diagnostics_do_not_echo_private_values(self):
+        result=subprocess.run([sys.executable,str(PATH),'report','--root',str(self.root),
+            '--output','candidate.json','--unknown','original-private-sentinel'],capture_output=True,text=True)
+        self.assertEqual(result.returncode,2)
+        self.assertNotIn('original-private-sentinel',result.stdout+result.stderr)
+        self.assertNotIn(str(self.root),result.stdout+result.stderr)
+        self.assertFalse((self.root/'candidate.json').exists())
     def test_timeout_records_failure_and_scopes_termination(self):
         m,out,_=self.fixture();(out.parent/'receipt.json').unlink()
         # The fake provider represents a whole-module timeout, independent of

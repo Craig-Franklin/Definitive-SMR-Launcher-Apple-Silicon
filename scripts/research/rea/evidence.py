@@ -11,6 +11,10 @@ HERE = Path(__file__).resolve().parent
 MAX_BYTES = 1024 * 1024
 CASE = 'synthetic-bounded-index'
 
+class ClosedParser(argparse.ArgumentParser):
+    def error(self, message):
+        self.exit(2, 'Refused arguments; see --help. No input values emitted.\n')
+
 def digest(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -140,7 +144,7 @@ class Store:
                 'legal_clearance': False}
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = ClosedParser(description=__doc__)
     parser.add_argument('--private-root', required=True)
     sub = parser.add_subparsers(dest='command', required=True)
     add = sub.add_parser('index')

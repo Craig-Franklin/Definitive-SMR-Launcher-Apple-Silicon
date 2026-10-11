@@ -113,7 +113,7 @@ def annotate_findings(findings):
 
 
 def main():
-    parser=argparse.ArgumentParser(description=__doc__)
+    parser=c.ClosedParser(description=__doc__)
     parser.add_argument('action',choices=['bind','catalog'])
     parser.add_argument('--root',type=Path)
     args=parser.parse_args()

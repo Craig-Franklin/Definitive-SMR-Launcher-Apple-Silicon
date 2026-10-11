@@ -31,6 +31,11 @@ class Refusal(ValueError):
     pass
 
 
+class ClosedParser(argparse.ArgumentParser):
+    def error(self, message):
+        self.exit(2,'Refused arguments; see --help. No input values emitted.\n')
+
+
 def sha(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -531,7 +536,7 @@ def publication(root, output):
 
 def main():
     os.umask(0o077)
-    parser=argparse.ArgumentParser(description=__doc__)
+    parser=ClosedParser(description=__doc__)
     sub=parser.add_subparsers(dest='action',required=True)
     p=sub.add_parser('inventory');p.add_argument('--root',type=Path,required=True);p.add_argument('--app',type=Path,action='append',required=True)
     p=sub.add_parser('run');p.add_argument('--root',type=Path,required=True);p.add_argument('--module',type=int,action='append');p.add_argument('--seconds',type=int,default=3600)

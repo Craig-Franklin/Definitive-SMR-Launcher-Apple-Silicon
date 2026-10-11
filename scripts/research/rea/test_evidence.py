@@ -87,5 +87,10 @@ class CLITests(unittest.TestCase):
         out=self.root/'existing'; out.write_bytes(b'preserved')
         self.assertEqual(self.run_cli('report','--approval','approval.json','--human-reviewed','--output',str(out)).returncode,2)
         self.assertEqual(out.read_bytes(),b'preserved')
+    def test_cli_argument_error_is_closed(self):
+        result=self.run_cli('report','--unknown','original-private-sentinel')
+        self.assertEqual(result.returncode,2)
+        self.assertNotIn(b'original-private-sentinel',result.stdout+result.stderr)
+        self.assertNotIn(str(self.root).encode(),result.stdout+result.stderr)
 
 if __name__ == '__main__': unittest.main()

@@ -90,6 +90,7 @@ export digests. Unknown rules and stale catalogs fail. Broader scanner models
 without independent evidence retain partial status. The raw scanner JSON still
 contains local paths, extracted identities and map data; redirect both streams
 to private files. The corpus CLI's stdout is only closed operational metadata.
+Invalid CLI arguments also produce a fixed error without echoing input values.
 
 ## Publication and replay
 
