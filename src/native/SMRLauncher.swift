@@ -4,6 +4,37 @@ import SwiftUI
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var model: LauncherModel?
     var acceptedQuit = false
+    private var instance: InstanceLease?
+    private(set) var admitted = false
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        if CommandLine.arguments.contains("--fixture") { admitted = true; return }
+        do {
+            let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+                .appendingPathComponent("Definitive SMR Launcher Apple Silicon", isDirectory: true)
+            try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+            guard support.resolvingSymlinksInPath() == support.standardizedFileURL,
+                  let executable = NSRunningApplication.current.executableURL?.path,
+                  let launched = NSRunningApplication.current.launchDate else { throw InstanceLease.Failure.unavailable }
+            instance = try InstanceLease(url: support.appendingPathComponent(".native-instance.lock"),
+                owner: .init(pid: ProcessInfo.processInfo.processIdentifier, launched: launched, executable: executable))
+            admitted = true
+        } catch InstanceLease.Failure.occupied(let owner) {
+            if let owner, let running = NSRunningApplication(processIdentifier: owner.pid),
+               running.bundleIdentifier == Bundle.main.bundleIdentifier,
+               running.launchDate == owner.launched, running.executableURL?.path == owner.executable,
+               !running.isTerminated, running.activate(options: [.activateAllWindows, .activateIgnoringOtherApps]) {
+                NSApplication.shared.terminate(nil)
+            } else { refuseStartup("Another launcher owns this library. Close that launcher before opening another copy.") }
+        } catch { refuseStartup("The launcher could not establish exclusive ownership. Inspect the local library permissions before reopening it.") }
+    }
+    private func refuseStartup(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = "Launcher already open or unavailable"
+        alert.informativeText = message
+        alert.addButton(withTitle: "Quit")
+        alert.runModal()
+        NSApplication.shared.terminate(nil)
+    }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let model else { return .terminateNow }
         if acceptedQuit || model.fixture { return .terminateNow }
@@ -35,6 +66,7 @@ import SwiftUI
                 .preferredColorScheme(model.fixture ? (LauncherModel.argument("--fixture-appearance") == "light" ? .light : LauncherModel.argument("--fixture-appearance") == "dark" ? .dark : nil) : nil)
                 .background(FixtureWindowSize(width: model.fixture ? LauncherModel.argument("--fixture-width").flatMap(Double.init) : nil))
                 .task {
+                    guard delegate.admitted else { return }
                     delegate.model = model
                     await model.start()
                 }
