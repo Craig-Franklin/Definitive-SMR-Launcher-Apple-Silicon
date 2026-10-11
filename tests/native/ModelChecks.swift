@@ -89,6 +89,43 @@ import Foundation
         precondition(liveModel.error.isEmpty && liveModel.maps.count == 1000)
         precondition(ticks > 1 && longestGap < 500, "Large fragmented replies must not monopolize the main actor")
         print(String(format: "Large synthetic library passed; 1000 maps, 16 MiB text, %d main-actor ticks, max gap %.2f ms, total %@ (not viewport timing)", ticks, longestGap, String(describing: loadStarted.duration(to: clock.now))))
+
+        let reported = liveModel.maps[0], untouched = liveModel.maps[1]
+        liveModel.selection = reported.id; liveModel.query = "Synthetic"; liveModel.sort = "Name Z–A"
+        liveModel.personal[untouched.id] = PersonalDraft(title: "Retain", notes: "Unsaved", dirty: true)
+        liveModel.outcomes[reported.id] = OutcomeDraft(outcome: "Played", attempt: "synthetic-attempt", scenario: "Synthetic.xml")
+        let before = try await backend.call("fixture.counts")
+        await liveModel.confirm(reported)
+        let after = try await backend.call("fixture.counts")
+        precondition(liveModel.error.isEmpty && liveModel.outcomes[reported.id] == nil)
+        precondition(after["snapshot"] as? Int == before["snapshot"] as? Int, "Recording one map must not rebuild the library")
+        precondition((after["details"] as? Int ?? 0) == (before["details"] as? Int ?? 0) + 1, "Read the affected map once")
+        precondition((after["history.record"] as? Int ?? 0) == 1, "Never repeat a confirmation")
+        precondition(liveModel.maps[0].summary.text("label") == "Played" && liveModel.maps[1].summary.isEmpty)
+        precondition(liveModel.personal[untouched.id]?.dirty == true && liveModel.maps.count == 1000)
+        precondition(liveModel.selection == reported.id && liveModel.query == "Synthetic" && liveModel.sort == "Name Z–A")
+
+        _ = try await backend.call("fixture.configure", ["changed_edition": true])
+        await liveModel.loadDetails(reported.id, force: true)
+        precondition(liveModel.maps[0].summary.text("label") == "Played", "Different editions cannot replace this map summary")
+
+        _ = try await backend.call("fixture.configure", ["reject_record": true])
+        liveModel.outcomes[reported.id] = OutcomeDraft(outcome: "Played", attempt: "synthetic-attempt", scenario: "Synthetic.xml")
+        let beforeRejected = try await backend.call("fixture.counts")
+        await liveModel.confirm(reported)
+        let afterRejected = try await backend.call("fixture.counts")
+        precondition(liveModel.error == "synthetic history.record failure" && liveModel.outcomes[reported.id] != nil)
+        precondition(afterRejected["details"] as? Int == beforeRejected["details"] as? Int, "Rejected confirmations must retain drafts without a refresh")
+
+        _ = try await backend.call("fixture.configure", ["reject_details": true])
+        let beforeReadFailure = try await backend.call("fixture.counts")
+        await liveModel.confirm(reported)
+        let afterReadFailure = try await backend.call("fixture.counts")
+        precondition(liveModel.error == "synthetic details failure" && liveModel.outcomes[reported.id] == nil)
+        precondition(liveModel.status.contains("confirmation recorded"), "Read failure must preserve the saved confirmation status")
+        precondition((afterReadFailure["history.record"] as? Int ?? 0) == (beforeReadFailure["history.record"] as? Int ?? 0) + 1)
+        precondition(afterReadFailure["snapshot"] as? Int == beforeReadFailure["snapshot"] as? Int)
+        print("Confirmation checks passed; one detail read, no library rebuild, retained selection/drafts, rejected write and post-write read failure")
         do { _ = try await backend.call("disconnect"); preconditionFailure("Lost mutation result was swallowed") }
         catch { precondition(error.localizedDescription.contains("unknown") || error.localizedDescription.contains("inspect")) }
         print("Native pipe checks passed; partial replies, events, explicit rejection and unknown disconnect")

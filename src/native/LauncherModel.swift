@@ -10,7 +10,7 @@ struct MapItem: Identifiable {
     let metadata: [String: Any]
     let verification: String
     let notice: String
-    let summary: [String: Any]
+    var summary: [String: Any]
     let historyError: String
     let title: String
     let notes: String
@@ -236,7 +236,16 @@ final class ScrollMemory { var point: NSPoint? }
             ], "context": ["game_executable_sha256": String(repeating: "f", count: 64)], "verification_text": "Synthetic fixture · actual compatibility is unknown", "checks_text": "No package scan executed."]
             return
         }
-        await request("details", ["profile_id": id]) { value in self.details[id] = value }
+        await request("details", ["profile_id": id]) { value in
+            self.details[id] = value
+            let context = value.object("context")
+            if value.text("profile_id") == id, let summary = value["summary"] as? [String: Any],
+               let index = self.maps.firstIndex(where: {
+                   $0.id == id && $0.archive == context.text("archive_sha256") && $0.variant == context.text("variant_id")
+               }) {
+                self.maps[index].summary = summary
+            }
+        }
     }
     func memory(_ key: String) -> ScrollMemory {
         if let memory = detailScroll[key] { return memory }
@@ -302,7 +311,9 @@ final class ScrollMemory { var point: NSPoint? }
         await request("history.record", params) { _ in
             self.outcomes[map.id] = nil; self.section = "Play History"; self.status = "Player confirmation recorded. Earlier failures remain visible."
         }
-        if error.isEmpty && !fixture { await refresh(); await loadDetails(map.id, force: true) }
+        // The confirmation changed this map's history, not every map's assets.
+        // Keep the library and drafts in place; read the affected map once.
+        if error.isEmpty && !fixture { await loadDetails(map.id, force: true) }
     }
     func workflow(_ action: String, profile: String? = nil, extras: [String: Any] = [:]) async {
         var params = extras; params["action"] = action

@@ -4,9 +4,52 @@ import json
 import sys
 import time
 
+counts = {}
+configuration = {}
+recorded = False
 for line in sys.stdin:
     request = json.loads(line)
     method = request["method"]
+    counts[method] = counts.get(method, 0) + 1
+    if method == "fixture.configure":
+        configuration = request["params"]
+        print(json.dumps({"id": request["id"], "ok": True, "data": {}}), flush=True)
+        continue
+    if method == "fixture.counts":
+        print(json.dumps({"id": request["id"], "ok": True, "data": counts}), flush=True)
+        continue
+    if method in ("details", "history.record"):
+        failed = configuration.get(
+            "reject_record" if method == "history.record" else "reject_details"
+        )
+        if method == "history.record" and not failed:
+            recorded = True
+        value = {"id": request["id"], "ok": not failed}
+        value["error" if failed else "data"] = (
+            "synthetic " + method + " failure"
+            if failed
+            else {
+                "profile_id": request["params"].get("profile_id", ""),
+                "context": {
+                    "archive_sha256": "a" * 64,
+                    "variant_id": ("d" if configuration.get("changed_edition") else "b") * 64,
+                    "game_executable_sha256": "c" * 64,
+                },
+                "summary": {
+                    "label": "Wrong edition"
+                    if configuration.get("changed_edition")
+                    else "Played"
+                    if recorded
+                    else "Never opened",
+                    "light": "grey",
+                    "opens": 1 if recorded else 0,
+                },
+                "history": [],
+                "recorded": 1,
+            }
+        )
+        print(json.dumps(value), flush=True)
+        continue
     if method == "disconnect":
         # A truncated response cannot establish the outcome of a mutation.
         sys.stdout.write('{"id":')

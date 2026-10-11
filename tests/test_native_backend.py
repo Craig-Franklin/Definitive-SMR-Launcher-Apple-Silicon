@@ -372,6 +372,11 @@ class NativeLibraryTests(TestCase):
             self.assertEqual(
                 [e["kind"] for e in store.records()[-2:]], ["save_reopened", "continued_play"]
             )
+            details = model.details(application, dict(profile_id="synthetic"))
+            self.assertEqual(details["summary"]["opens"], 1)
+            self.assertNotIn("events", details["summary"])
+            self.assertEqual(details["context"], context(record(), "c" * 64))
+            self.assertEqual(details["history"][-1]["kind"], "continued_play")
             before = store.path.read_bytes()
             for override in (dict(kind="playable"), dict(continued="yes")):
                 with self.assertRaises(HistoryError):

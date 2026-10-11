@@ -6,7 +6,7 @@ are session caches, never validation authority for a game operation.
 """
 
 from collections import OrderedDict
-from dataclasses import asdict
+from dataclasses import asdict, fields
 import base64
 import json
 from pathlib import Path
@@ -164,6 +164,7 @@ class NativeLibrary:
         record = self.record(app, text(params, "profile_id"))
         ctx = context(record, app.installation.executable_sha256)
         rows = tuple(e for e in PlayHistoryStore(app.library).records() if same_map(e, ctx))
+        summary = summarize(rows, ctx)
         try:
             verification = app.verification_for(record)
             verification_text = (
@@ -182,6 +183,11 @@ class NativeLibrary:
             scenarios=list(record.scenarios),
             context=ctx,
             history=[{**e, "label": LABELS[e["kind"]]} for e in rows],
+            summary={
+                field.name: getattr(summary, field.name)
+                for field in fields(summary)
+                if field.name != "events"
+            },
             history_text=timeline_text(rows),
             verification_text=verification_text,
             checks_text=checks,
