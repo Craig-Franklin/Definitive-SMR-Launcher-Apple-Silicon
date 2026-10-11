@@ -171,6 +171,8 @@ class RecipeGuiTests(unittest.TestCase):
         window.bulk_active = False
         window.close_when_idle = False
         window.speech_process = None
+        window.view = "maps"
+        window._render_gallery = Mock()
         window._update_download_rows = Mock()
         window._controls = Mock()
         window._log = Mock()
