@@ -1,6 +1,7 @@
 import hashlib
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
+import os
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
@@ -9,6 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from smr_launcher import recipe_service
+from smr_launcher.activation import ActivationError
 from smr_launcher.recipe_identity import file_context
 from smr_launcher.rules import RuleError
 from smr_launcher.variants import assets_manifest_hash
@@ -368,6 +370,119 @@ class SyntheticRecipeServiceTests(unittest.TestCase):
         self.assertEqual(calls, 2)
         self.assertEqual((self.source / self.INDUSTRY_PATH).read_bytes(), self.industry_data)
         self.assertFalse((self.root / "prepared").exists())
+
+    def donor_fixture(self):
+        """Invented members and identities; no real donor archive or asset data."""
+        donor = self.imports / ("b" * 32)
+        members = (
+            ("UserMaps/Donor/one.nif", b"invented model\0\xff"),
+            ("UserMaps/Donor/two.kfm", b"invented animation\0\xfe"),
+        )
+        additions = []
+        for path, data in members:
+            file = donor / path
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.write_bytes(data)
+            os.utime(file, ns=(1_700_000_000_123_456_789,) * 2)
+            destination = path.replace("/Donor/", "/Synthetic/")
+            additions.append((destination, path, sha(data)))
+        archive, variant = sha(b"invented donor archive"), sha(b"invented donor variant")
+        record = SimpleNamespace(
+            archive_sha256=archive,
+            variant_id=variant,
+            profile_id="map-" + variant,
+            imported_directory=donor.name,
+            name="Side_to_Side_2_v1_00",
+        )
+        self.app.catalogue = lambda: [record]
+        return replace(self.recipe, additions=tuple(additions)), record, donor, members
+
+    def fixture_file_facts(self):
+        """Compare file and link facts independently; exclude read-sensitive atime."""
+        result = {}
+        for path in self.root.rglob("*"):
+            info = path.lstat()
+            if path.is_symlink():
+                data = ("link", os.readlink(path))
+            elif path.is_file():
+                data = ("file", path.read_bytes())
+            else:
+                continue
+            result[path.relative_to(self.root).as_posix()] = (
+                data,
+                info.st_ino,
+                info.st_mtime_ns,
+                info.st_mode,
+            )
+        return result
+
+    def test_exact_donor_members_compile_without_mutating_any_fixture(self):
+        recipe, donor_record, _, members = self.donor_fixture()
+        before = self.fixture_file_facts()
+        with patch.object(
+            recipe_service, "_HILL_COWHIDE_DONOR_ARCHIVE", donor_record.archive_sha256
+        ):
+            rules, binding = self.resolve(recipe)
+        self.assertEqual(len(rules), 1)
+        self.assertEqual(len(rules[0].additions), 2)
+        for addition, (path, data) in zip(rules[0].additions, members):
+            self.assertEqual(addition.path, path.replace("/Donor/", "/Synthetic/"))
+            self.assertEqual(addition.data, data)
+            self.assertEqual(addition.after_sha256, sha(data))
+            self.assertEqual(addition.mtime_ns, 1_700_000_000_123_456_789)
+        self.assertEqual(rules[0].patches[0].old, self.industry_data)
+        self.assertEqual(
+            rules[0].patches[0].new,
+            self.industry_data.replace(
+                b"<szName>Test Mill</szName>", b"<szName>Registered One</szName>"
+            ),
+        )
+        self.assertEqual(binding.recipe_id, recipe.recipe_id)
+        self.assertEqual(self.fixture_file_facts(), before)
+        self.assertFalse((self.root / "prepared").exists())
+
+    def test_missing_foreign_or_ambiguous_donor_refuses_without_mutation(self):
+        recipe, record, _, _ = self.donor_fixture()
+        foreign = SimpleNamespace(**{**vars(record), "archive_sha256": sha(b"foreign archive")})
+        before = self.fixture_file_facts()
+        for candidates in ([], [foreign], [record, record]):
+            self.app.catalogue = lambda: candidates
+            with (
+                self.subTest(candidates=len(candidates)),
+                patch.object(recipe_service, "_HILL_COWHIDE_DONOR_ARCHIVE", record.archive_sha256),
+                self.assertRaisesRegex(RuleError, "donor import is unavailable"),
+            ):
+                self.resolve(recipe)
+            self.assertEqual(self.fixture_file_facts(), before)
+            self.assertFalse((self.root / "prepared").exists())
+
+    def test_missing_changed_or_linked_later_donor_member_refuses_without_mutation(self):
+        recipe, record, donor, members = self.donor_fixture()
+        path, original = members[1]
+        target = donor / path
+        for kind in ("missing", "changed", "linked"):
+            with self.subTest(kind=kind):
+                target.unlink()
+                if kind == "changed":
+                    target.write_bytes(b"planted wrong donor bytes")
+                elif kind == "linked":
+                    target.symlink_to(donor / members[0][0])
+                before = self.fixture_file_facts()
+                # Tree validation rejects links before the recipe-specific reader.
+                error = ActivationError if kind == "linked" else RuleError
+                with (
+                    patch.object(
+                        recipe_service, "_HILL_COWHIDE_DONOR_ARCHIVE", record.archive_sha256
+                    ),
+                    self.assertRaises(error),
+                ):
+                    self.resolve(recipe)
+                self.assertEqual(self.fixture_file_facts(), before)
+                self.assertFalse((self.root / "prepared").exists())
+                if target.is_symlink() or target.exists():
+                    target.unlink()
+                target.write_bytes(original)
+                os.utime(target, ns=(1_700_000_000_123_456_789,) * 2)
 
 
 if __name__ == "__main__":
