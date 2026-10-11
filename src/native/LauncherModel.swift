@@ -161,6 +161,8 @@ final class ScrollMemory { var point: NSPoint? }
 
     private func event(_ name: String, _ data: [String: Any]) {
         if name == "closed" { quitting = true; NotificationCenter.default.post(name: .nativeServicesClosed, object: nil) }
+        else if name == "close.requested" { NSApplication.shared.terminate(nil) }
+        else if name == "close.cancelled" { quitting = false }
         else if name == "history.exit" {
             exitPrompt = data
             Task { await refresh() }

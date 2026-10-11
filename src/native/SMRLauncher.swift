@@ -6,7 +6,7 @@ import SwiftUI
     var acceptedQuit = false
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let model else { return .terminateNow }
-        if acceptedQuit || model.fixture || !model.connected { return .terminateNow }
+        if acceptedQuit || model.fixture { return .terminateNow }
         if model.dirty {
             let alert = NSAlert()
             alert.messageText = "Quit with unsaved drafts?"
@@ -15,6 +15,7 @@ import SwiftUI
             alert.addButton(withTitle: "Discard Drafts & Quit")
             guard alert.runModal() == .alertSecondButtonReturn else { return .terminateCancel }
         }
+        if !model.connected { return .terminateNow }
         Task { await model.quit() }
         return .terminateCancel
     }

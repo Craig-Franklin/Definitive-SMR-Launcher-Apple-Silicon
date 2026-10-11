@@ -645,6 +645,68 @@ class NativeProtocolTests(TestCase):
             main()
         self.assertEqual(order, ["closed event and Tk lifecycle", "native pipe EOF"])
 
+    def test_tk_quit_requests_native_review_and_approved_or_eof_quit_uses_existing_guard(self):
+        w = window()
+        with patch("smr_launcher.native_backend.LauncherWindow._close") as guarded_close:
+            w._close()
+            guarded_close.assert_not_called()
+            self.assertEqual(
+                w._emit_native.call_args.args[0], dict(event="close.requested", data={})
+            )
+            w._native_workflow(dict(action="quit"))
+            self.assertTrue(w._native_parent_approved_close)
+            w.root.after_idle.call_args.args[0]()
+            guarded_close.assert_called_once_with()
+        w = window()
+        w._native_input_ended.set()
+        with patch("smr_launcher.native_backend.LauncherWindow._close") as guarded_close:
+            w._close()
+            guarded_close.assert_called_once_with()
+        w._emit_native.assert_not_called()
+
+    def test_cancelled_guarded_close_resets_native_approval_for_future_drafts(self):
+        w = window()
+        w._native_parent_approved_close = True
+        w._native_shutdown_started = True
+        w.close_when_idle = False
+        w.busy = True
+        w._native_tick()
+        self.assertTrue(w._native_parent_approved_close)
+        w.busy = False
+        w._native_tick()
+        self.assertFalse(w._native_parent_approved_close)
+        self.assertTrue(
+            any(
+                call.args[0].get("event") == "close.cancelled"
+                for call in w._emit_native.call_args_list
+            )
+        )
+        with patch("smr_launcher.native_backend.LauncherWindow._close") as guarded_close:
+            w._close()
+            guarded_close.assert_not_called()
+        self.assertEqual(w._emit_native.call_args.args[0]["event"], "close.requested")
+
+    def test_advanced_red_close_only_hides_tools_and_output_disconnect_allows_close(self):
+        from threading import Lock
+
+        w = window()
+        w._show = Mock()
+        w._native_workflow(dict(action="preferences"))
+        name, red_close = w.root.protocol.call_args.args
+        self.assertEqual(name, "WM_DELETE_WINDOW")
+        with patch("smr_launcher.native_backend.LauncherWindow._close") as guarded_close:
+            red_close()
+            guarded_close.assert_not_called()
+        self.assertFalse(w._native_advanced)
+        w.root.withdraw.assert_called_once_with()
+        w._native_output, w._native_output_lock = Mock(), Lock()
+        w._native_output.write.side_effect = BrokenPipeError("Synthetic disconnected parent")
+        NativeBackendWindow._emit_native(w, dict(event="status", data={}))
+        self.assertTrue(w._native_disconnected)
+        with patch("smr_launcher.native_backend.LauncherWindow._close") as guarded_close:
+            w._close()
+            guarded_close.assert_called_once_with()
+
     def test_quit_and_play_use_existing_guarded_paths(self):
         w = window()
         w._play, w._close = Mock(), Mock()

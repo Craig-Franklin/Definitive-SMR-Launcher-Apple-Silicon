@@ -74,12 +74,17 @@ executables and then the enclosing bundle are signed. On orderly shutdown Python
 waits for the frontend's input EOF before exiting; the updater waits for Python.
 This prevents replacement while the native frontend is still alive. A crashing
 child can conservatively produce UNKNOWN even after writing a final response.
+Advanced-tool Quit requests pass through the native draft warning. Closing the
+advanced window hides it. If an existing update dialog cancels shutdown, later
+quit requests require fresh approval. Disconnected native drafts still warn.
 
 ## Verification and limits
 
-Local full suite: **977 tests passed** on Apple Silicon macOS 27.2. Focused coverage
-includes 30 bridge/annotation tests, 26 history tests and one compiled Swift check.
-The latter covers retained selection/drafts, 1,000 synthetic maps and fragmented
+Local full suite before the final quit correction: **977 tests passed** on Apple
+Silicon macOS 27.2. After that correction, **35 focused native tests passed**,
+including 33 bridge/annotation tests and one compiled Swift check. The existing
+26 history tests also passed before the correction.
+The Swift check covers retained selection/drafts, 1,000 synthetic maps and fragmented
 pipe replies, events, rejection and disconnect. Forty in-memory query/sort samples
 had p95 about 2.4 ms. That measures model computation, not updated viewport rendering,
 memory growth or the full #218 performance target.

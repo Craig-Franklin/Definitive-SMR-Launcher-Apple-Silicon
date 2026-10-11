@@ -292,6 +292,9 @@ class NativeBackendWindow(LauncherWindow):
         self.native_library = NativeLibrary()
         self._native_requests = Queue(maxsize=64)
         self._native_input_ended = Event()
+        self._native_parent_approved_close = False
+        self._native_shutdown_started = False
+        self._native_disconnected = False
         self._native_completed = OrderedDict()
         self._native_output = output_stream or sys.stdout
         self._native_output_lock = Lock()
@@ -324,7 +327,21 @@ class NativeBackendWindow(LauncherWindow):
                 self._native_output.flush()
         except (OSError, ValueError):
             # The parent vanished. Preserve the normal transaction/update close path.
+            self._native_disconnected = True
             self.close_when_idle = True
+
+    def _close(self):
+        # Tk menus and dialogs must let the native owner review unsaved drafts.
+        # Once the native owner approves, preserve the existing transaction and
+        # pending-update close path. Disconnected channels cannot request review.
+        if (
+            getattr(self, "_native_parent_approved_close", False)
+            or getattr(self, "_native_disconnected", False)
+            or self._native_input_ended.is_set()
+        ):
+            self._native_shutdown_started = True
+            return super()._close()
+        self._emit_native(dict(event="close.requested", data={}))
 
     def _show(self, view):
         if self._native_advanced:
@@ -412,6 +429,17 @@ class NativeBackendWindow(LauncherWindow):
     def _native_tick(self):
         if self.closed:
             return
+        if (
+            getattr(self, "_native_parent_approved_close", False)
+            and getattr(self, "_native_shutdown_started", False)
+            and not self.busy
+            and not self.close_when_idle
+        ):
+            # A pending-update failure dialog can cancel the existing close flow.
+            # New close attempts must review any subsequently edited native draft.
+            self._native_parent_approved_close = False
+            self._native_shutdown_started = False
+            self._emit_native(dict(event="close.cancelled", data={}))
         status = self._native_status()
         if status != self._native_last_status:
             self._native_last_status = status
@@ -580,6 +608,8 @@ class NativeBackendWindow(LauncherWindow):
     def _native_workflow(self, params):
         action = text(params, "action")
         if action == "quit":
+            self._native_parent_approved_close = True
+            self._native_shutdown_started = False
             self.root.after_idle(self._close)
             return dict(accepted=True)
         if action == "hide-advanced":
