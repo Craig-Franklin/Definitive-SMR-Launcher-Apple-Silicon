@@ -96,6 +96,15 @@ can be incomplete or wrong. Indirect calls can hide relationships from a static
 call graph. Data and undiscovered code do not become understood because an
 export finished. Failed functions remain visible in the coverage record.
 
+A fresh import can produce different labels and row order. Our cold main
+replay reproduced the tested searches and map audits. All 79,340 reconstructed
+implementation files matched byte for byte; five external declaration labels
+and reference row order varied. External declaration comments contain no
+implementation. Match build identity, static address and body digest where
+available when comparing imports. Keep the accepted corpus as the reference;
+do not treat reconstructed labels as stable source declarations.
+[Validation](VALIDATION.md#pr-and-main-replay) records the exact limits.
+
 The SQLite index makes this evidence reusable. A local query can locate a
 function by name or containing address, inspect references, or search strings.
 Results go to a private file with bounded rows and optional bounded code.
