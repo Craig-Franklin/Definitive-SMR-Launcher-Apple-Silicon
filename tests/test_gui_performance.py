@@ -469,6 +469,7 @@ class MainIntegrationTests(TestCase):
     def test_memory_protection_preference_control_preserves_monitor_contract(self):
         w = window(); w.crash_monitor = SimpleNamespace(enabled=True, automatic_reporting=False,
                                                        protect_resources=False, configure=Mock())
+        w._submit = Mock()
         variables = []
         class Value:
             def __init__(self, value): self.value=value; variables.append(self)
@@ -481,6 +482,10 @@ class MainIntegrationTests(TestCase):
             self.assertFalse(protection.kwargs["variable"].get())
             protection.kwargs["variable"].value = True
             protection.kwargs["command"]()
+            w.crash_monitor.configure.assert_not_called()
+            label, operation = w._submit.call_args.args
+            self.assertIn("Saving", label)
+            operation()
         w.crash_monitor.configure.assert_called_once_with(enabled=True, automatic_reporting=False,
                                                           protect_resources=True)
 
