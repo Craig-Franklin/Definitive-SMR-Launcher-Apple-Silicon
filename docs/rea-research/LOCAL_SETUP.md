@@ -12,9 +12,17 @@ Use an official [Ghidra release](https://github.com/NationalSecurityAgency/ghidr
 
 Installers for Ghidra/JDK and host OS are not vendored or fully locked by npm. Record their version, distribution source and archive digest in the private environment manifest. A package lock reproduces npm dependencies, not the entire computer.
 
-## Install from this branch
+## Reuse from any local branch
 
-In the isolated research worktree:
+The tracked skill, original tools, lockfile and research notes travel with branches based on current `main`. The accepted corpus remains shared at `$HOME/Library/Application Support/SMR Research/corpus-v1`; keep the independent `corpus-main-replay-v1` beside it. Querying these indexes uses the standard-library Python tools in this repository and needs no npm install or new Ghidra import.
+
+Before retiring the research worktree, the pinned REA installation and reviewed source were preserved under `$HOME/Library/Application Support/SMR Research/tools/rea-6.4.0`. `node_modules` holds the existing CLI; `rea-review/source` holds the source snapshot pinned in `toolchain.json`. `preservation.json` records per-file digests and symlink targets. This is a local cache on the first Mac, not a downloaded dependency, second-machine replay or proof of source/npm equivalence. It is outside Git and available to every local branch without copying raw evidence into worktrees.
+
+For a targeted REA query, use the preserved executable at `"$HOME/Library/Application Support/SMR Research/tools/rea-6.4.0/node_modules/.bin/rea"`. Only populate branch-local dependencies when changing/testing the REA helper or when the shared installation is unavailable. Preserve the accepted smoke receipts; checking availability does not warrant another smoke run.
+
+## Install branch-local dependencies when needed
+
+From the relevant checkout:
 
 ```sh
 npm ci --prefix scripts/research/rea --ignore-scripts --no-audit --no-fund
@@ -65,12 +73,12 @@ For raw local-only analysis, use local Ghidra/CLI/manual inspection. An on-devic
 
 ## Reproduce and roll back
 
-As a later portability check, a second machine should check out this branch, install the specified tools, run `npm ci`, run the fixture helper and compare structured behavior and observed versions. Exact timings are not acceptance criteria. Preserve each receipt independently.
+As a later portability check, a second machine should check out the accepted revision, install the specified tools, run `npm ci`, run the fixture helper and compare structured behavior and observed versions. Exact timings are not acceptance criteria. Preserve each receipt independently.
 
 To stop using this setup, leave the optional directory unused or remove only its generated `node_modules` after confirming the exact path. No global agent configuration or launcher runtime was changed. Retain private receipts and any future authorized evidence according to the chosen retention policy; do not delete them as a routine cleanup side effect.
 
 ## Bulk extraction implementation path
 
-Use the existing persistent Ghidra project and ExportEngine.java instructions in scripts/research/README.md. First reconcile private existing exports with the module manifest; do not reimport a valid completed module. A small original runner must check private roots and copies, assign one output identity per module/slice/tool profile, redirect all provider output to private logs, preserve progress/completion/failure receipts and expose only allowlisted operational fields to cloud orchestration. Inspect exporter assumptions before admitting game output; it is not itself a publication gate. Keep all code, function metadata, strings, raw inventories and databases private.
+The implemented `scripts/research/corpus.py` runner and `ExportEngine.java` are documented in [CORPUS.md](CORPUS.md). Reconcile private exports with the module manifest before starting work; do not reimport a valid completed module. The runner checks private roots and copies, assigns output identities by module/slice/tool profile, redirects provider output to private logs, retains progress/failure receipts and exposes closed operational metadata. Keep code, function metadata, strings, raw inventories and databases private.
 
-Bulk extraction may take longer than an exploratory 20-minute analysis pass. Checkpoint per module and report progress without repeatedly restarting imports. The next implementation is this runner plus actual module/slice index support; no completed game corpus is claimed by these setup instructions.
+Bulk extraction may take longer than an exploratory 20-minute analysis pass. Checkpoint per module and report progress without repeatedly restarting imports. The accepted first-Mac corpus and independent main replay are recorded with coverage and reproducibility limits in [VALIDATION.md](VALIDATION.md); setup does not expand those claims.
