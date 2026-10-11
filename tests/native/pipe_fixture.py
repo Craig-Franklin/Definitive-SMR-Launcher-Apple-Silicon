@@ -18,6 +18,24 @@ for line in sys.stdin:
     if method == "fixture.counts":
         print(json.dumps({"id": request["id"], "ok": True, "data": counts}), flush=True)
         continue
+    if method == "briefing.translate":
+        if configuration.get("slow_translation"):
+            time.sleep(0.15)
+        params = request["params"]
+        value = {"id": request["id"], "ok": not configuration.get("reject_translation")}
+        value["error" if not value["ok"] else "data"] = (
+            "synthetic translation unavailable"
+            if not value["ok"]
+            else {
+                **params,
+                "variant_id": "different-edition"
+                if configuration.get("changed_translation_edition")
+                else params["variant_id"],
+                "text": "Présentation fictive traduite.",
+            }
+        )
+        print(json.dumps(value), flush=True)
+        continue
     if method in ("details", "history.record"):
         failed = configuration.get(
             "reject_record" if method == "history.record" else "reject_details"

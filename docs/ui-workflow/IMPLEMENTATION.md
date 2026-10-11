@@ -104,6 +104,9 @@ Integrate these workflows into the relevant native destinations and contextual
 inspectors, preserving validation and explicit consent. Remove Tk ownership once
 its remaining UI and event-loop responsibilities have native replacements. A full
 Python service rewrite is not a prerequisite for this interface integration.
+The [native tool destination map](NATIVE_TOOLS.md) records that direction. Briefing
+translation is now integrated directly into Overview, with edition-bound results,
+language choices and Show Original. Other advanced workflows remain to be migrated.
 
 ## Verification and limits
 

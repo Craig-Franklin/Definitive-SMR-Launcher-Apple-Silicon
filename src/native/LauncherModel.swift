@@ -64,6 +64,14 @@ struct OutcomeDraft {
     var checkpoint = ""
     var continued = false
 }
+struct BriefingTranslation {
+    let archive: String
+    let variant: String
+    var source = "en"
+    var target: String
+    var text: String?
+    var showingResult = false
+}
 final class ScrollMemory { var point: NSPoint? }
 
 @MainActor final class LauncherModel: ObservableObject {
@@ -86,6 +94,7 @@ final class ScrollMemory { var point: NSPoint? }
     @Published var details: [String: [String: Any]] = [:]
     @Published var personal: [String: PersonalDraft] = [:]
     @Published var outcomes: [String: OutcomeDraft] = [:]
+    @Published var translations: [String: BriefingTranslation] = [:]
     @Published var preferences: [String: Any] = [:]
     @Published var activity: [[String: Any]] = []
     @Published var collection: [[String: Any]] = []
@@ -211,7 +220,7 @@ final class ScrollMemory { var point: NSPoint? }
                 guard Set(replacement.map(\.id)).count == replacement.count else { throw NativeError.message("The library contains duplicate identities. Existing presentation retained.") }
                 let old = Dictionary(uniqueKeysWithValues: self.maps.map { ($0.id, $0.archive + $0.variant) })
                 for map in replacement where old[map.id] != nil && old[map.id] != map.archive + map.variant {
-                    self.personal[map.id] = nil; self.outcomes[map.id] = nil
+                    self.personal[map.id] = nil; self.outcomes[map.id] = nil; self.translations[map.id] = nil
                 }
                 self.maps = replacement
                 if !replacement.contains(where: { $0.id == self.selection }) { self.selection = replacement.first?.id }
@@ -227,13 +236,40 @@ final class ScrollMemory { var point: NSPoint? }
     func select(_ map: MapItem) {
         selection = map.id; narrowDetail = true
     }
+    func translation(_ map: MapItem) -> BriefingTranslation {
+        if let saved = translations[map.id], saved.archive == map.archive, saved.variant == map.variant { return saved }
+        return BriefingTranslation(archive: map.archive, variant: map.variant, target: preferences.text("language", "en"))
+    }
+    func setTranslationLanguage(_ map: MapItem, _ key: WritableKeyPath<BriefingTranslation, String>, _ value: String) {
+        var draft = translation(map)
+        draft[keyPath: key] = value; draft.text = nil; draft.showingResult = false
+        translations[map.id] = draft
+    }
+    func translateBriefing(_ map: MapItem) async {
+        let draft = translation(map)
+        await request("briefing.translate", ["profile_id": map.id, "archive_sha256": map.archive, "variant_id": map.variant, "source": draft.source, "target": draft.target]) { value in
+            guard let current = self.maps.first(where: { $0.id == map.id }),
+                  current.archive == map.archive, current.variant == map.variant,
+                  value.text("profile_id") == map.id, value.text("archive_sha256") == map.archive,
+                  value.text("variant_id") == map.variant, value.text("source") == draft.source,
+                  value.text("target") == draft.target, let text = value["text"] as? String else {
+                self.error = "The briefing translation no longer matches this map edition. Original briefing retained."
+                return
+            }
+            var result = self.translation(current)
+            guard result.source == draft.source, result.target == draft.target else { return }
+            result.text = text; result.showingResult = true
+            self.translations[map.id] = result
+            self.status = "Briefing translated. Original package preserved."
+        }
+    }
     func loadDetails(_ id: String, force: Bool = false) async {
         if details[id] != nil && !force { return }
         if fixture {
             details[id] = ["scenarios": ["Coastal scenario"], "history": [
                 ["kind": "process_confirmed", "label": "Process observed · synthetic", "attempt_id": "fictional-attempt", "scenario": "Coastal scenario", "game_id": "", "at": "2026-10-11 12:00", "source": "synthetic fixture"],
                 ["kind": "crash_unknown", "label": "Crash · phase unknown · synthetic", "attempt_id": "fictional-attempt", "scenario": "Coastal scenario", "incident_id": "fictional-incident", "at": "2026-10-11 12:05", "source": "synthetic fixture"]
-            ], "context": ["game_executable_sha256": String(repeating: "f", count: 64)], "verification_text": "Synthetic fixture · actual compatibility is unknown", "checks_text": "No package scan executed."]
+            ], "context": ["game_executable_sha256": String(repeating: "f", count: 64)], "languages": [["id": "en", "name": "English"], ["id": "fr", "name": "Français"]], "verification_text": "Synthetic fixture · actual compatibility is unknown", "checks_text": "No package scan executed."]
             return
         }
         await request("details", ["profile_id": id]) { value in

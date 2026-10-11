@@ -126,6 +126,33 @@ import Foundation
         precondition((afterReadFailure["history.record"] as? Int ?? 0) == (beforeReadFailure["history.record"] as? Int ?? 0) + 1)
         precondition(afterReadFailure["snapshot"] as? Int == beforeReadFailure["snapshot"] as? Int)
         print("Confirmation checks passed; one detail read, no library rebuild, retained selection/drafts, rejected write and post-write read failure")
+
+        liveModel.setTranslationLanguage(reported, \.target, "fr")
+        let beforeTranslation = try await backend.call("fixture.counts")
+        await liveModel.translateBriefing(reported)
+        let afterTranslation = try await backend.call("fixture.counts")
+        precondition(liveModel.error.isEmpty && liveModel.translation(reported).text == "Présentation fictive traduite.")
+        precondition(liveModel.translation(reported).showingResult && liveModel.translation(untouched).text == nil)
+        precondition(liveModel.maps[0].metadata.text("description") == reported.metadata.text("description"), "Translation must preserve the original briefing")
+        precondition(afterTranslation["snapshot"] as? Int == beforeTranslation["snapshot"] as? Int, "Translation must not reload maps")
+        precondition(afterTranslation["details"] as? Int == beforeTranslation["details"] as? Int, "Translation must not verify unrelated details")
+        precondition(liveModel.personal[untouched.id]?.dirty == true && liveModel.selection == reported.id)
+        liveModel.setTranslationLanguage(reported, \.source, "de")
+        precondition(liveModel.translation(reported).text == nil && !liveModel.translation(reported).showingResult)
+        _ = try await backend.call("fixture.configure", ["changed_translation_edition": true])
+        await liveModel.translateBriefing(reported)
+        precondition(liveModel.error.contains("no longer matches") && liveModel.translation(reported).text == nil)
+        _ = try await backend.call("fixture.configure", ["reject_translation": true])
+        await liveModel.translateBriefing(reported)
+        precondition(liveModel.error == "synthetic translation unavailable" && liveModel.translation(reported).text == nil)
+        _ = try await backend.call("fixture.configure", ["slow_translation": true])
+        let translationTask = Task { await liveModel.translateBriefing(reported) }
+        while !liveModel.busy { await Task.yield() }
+        liveModel.select(untouched)
+        precondition(liveModel.selection == untouched.id && liveModel.busy, "Cached selection stays usable during translation")
+        await translationTask.value
+        precondition(liveModel.translation(reported).text != nil && liveModel.translation(untouched).text == nil && liveModel.selection == untouched.id)
+        print("Integrated translation checks passed; map-scoped result, unchanged original/library/drafts, rejected provider and wrong edition")
         do { _ = try await backend.call("disconnect"); preconditionFailure("Lost mutation result was swallowed") }
         catch { precondition(error.localizedDescription.contains("unknown") || error.localizedDescription.contains("inspect")) }
         print("Native pipe checks passed; partial replies, events, explicit rejection and unknown disconnect")

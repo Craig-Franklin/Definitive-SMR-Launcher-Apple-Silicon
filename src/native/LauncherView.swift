@@ -169,7 +169,6 @@ struct LauncherView: View {
                                 .accessibilityElement(children: .combine)
                                 .accessibilityLabel("\(map.name), \(map.status)")
                                 .accessibilityValue(model.selection == map.id ? "Selected" : "Not selected")
-                                .disabled(model.working)
                         }
                     }.padding(16).background(ScrollPosition(memory: model.gridScroll))
                 }.hardScrollEdge()
@@ -248,12 +247,47 @@ struct LauncherView: View {
             fact("Mac testing", map.verification)
             Divider()
             Text(model.translated("Briefing")).font(.headline)
-            Text(map.metadata.text("description").isEmpty ? "No briefing provided." : map.metadata.text("description")).textSelection(.enabled)
+            let translation = model.translation(map)
+            let original = map.metadata.text("description")
+            if translation.showingResult, let text = translation.text {
+                Text("Translation · \(translation.source) to \(translation.target)").font(.caption).foregroundStyle(.secondary)
+                Text(text.isEmpty ? "No briefing provided." : text).textSelection(.enabled)
+                Button("Show Original") {
+                    var value = model.translation(map); value.showingResult = false; model.translations[map.id] = value
+                }
+            } else {
+                Text(original.isEmpty ? "No briefing provided." : original).textSelection(.enabled)
+                if translation.text != nil {
+                    Button("Show Translation") {
+                        var value = model.translation(map); value.showingResult = true; model.translations[map.id] = value
+                    }
+                }
+            }
             HStack {
-                Button("Read Aloud") { advanced("read", profile: map.id) }
+                Button(translation.showingResult ? "Read Original Aloud" : "Read Aloud") { advanced("read", profile: map.id) }
                 Button("Stop Reading") { advanced("stop-reading", profile: map.id) }
-                Button("Translate…") { advanced("translate", profile: map.id) }
             }.disabled(model.working)
+            DisclosureGroup("Translate Briefing") {
+                VStack(alignment: .leading, spacing: 10) {
+                    let languages = model.details[map.id]?.rows("languages") ?? []
+                    if languages.isEmpty { Text("Loading available languages…").foregroundStyle(.secondary) }
+                    Picker("From", selection: Binding(get: { model.translation(map).source }, set: { model.setTranslationLanguage(map, \.source, $0) })) {
+                        ForEach(languages.indices, id: \.self) { index in
+                            Text(languages[index].text("name")).tag(languages[index].text("id"))
+                        }
+                    }
+                    Picker("To", selection: Binding(get: { model.translation(map).target }, set: { model.setTranslationLanguage(map, \.target, $0) })) {
+                        ForEach(languages.indices, id: \.self) { index in
+                            Text(languages[index].text("name")).tag(languages[index].text("id"))
+                        }
+                    }
+                    Button("Translate") { Task { await model.translateBriefing(map) } }
+                        .disabled(model.working || !model.connected || languages.isEmpty || original.isEmpty)
+                    Text("Uses Apple’s installed translation languages on macOS 26 or later. Original map text stays intact.").font(.caption).foregroundStyle(.secondary)
+                    Button("Manage Translation Languages…") { advanced("translation-settings") }
+                        .disabled(model.working || !model.connected)
+                }.padding(.top, 8)
+            }
             if !map.notes.isEmpty { Text("Personal notes").font(.headline); Text(map.notes).textSelection(.enabled) }
             DisclosureGroup("Package Text & Sources") {
                 VStack(alignment: .leading, spacing: 12) {

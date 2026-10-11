@@ -23,7 +23,13 @@ from .collection import fetch_catalogue, read_cached_catalogue, write_cached_cat
 from .gui import LauncherWindow, _checks_text
 from .application import LauncherApplication
 from .history_ui import confirm_checkpoint, save_digest, timeline_text
-from .language import LANGUAGES, TRANSLATIONS, set_language, open_translation_settings
+from .language import (
+    LANGUAGES,
+    TRANSLATIONS,
+    set_language,
+    open_translation_settings,
+    translate_briefing,
+)
 from .voices import list_voices, open_voice_settings
 from .play_history import (
     CHECKPOINTS,
@@ -221,6 +227,7 @@ class NativeLibrary:
         return dict(
             profile_id=record.profile_id,
             scenarios=list(record.scenarios),
+            languages=[dict(id=k, name=v) for k, v in LANGUAGES.items()],
             context=ctx,
             history=[{**e, "label": LABELS[e["kind"]]} for e in rows],
             summary={
@@ -239,7 +246,7 @@ class NativeLibrary:
         keys = IDENTITIES if build else ("archive_sha256", "variant_id")
         if any(text(params, key) != expected[key] for key in keys):
             raise ValueError(
-                "The selected map edition or game build changed; refresh details before saving"
+                "The selected map edition or game build changed; refresh details before continuing"
             )
 
     def annotations_save(self, app, params):
@@ -254,6 +261,23 @@ class NativeLibrary:
             record, title=text(params, "title"), notes=text(params, "notes"), image_png=image
         )
         return dict(saved=True)
+
+    def briefing_translate(self, app, params):
+        record = self.record(app, text(params, "profile_id"))
+        self.require_scope(app, record, params)
+        source, target = text(params, "source"), text(params, "target")
+        if source not in LANGUAGES or target not in LANGUAGES:
+            raise ValueError("Choose a supported translation language")
+        briefing = app.map_metadata(record).description
+        translated = translate_briefing(briefing, target, source)
+        return dict(
+            profile_id=record.profile_id,
+            archive_sha256=record.archive_sha256,
+            variant_id=record.variant_id,
+            source=source,
+            target=target,
+            text=translated,
+        )
 
     def history_record(self, app, params):
         record = self.record(app, text(params, "profile_id"))
@@ -563,6 +587,8 @@ class NativeBackendWindow(LauncherWindow):
                     )
                 elif method == "details":
                     operation = lambda: self.native_library.details(app, params)
+                elif method == "briefing.translate":
+                    operation = lambda: self.native_library.briefing_translate(app, params)
                 elif method == "annotations.save":
                     operation = lambda: self.native_library.annotations_save(app, params)
                 elif method == "history.record":
@@ -729,7 +755,6 @@ class NativeBackendWindow(LauncherWindow):
             if action not in {
                 "collection",
                 "details",
-                "translate",
                 "legacy-test",
                 "fix-test",
                 "crash-reports",
@@ -746,7 +771,7 @@ class NativeBackendWindow(LauncherWindow):
             self.root.protocol(
                 "WM_DELETE_WINDOW", lambda: self._native_workflow(dict(action="hide-advanced"))
             )
-            if action in ("details", "translate", "legacy-test", "fix-test"):
+            if action in ("details", "legacy-test", "fix-test"):
                 if self.app is None:
                     raise ValueError("Find the Steam Mac game before opening map details")
                 app, profile_id = self.app, text(params, "profile_id")

@@ -169,6 +169,86 @@ class AnnotationTests(TestCase):
 
 
 class NativeLibraryTests(TestCase):
+    def test_translation_uses_current_package_text_and_keeps_presentation_cache(self):
+        model, application = NativeLibrary(), app("/synthetic-not-read")
+        cached = model.cached_items = object()
+        metadata = application.map_metadata.return_value
+        params = dict(
+            profile_id="synthetic",
+            archive_sha256="a" * 64,
+            variant_id="b" * 64,
+            source="en",
+            target="fr",
+            text="Untrusted client text",
+        )
+        with patch(
+            "smr_launcher.native_backend.translate_briefing", return_value="Traduit"
+        ) as provider:
+            result = model.briefing_translate(application, params)
+        provider.assert_called_once_with("Original package text", "fr", "en")
+        application.catalogue.assert_called_once_with()
+        application.map_metadata.assert_called_once_with(record())
+        application.verification_for.assert_not_called()
+        application.import_checks.assert_not_called()
+        self.assertEqual(
+            result, {k: v for k, v in params.items() if k != "text"} | {"text": "Traduit"}
+        )
+        self.assertEqual(metadata.description, "Original package text")
+        self.assertIs(model.cached_items, cached)
+
+    def test_translation_rejects_missing_or_stale_scope_unknown_map_and_bad_languages(self):
+        params = dict(
+            profile_id="synthetic",
+            archive_sha256="a" * 64,
+            variant_id="b" * 64,
+            source="en",
+            target="fr",
+        )
+        for changes in (
+            {"profile_id": "missing"},
+            {"profile_id": 1},
+            {"archive_sha256": ""},
+            {"archive_sha256": "d" * 64},
+            {"variant_id": ""},
+            {"variant_id": "d" * 64},
+            {"source": "xx"},
+            {"source": None},
+            {"target": ""},
+            {"target": ["fr"]},
+        ):
+            with self.subTest(changes=changes):
+                application = app("/synthetic-not-read")
+                with patch("smr_launcher.native_backend.translate_briefing") as provider:
+                    with self.assertRaises(ValueError):
+                        NativeLibrary().briefing_translate(application, {**params, **changes})
+                provider.assert_not_called()
+                application.map_metadata.assert_not_called()
+
+    def test_translation_preserves_provider_error_and_cached_content(self):
+        from smr_launcher.language import TranslationError
+
+        model, application = NativeLibrary(), app("/synthetic-not-read")
+        cached = model.cached_items = object()
+        with patch(
+            "smr_launcher.native_backend.translate_briefing",
+            side_effect=TranslationError("Synthetic installed language unavailable"),
+        ):
+            with self.assertRaisesRegex(
+                TranslationError, "Synthetic installed language unavailable"
+            ):
+                model.briefing_translate(
+                    application,
+                    dict(
+                        profile_id="synthetic",
+                        archive_sha256="a" * 64,
+                        variant_id="b" * 64,
+                        source="en",
+                        target="fr",
+                    ),
+                )
+        self.assertIs(model.cached_items, cached)
+        self.assertEqual(application.map_metadata.return_value.description, "Original package text")
+
     def test_snapshot_cached_until_explicit_refresh_but_annotations_update(self):
         with TemporaryDirectory(dir=Path(gettempdir()).resolve()) as folder:
             model, application = NativeLibrary(), app(folder)
@@ -437,7 +517,14 @@ class NativeLibraryTests(TestCase):
                         source="observed",
                     )
                 )
-            details = model.details(application, dict(profile_id="synthetic"))
+            with patch("smr_launcher.native_backend.list_voices") as voices:
+                details = model.details(application, dict(profile_id="synthetic"))
+            voices.assert_not_called()
+            from smr_launcher.language import LANGUAGES
+
+            self.assertEqual(
+                details["languages"], [dict(id=k, name=v) for k, v in LANGUAGES.items()]
+            )
             self.assertEqual(len(details["history"]), 1)
             self.assertEqual(details["history"][0]["game_executable_sha256"], "c" * 64)
 
@@ -697,6 +784,94 @@ class NativeProtocolTests(TestCase):
             self.assertTrue(response["ok"])
             self.assertTrue(response["data"]["enrolled"])
             self.assertEqual(response["data"]["maps"][0]["id"], "synthetic")
+
+    def test_translation_worker_replies_without_tk_dialogs_or_library_reload(self):
+        from collections import OrderedDict
+        from threading import Thread, get_ident
+        from smr_launcher.language import TranslationError
+
+        for fail in (False, True):
+            with self.subTest(fail=fail):
+                w = window()
+                w._native_completed = OrderedDict()
+                w.app = app("/synthetic-not-read")
+                w._map_details, w._show = Mock(), Mock()
+                cached = w.native_library.cached_items = object()
+                work, threads = [], []
+                w._background = lambda operation, completed, **kwargs: work.append(
+                    (operation, completed)
+                )
+
+                def provider(*args):
+                    threads.append(get_ident())
+                    if fail:
+                        raise TranslationError("Synthetic provider failed")
+                    return "Traduit"
+
+                with (
+                    patch("smr_launcher.native_backend.translate_briefing", side_effect=provider),
+                    patch(
+                        "smr_launcher.native_backend.gallery_snapshot",
+                        side_effect=AssertionError("No gallery reload"),
+                    ),
+                    patch(
+                        "smr_launcher.native_backend.PlayHistoryStore",
+                        side_effect=AssertionError("No history reads"),
+                    ),
+                ):
+                    w._native_dispatch(
+                        dict(
+                            id="translate",
+                            method="briefing.translate",
+                            params=dict(
+                                profile_id="synthetic",
+                                archive_sha256="a" * 64,
+                                variant_id="b" * 64,
+                                source="en",
+                                target="fr",
+                            ),
+                        )
+                    )
+                    w.app.map_metadata.assert_not_called()
+                    w._emit_native.assert_not_called()
+                    self.assertTrue(w.busy)
+                    results = []
+
+                    def run():
+                        try:
+                            results.append((True, work[0][0]()))
+                        except TranslationError as exc:
+                            results.append((False, exc))
+
+                    worker = Thread(target=run)
+                    worker.start()
+                    worker.join(5)
+                    self.assertFalse(worker.is_alive())
+                    self.assertNotEqual(threads, [get_ident()])
+                    work[0][1](*results[0])
+                self.assertFalse(w.busy)
+                self.assertIs(w.native_library.cached_items, cached)
+                response = w._emit_native.call_args.args[0]
+                self.assertEqual(response["ok"], not fail)
+                if fail:
+                    self.assertEqual(response["error"], "Synthetic provider failed")
+                else:
+                    self.assertEqual(response["data"]["text"], "Traduit")
+                w._map_details.assert_not_called()
+                w._show.assert_not_called()
+                w.root.deiconify.assert_not_called()
+                w.app.verification_for.assert_not_called()
+                w.app.import_checks.assert_not_called()
+
+    def test_removed_translate_workflow_cannot_open_legacy_tools(self):
+        w = window()
+        w._map_details, w._show = Mock(), Mock()
+        with self.assertRaisesRegex(ValueError, "Unknown workflow: translate"):
+            w._native_workflow(dict(action="translate", profile_id="synthetic"))
+        w._map_details.assert_not_called()
+        w._show.assert_not_called()
+        w.root.deiconify.assert_not_called()
+        self.activation_policy.assert_not_called()
 
     def test_contextual_exit_offer_is_once_and_checks_exact_identities(self):
         with TemporaryDirectory(dir=Path(gettempdir()).resolve()) as folder:
