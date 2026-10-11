@@ -110,13 +110,18 @@ class NavigationTests(unittest.TestCase):
         window.app = Mock(); window.root = Mock(); window.status = Mock()
         record = SimpleNamespace(profile_id="map-example")
         window._records = Mock(return_value=(record,))
+        window.app.catalogue.return_value = (record,)
         window._submit = Mock()
         window.app.verification_for.side_effect = RuntimeError("Resource changed during inspection")
         with patch("smr_launcher.gui.messagebox.showerror") as error:
             window._play(record.profile_id)
+            _label, inspect, _checked = window._submit.call_args.args
+            with self.assertRaises(RuntimeError) as refusal:
+                inspect()
+            window._submit.call_args.kwargs["failed"](refusal.exception)
             error.assert_called_once()
             self.assertIn("Resource changed", error.call_args.args[1])
-        window._submit.assert_not_called()
+        window._submit.assert_called_once()  # Only inspection; no launch dispatch.
         window.app.play.assert_not_called()
 
     def test_map_details_survives_resource_inspection_failure_without_second_read(self):
@@ -128,6 +133,8 @@ class NavigationTests(unittest.TestCase):
         window.community_index = {}
         window.language_preferences = SimpleNamespace(language="en")
         window._localize_widgets = Mock()
+        window._attach_activity = Mock()
+        window._submit = Mock()
         window._metadata = Mock(return_value=SimpleNamespace(
             name="Example", author="", modified_by="", version="", created="", updated="",
             map_type="", source_urls=(), description="Briefing", raw_text=""))
@@ -135,11 +142,14 @@ class NavigationTests(unittest.TestCase):
             archive_filename="Example.7z", source_url="", archive_sha256="a" * 64,
             variant_id="b" * 64)
         window.app.library = Path("/synthetic/library")
+        window.app.map_metadata.return_value = window._metadata.return_value
         with patch("smr_launcher.gui.tk") as tk, patch("smr_launcher.gui.ttk") as ttk, \
              patch("smr_launcher.gui.HistoryPanel"), \
              patch("smr_launcher.gui.render_linked_text", side_effect=lambda w, text: w.insert("1.0", text)), \
              patch("smr_launcher.gui._checks_text", return_value="Static checks"):
             window._map_details(record)
+            _label, prepare, finished = window._submit.call_args.args
+            finished(prepare())
             window.app.verification_for.assert_called_once_with(record)
             self.assertTrue(any(c.kwargs.get("text") == "Needs inspection"
                                 for c in ttk.Label.call_args_list))

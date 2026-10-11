@@ -71,7 +71,7 @@ class NativeHistoryContracts(unittest.TestCase):
         window.map_filter = tk.StringVar(value="All maps"); window.sort_order = tk.StringVar(value="Name A–Z")
         window.status = tk.StringVar(); window.gallery_count = Mock(); window.images = {}
         window._localize_widgets = Mock()
-        window._background = lambda operation, finished: finished(True, operation())
+        window._background = lambda operation, finished, **kw: finished(True, operation())
         records = [SimpleNamespace(name="Map " + ("long title " * (i+1)), archive_sha256=hex(i+1)[2:]*64,
                    variant_id=hex(i+5)[2:]*64, profile_id=str(i), archive_filename=str(i)+".7z") for i in range(4)]
         window.app = SimpleNamespace(library=self.library, installation=SimpleNamespace(executable_sha256="f"*64),

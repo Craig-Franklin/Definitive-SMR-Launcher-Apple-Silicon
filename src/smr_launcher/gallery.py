@@ -63,7 +63,7 @@ def _read_art(path, maximum=MAX_ART_BYTES):
             os.close(parent)
 
 
-def gallery_snapshot(app, cancelled, *, history_error=""):
+def gallery_snapshot(app, cancelled, progress=None, *, history_error=""):
     """Re-read secure metadata and contextual verification for this presentation."""
     result = []
     try:
@@ -71,7 +71,10 @@ def gallery_snapshot(app, cancelled, *, history_error=""):
     except (OSError, ValueError, AttributeError, TypeError) as exc:
         history, history_error = (), str(exc)
     remaining_art = MAX_SNAPSHOT_ART_BYTES
-    for record in app.catalogue():
+    records = app.catalogue()
+    if progress:
+        progress(0, len(records))
+    for record in records:
         if cancelled.is_set():
             return ()
         metadata = app.map_metadata(record)
@@ -91,6 +94,8 @@ def gallery_snapshot(app, cancelled, *, history_error=""):
             summary, error = None, str(exc)
         result.append(GalleryItem(record, metadata, label, notice, art,
                                   hashlib.sha256(art).hexdigest() if art else "", summary, error))
+        if progress:
+            progress(len(result), len(records))
     return tuple(result) if not cancelled.is_set() else ()
 
 
