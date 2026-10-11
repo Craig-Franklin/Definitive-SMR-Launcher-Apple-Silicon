@@ -38,9 +38,9 @@ class KnowledgeTests(unittest.TestCase):
         m={'id':mid,'sha256':digest,'architecture':'x86_64','image_uuid':None,'copy':f'inputs/{mid}.bin','bytes':len(data),'sources':[]}
         k.c.write(self.root/'manifest.json',{'schema':1,'profile':k.c.profile(),'modules':[m],'resources':[],'symlinks':[]})
         out=self.root/'modules'/mid/'export';out.mkdir(parents=True)
-        k.c.write(out/'identity.json',{'binary_sha256':digest})
+        k.c.write(out/'identity.json',{'binary_sha256':digest,'ghidra_version':k.c.profile()['ghidra']})
         counts={x:0 for x in k.c.COUNTS};counts.update(references=36,strings=36)
-        k.c.write(out/'COMPLETE.json',dict(counts,binary_sha256=digest,status='complete'))
+        k.c.write(out/'COMPLETE.json',dict(counts,binary_sha256=digest,status='complete',ghidra_version=k.c.profile()['ghidra']))
         for name in k.c.FILES:
             rows=refs if name=='references.jsonl' else strings if name=='strings.jsonl' else []
             k.c.write(out/name,b''.join(k.c.canonical(row)+b'\n' for row in rows))

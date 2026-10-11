@@ -25,6 +25,7 @@ FILES = ('functions.jsonl', 'references.jsonl', 'callgraph.jsonl', 'strings.json
 ARCHES = ('x86_64', 'i386', 'arm64')
 MAGIC = {bytes.fromhex(x) for x in ('feedface','cefaedfe','feedfacf','cffaedfe','cafebabe','bebafeca','cafebabf','bfbafeca')}
 COUNTS = ('functions_seen','decompiled','failed','external','references','call_edges','strings','string_references')
+RUNNER_SHA = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
 class Refusal(ValueError):
     pass
@@ -318,6 +319,8 @@ def export_digest(directory, expected_sha):
     summary=load(directory/'COMPLETE.json')
     if identity['binary_sha256']!=expected_sha or summary['binary_sha256']!=expected_sha or summary['status']!='complete':
         raise Refusal('export identity/completion mismatch')
+    if identity.get('ghidra_version')!=profile()['ghidra'] or summary.get('ghidra_version')!=profile()['ghidra']:
+        raise Refusal('provider build mismatch')
     counts={key:integer(summary[key]) for key in COUNTS}
     if counts['functions_seen']!=counts['decompiled']+counts['failed']+counts['external']:
         raise Refusal('inconsistent completion counts')
@@ -376,17 +379,21 @@ def run(root, indices=None, seconds=3600, reuse=True):
         argv+=['-scriptPath',str(HERE),'-postScript','ExportEngine.java',str(out),'20','-max-cpu','2']
         if (out/'COMPLETE.json').exists():
             (out/'COMPLETE.json').rename(out/('COMPLETE-'+attempt+'.previous.json'))
-        write(receipt,{'status':'running','attempt':attempt,'input_sha256':m['sha256'],'argv':argv,'log':str(log),'started':time.time()},replace=True)
+        provenance={'attempt':attempt,'input_sha256':m['sha256'],'argv':argv,'log':str(log),
+                    'started':time.time(),'runner_sha256':RUNNER_SHA,'profile':value['profile']}
+        write(receipt,dict(provenance,status='running'),replace=True)
         # Separate owned process group permits scoped termination. Never kill unrelated Java/Ghidra.
         with log.open('xb') as stream:
             proc=subprocess.Popen(argv,stdout=stream,stderr=subprocess.STDOUT,env=env,start_new_session=True)
             try:code=proc.wait(timeout=seconds)
             except (subprocess.TimeoutExpired,KeyboardInterrupt):
-                os.killpg(proc.pid,signal.SIGTERM)
+                try:os.killpg(proc.pid,signal.SIGTERM)
+                except ProcessLookupError:pass
                 try:proc.wait(timeout=15)
                 except subprocess.TimeoutExpired:os.killpg(proc.pid,signal.SIGKILL);proc.wait()
                 code=124
-        item={'status':'failed','exit_code':code,'input_sha256':m['sha256'],'log':str(log),'attempt':attempt}
+        item=dict(provenance,status='failed',exit_code=code,finished=time.time(),provider_pid=proc.pid)
+        item['elapsed_seconds']=round(item['finished']-item['started'],3)
         if file_sha(contained(root,m['copy']))!=m['sha256']:raise Refusal('analysis changed input')
         if code==0 and (out/'COMPLETE.json').exists():
             item['export']=export_digest(out,m['sha256']);item['status']='complete'

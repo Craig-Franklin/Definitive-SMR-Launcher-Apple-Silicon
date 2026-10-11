@@ -22,6 +22,13 @@ in its operational response. The extracted identities remain private. This
 cross-check validates the table reader against a second static representation;
 it does not establish how every engine caller uses that table.
 
+The 11 October 2026 acceptance run matched all 36 entries. The narrow installed
+library audit inspected 236 catalog variants in 221 directories. It flagged 131
+directories with outside-table identities, including 120 with explicit placement;
+10 directories remained unresolved. These are static review leads, not counts of
+broken maps or proven crashes. The broader auditor applies different projections
+and coverage, so its category counts need not equal the narrow screen's counts.
+
 Original implementation: `src/smr_launcher/industry_registry.py` and
 `scripts/research/check_industry_registry.py`. Independently specified synthetic
 maps cover a registered identity, an outside identity, explicit placement,

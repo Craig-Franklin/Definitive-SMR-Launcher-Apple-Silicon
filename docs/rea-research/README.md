@@ -19,7 +19,7 @@ External system libraries are dependency references, not a request to decompile 
 ## Working location and start here
 
 - Personal repository only: `Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon`.
-- Research branch: `Craig-Franklin/rea-stability-research`; [draft PR #205](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/pull/205).
+- Research branch: `Craig-Franklin/rea-stability-research`; [PR #205](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/pull/205).
 - [Project #4](https://github.com/users/Craig-Franklin/projects/4) tracks the work. Existing REA IDs are retained; several item scopes changed with this revision.
 - Private corpus and receipts live outside every Git worktree. The public branch contains original tools/tests/docs and reviewed original findings only.
 
@@ -34,15 +34,15 @@ At session start read this file, [AI_PLAYBOOK.md](AI_PLAYBOOK.md), the current s
 | REA-01 | Choose the local corpus method | Existing exporter for bulk, REA for targeted gaps; assessment complete |
 | REA-02 | Keep the pinned local toolchain usable | First-machine smoke and document-bound cache replay passed; accepted for this Mac; second-machine replay is a portability follow-up |
 | REA-03 | Record local authorization and disclosure boundary | Settled by Craig's instruction; local extraction authorized, raw output private, reviewed original analysis publishable; no license-resolution gate |
-| REA-04 | Identify builds and make the private corpus resumable/queryable | Metadata inventory started; extend synthetic index to real module/slice identities, digest/coverage checks, bounded retrieval and original-analysis handoffs |
-| REA-05 | Complete bulk local decompilation | Reuse verified existing exports first; persist one Ghidra analysis per unique module/slice; export every discovered function; enumerate failures and unresolved code |
-| REA-06 | Build reusable knowledge and AI session handoffs | Local function/resource lookup; original subsystem notes with evidence IDs, confidence and unknowns; compact reviewed handoff and human-readable developer guide using Caveman's concise explanation guidance |
-| REA-07 | Use the corpus for building, debugging and crashes | One request at a time; matching build/UUID, targeted evidence, falsifying checks and original diagnostics; runtime work stays separately scoped |
-| REA-08 | Publish original tools and reviewed analysis as useful | Explicit candidate-file review, synthetic tests for code changes, signed exact-fork push/readback; no raw corpus in GitHub/CI |
+| REA-04 | Identify builds and make the private corpus resumable/queryable | Eight slice identities; digest/coverage checks; SQLite index; four bounded lookup modes demonstrated; closed publication projection |
+| REA-05 | Complete bulk local decompilation | Eight analyzed/exported slices, all 81,808 discovered functions attempted; 79,340 decompiled, 2,241 external, 227 failures retained; installed resources unchanged |
+| REA-06 | Build reusable knowledge and AI session handoffs | Original finding catalog, private static binding, developer guide using Caveman guidance, root instructions and compact handoff |
+| REA-07 | Use the corpus for building, debugging and crashes | Actual read-only map audits and lookup acceptance passed; industry cross-check matched 36 entries; broader rules partial; crash workflow documented, no crash diagnosis claimed |
+| REA-08 | Publish original tools and reviewed analysis as useful | Original source/guide review and signed commits; PR checks, merge and main replay tracked in VALIDATION.md; no raw corpus in GitHub/CI |
 
-## Next ready work
+## Reuse and next work
 
-Finish REA-04 and begin REA-05 together: reconcile existing private export identities and completion records without returning raw content to cloud tools; complete the module/slice/dependency inventory; harden a small bulk runner around the existing exporter; checkpoint each module. Do not wait for the synthetic PR to merge, a second machine, a broad dependency audit, exhaustive provider tests or a rights-holder reply.
+Reuse the matching private corpus for a concrete new debugging, map or crash question. Start with the original finding IDs and retrieve only the relevant neighborhood. Target retained failures when their functions matter; do not repeat every import. Extend a subsystem note only with new evidence and an independently stated counterexample. A second machine and broader provider audit remain optional follow-ups.
 
 The synthetic helper in [EVIDENCE_INDEX.md](EVIDENCE_INDEX.md) remains a separate original-fixture publication example. The real corpus commands are documented in [CORPUS.md](CORPUS.md). [FINDINGS.md](FINDINGS.md) and [GAME_DEVELOPER_GUIDE.md](GAME_DEVELOPER_GUIDE.md) provide reviewed original explanations. No raw game evidence is bundled with either tool.
 

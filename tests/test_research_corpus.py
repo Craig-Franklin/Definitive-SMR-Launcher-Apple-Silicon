@@ -20,9 +20,9 @@ class CorpusTests(unittest.TestCase):
         module={'id':mid,'sha256':digest,'architecture':'x86_64','image_uuid':None,'copy':'inputs/'+mid+'.bin','bytes':len(data),'sources':[]}
         c.write(self.root/'manifest.json',{'schema':1,'profile':c.profile(),'modules':[module],'resources':[],'symlinks':[]})
         out=self.root/'modules'/mid/'export';out.mkdir(parents=True)
-        c.write(out/'identity.json',{'binary_sha256':digest})
+        c.write(out/'identity.json',{'binary_sha256':digest,'ghidra_version':c.profile()['ghidra']})
         counts={'functions_seen':1,'decompiled':1,'failed':0,'external':0,'references':0,'call_edges':0,'strings':0,'string_references':0}
-        c.write(out/'COMPLETE.json',dict(counts,binary_sha256=digest,status='complete'))
+        c.write(out/'COMPLETE.json',dict(counts,binary_sha256=digest,status='complete',ghidra_version=c.profile()['ghidra']))
         (out/'functions').mkdir();code=b'int original_fixture(void) { return 7; }\n';c.write(out/'functions/f.c',code)
         row={'address':'001000','name':'original_fixture','status':'decompiled','decomp_file':'functions/f.c','decomp_sha256':c.sha(code),'elapsed_seconds':1.0,'reused':False,'body_ranges':[{'start':'001000','end':'001007'}]}
         c.write(out/'functions.jsonl',c.canonical(row)+b'\n')
@@ -48,6 +48,9 @@ class CorpusTests(unittest.TestCase):
         with self.assertRaises(c.Refusal):c.manifest(self.root)
     def test_export_hash_and_count_mismatch(self):
         m,out,_=self.fixture()
+        identity=c.load(out/'identity.json');identity['ghidra_version']='wrong-build';c.write(out/'identity.json',identity,replace=True)
+        with self.assertRaises(c.Refusal):c.export_digest(out,m['sha256'])
+        identity['ghidra_version']=c.profile()['ghidra'];c.write(out/'identity.json',identity,replace=True)
         c.write(out/'functions/f.c',b'changed',replace=True)
         with self.assertRaises(c.Refusal):c.export_digest(out,m['sha256'])
     def test_timing_and_reuse_not_semantic_difference(self):
