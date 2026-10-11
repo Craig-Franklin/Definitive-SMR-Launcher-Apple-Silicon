@@ -2,15 +2,13 @@
 
 import copy
 from datetime import datetime, timezone
-import hashlib
 import json
 import os
 from pathlib import Path
 import tempfile
-from unittest.mock import patch
 import unittest
 
-from smr_launcher.crash_details import MAX_THREADS, MAX_FRAMES, MAX_IMAGES, validate_details
+from smr_launcher.crash_details import MAX_THREADS, MAX_FRAMES, MAX_IMAGES
 from smr_launcher.crash_reports import (
     CrashReportError,
     CrashStore,

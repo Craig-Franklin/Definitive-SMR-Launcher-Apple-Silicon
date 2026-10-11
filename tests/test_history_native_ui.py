@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 
 from smr_launcher.gui import LauncherWindow
 from smr_launcher.history_ui import HistoryPanel, history_card, gallery_columns
-from smr_launcher.play_history import PlayHistoryStore, context, summarize, digest
+from smr_launcher.play_history import summarize, digest
 from smr_launcher.text_links import render_linked_text
 from smr_launcher.map_metadata import MapMetadata
 

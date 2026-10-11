@@ -3,7 +3,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import json
-import os
 from pathlib import Path
 from types import SimpleNamespace
 import subprocess

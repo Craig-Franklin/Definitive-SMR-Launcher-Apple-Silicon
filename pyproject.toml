@@ -25,10 +25,18 @@ force-exclude = true
 extend-exclude = ["Definitive-SMR-Launcher", ".handoff", ".local", "private", "local-data"]
 
 [tool.ruff.lint]
-select = ["E9", "F63", "F7", "F82"]
+select = ["E9", "F"]
 
 [tool.ruff.lint.per-file-ignores]
 # dmgbuild injects `defines` when loading its settings file.
 "scripts/dmg_settings.py" = ["F821"]
 # Preserved research fixture injects its two modules through globals().
-"scripts/research/native_window_capture/tests/test_consumer_fake.py" = ["F821"]
+"scripts/research/native_window_capture/tests/test_consumer_fake.py" = ["F401", "F821"]
+
+# Preserve existing declarations in source-bound research; do not extend these exceptions.
+"scripts/research/batch_smoke.py" = ["F401", "F811"]
+"scripts/research/runner_journal.py" = ["F401", "F811"]
+"scripts/research/individual_stop_support/wrapper.py" = ["F841"]
+"scripts/research/native_window_capture/capture.py" = ["F401"]
+"scripts/research/native_window_capture/tests/test_geometry_fake.py" = ["F401"]
+"scripts/research/native_window_capture/tests/test_independent_fake.py" = ["F401"]

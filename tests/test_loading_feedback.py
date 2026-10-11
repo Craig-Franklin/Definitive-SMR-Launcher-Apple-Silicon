@@ -1,6 +1,5 @@
 """Loading feedback survives real worker overlap, delays and UI lifetime changes."""
 
-from queue import Empty
 from threading import Event, get_ident
 from types import SimpleNamespace
 from unittest import TestCase

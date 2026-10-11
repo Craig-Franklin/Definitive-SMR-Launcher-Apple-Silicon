@@ -13,7 +13,8 @@ import re
 import ssl
 import stat
 import unicodedata
-import uuid
+
+from . import cache_files
 
 
 COMMUNITY_INDEX_URL = (
@@ -137,23 +138,7 @@ def _parent_fd(path: Path, *, create: bool = False) -> tuple[Path, int]:
     path = Path(path).expanduser()
     if ".." in path.parts:
         raise CommunityError("Community cache path contains a parent traversal")
-    path = path.absolute()
-    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-    fd = os.open(path.anchor, flags)
-    try:
-        for component in path.parts[1:-1]:
-            if create:
-                try:
-                    os.mkdir(component, mode=0o700, dir_fd=fd)
-                except FileExistsError:
-                    pass
-            next_fd = os.open(component, flags, dir_fd=fd)
-            os.close(fd)
-            fd = next_fd
-        return path, fd
-    except BaseException:
-        os.close(fd)
-        raise
+    return cache_files.open_parent(path.absolute(), create=create)
 
 
 def _cache_document(path: Path) -> dict:
@@ -198,33 +183,13 @@ def _write_cache(path: Path, document: dict) -> None:
     if len(payload) > _MAX_CACHE_BYTES:
         raise CommunityError("Community cache exceeds its size limit")
     path, parent = _parent_fd(path, create=True)
-    temporary = ".community-" + uuid.uuid4().hex
-    fd = None
-    try:
-        try:
-            info = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
-            if not stat.S_ISREG(info.st_mode):
-                raise CommunityError("Community cache destination is not a regular file")
-        except FileNotFoundError:
-            pass
-        fd = os.open(
-            temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent
-        )
-        with os.fdopen(fd, "wb") as stream:
-            fd = None
-            stream.write(payload)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path.name, src_dir_fd=parent, dst_dir_fd=parent)
-        os.fsync(parent)
-    finally:
-        if fd is not None:
-            os.close(fd)
-        try:
-            os.unlink(temporary, dir_fd=parent)
-        except FileNotFoundError:
-            pass
-        os.close(parent)
+    cache_files.replace_bytes(
+        path,
+        parent,
+        payload,
+        prefix=".community-",
+        invalid_destination=CommunityError("Community cache destination is not a regular file"),
+    )
 
 
 def fetch_community_index(cache_path: Path) -> dict[str, CommunityMap]:

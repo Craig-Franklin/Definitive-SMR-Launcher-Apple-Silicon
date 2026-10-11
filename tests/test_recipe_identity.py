@@ -17,7 +17,6 @@ from smr_launcher.variants import (
     prepare_original_variant,
     prepare_compatibility_variant,
 )
-from smr_launcher.extraction import _unfreeze_directories
 
 
 def sha(data):

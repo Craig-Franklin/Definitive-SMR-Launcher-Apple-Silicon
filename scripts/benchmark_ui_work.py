@@ -22,7 +22,6 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "src"), str(ROOT / "tests")]
 from smr_launcher.gui import LauncherWindow
-from smr_launcher.ui_work import DownloadEvents
 from smr_launcher.collection import RemoteMap, read_cached_catalogue, write_cached_catalogue
 from test_gui_performance import window
 

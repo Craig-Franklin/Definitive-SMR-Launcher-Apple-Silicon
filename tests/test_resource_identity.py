@@ -155,7 +155,7 @@ class ResourceIdentityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary).resolve()
             real_parent = base / "real-parent"
-            assets = self.make_assets(real_parent)
+            self.make_assets(real_parent)
             linked_parent = base / "linked-parent"
             linked_parent.symlink_to(real_parent, target_is_directory=True)
 

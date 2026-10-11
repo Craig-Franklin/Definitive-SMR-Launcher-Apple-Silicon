@@ -52,7 +52,7 @@ from .collection import (
     write_cached_catalogue,
 )
 from .map_metadata import safe_source_url
-from .community import CommunityError, fetch_community_index, read_cached_community_index
+from .community import fetch_community_index, read_cached_community_index
 from . import APP_VERSION
 from .updates import (
     Release,

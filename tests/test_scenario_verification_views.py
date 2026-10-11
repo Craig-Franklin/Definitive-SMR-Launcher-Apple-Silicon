@@ -2,7 +2,6 @@
 
 from io import BytesIO
 from pathlib import Path
-import hashlib
 import json
 import os
 import tarfile
@@ -14,7 +13,7 @@ from test_application import FakeInstallation
 from test_scenario_evidence import Fixture, h, known_options
 from smr_launcher.application import LauncherApplication
 from smr_launcher.gui import LauncherWindow
-from smr_launcher.scenario_evidence import EvidenceRecord, EvidenceError, SCHEMA, REQUIRED_ACTIONS
+from smr_launcher.scenario_evidence import EvidenceError, REQUIRED_ACTIONS
 from smr_launcher.verification import CHECKS, GameplayVerification
 
 

@@ -7,7 +7,6 @@ from threading import Event, get_ident
 from unittest.mock import patch
 import hashlib
 import json
-import os
 import sys
 import tempfile
 import unittest

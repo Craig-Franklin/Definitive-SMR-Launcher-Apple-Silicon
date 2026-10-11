@@ -8,7 +8,6 @@ from tkinter import ttk, filedialog, messagebox
 import webbrowser
 
 from .play_history import (
-    PlayHistoryStore,
     HistoryError,
     LABELS,
     CHECKPOINTS,

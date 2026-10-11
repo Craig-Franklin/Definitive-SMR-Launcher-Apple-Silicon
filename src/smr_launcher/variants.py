@@ -11,10 +11,9 @@ import os
 import shutil
 import tempfile
 
-from .activation import ActivationError, _assert_regular_tree, _make_writable_tree
+from .activation import _assert_regular_tree, _make_writable_tree
 from .extraction import (
     _freeze_tree,
-    _fsync_directory,
     _private_parent,
     _publish_exclusive,
     _unfreeze_directories,

@@ -888,7 +888,7 @@ class E02CorrectionTests(unittest.TestCase):
         self.assertEqual(corrupt, self.f.store.path.read_bytes())
 
     def test_r5_snapshot_cannot_overwrite_receipt_ledger_or_unowned_artifact(self):
-        c = self.complete()
+        self.complete()
         report = self.f.status([self.f.a]).as_json()
         foreign = EvidenceStore(self.f.store.report_path("foreign-ledger"))
         foreign.append(self.f.inventory)

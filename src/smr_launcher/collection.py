@@ -15,10 +15,10 @@ import json
 import os
 import re
 import stat
-import uuid
 import tempfile
 import unicodedata
 
+from . import cache_files
 from .activation import _assert_no_symlink_ancestor, _fsync_dir
 from .packages import MAX_ARCHIVE_BYTES
 
@@ -166,23 +166,7 @@ def _cache_parent(path: Path, create=False):
     path = Path(path).expanduser()
     if ".." in path.parts:
         raise CollectionError("Catalogue cache path contains parent traversal")
-    path = path.absolute()
-    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-    parent = os.open(path.anchor, flags)
-    try:
-        for component in path.parts[1:-1]:
-            if create:
-                try:
-                    os.mkdir(component, mode=0o700, dir_fd=parent)
-                except FileExistsError:
-                    pass
-            next_fd = os.open(component, flags, dir_fd=parent)
-            os.close(parent)
-            parent = next_fd
-        return path, parent
-    except BaseException:
-        os.close(parent)
-        raise
+    return cache_files.open_parent(path.absolute(), create=create)
 
 
 def _unique_cache_object(pairs):
@@ -283,33 +267,13 @@ def write_cached_catalogue(path: Path, records: tuple[RemoteMap, ...]) -> None:
     if len(payload) > MAX_CACHE_BYTES:
         raise CollectionError("Catalogue cache exceeds byte limit")
     path, parent = _cache_parent(path, create=True)
-    temporary = ".catalogue-" + uuid.uuid4().hex
-    fd = None
-    try:
-        try:
-            info = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
-            if not stat.S_ISREG(info.st_mode):
-                raise CollectionError("Catalogue cache destination is not regular")
-        except FileNotFoundError:
-            pass
-        fd = os.open(
-            temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent
-        )
-        with os.fdopen(fd, "wb") as stream:
-            fd = None
-            stream.write(payload)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path.name, src_dir_fd=parent, dst_dir_fd=parent)
-        os.fsync(parent)
-    finally:
-        if fd is not None:
-            os.close(fd)
-        try:
-            os.unlink(temporary, dir_fd=parent)
-        except FileNotFoundError:
-            pass
-        os.close(parent)
+    cache_files.replace_bytes(
+        path,
+        parent,
+        payload,
+        prefix=".catalogue-",
+        invalid_destination=CollectionError("Catalogue cache destination is not regular"),
+    )
 
 
 Progress = Callable[[RemoteMap, str, int, int, str], None]

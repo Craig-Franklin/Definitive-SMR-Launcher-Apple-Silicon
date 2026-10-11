@@ -11,7 +11,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Iterator, Optional, Sequence
 import ctypes
-import errno
 import fcntl
 import hashlib
 import json
