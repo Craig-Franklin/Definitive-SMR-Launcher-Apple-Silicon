@@ -23,6 +23,8 @@ External system libraries are dependency references, not a request to decompile 
 - [Project #4](https://github.com/users/Craig-Franklin/projects/4) tracks the work. Existing REA IDs are retained; several item scopes changed with this revision.
 - Private corpus and receipts live outside every Git worktree. The public branch contains original tools/tests/docs and reviewed original findings only.
 
+Root [AGENTS.md](../../AGENTS.md) routes general development sessions to [knowledge use and verification](KNOWLEDGE_USE.md) for engine-dependent work.
+
 At session start read this file, [AI_PLAYBOOK.md](AI_PLAYBOOK.md), the current section of [VALIDATION.md](VALIDATION.md), and the active Project item. Read other files only as needed. Preserve unrelated dirty work and the paused shared compatibility handoff.
 
 ## Execution order and acceptance

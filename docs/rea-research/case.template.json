@@ -3,7 +3,7 @@
   "case_id": "EXAMPLE-001",
   "question": "One falsifiable question",
   "status": "planned",
-  "rights_status": "unresolved",
+  "rights_status": "user-authorized-local-extraction; third-party rights not adjudicated",
   "disclosure_mode": "local-only",
   "target": {
     "sha256": null,
@@ -44,5 +44,21 @@
     "approved": false,
     "reviewer": null,
     "candidate_files": []
+  },
+  "knowledge_use": {
+    "status": "not_checked",
+    "knowledge_revision": null,
+    "corpus_identity": null,
+    "target_match": {
+      "sha256": null,
+      "image_uuid": null,
+      "architecture": null,
+      "matches": null
+    },
+    "consulted_finding_ids": [],
+    "applied_rule_ids": [],
+    "rejected_rules": [],
+    "coverage_gaps": [],
+    "verification_evidence_ids": []
   }
 }

@@ -33,6 +33,8 @@ Do not default to high/xhigh for setup, discovery, project administration or rou
 
 ## Evidence contract
 
+For engine-dependent development, crashes and map scans, follow [knowledge use and verification](KNOWLEDGE_USE.md). Record the `knowledge_use` consultation fields in the private case/receipt; future scanners must bind catalog revision and applied rule IDs. Missing coverage limits a claim, rather than forcing unrelated work to stop.
+
 Use `case.template.json` as the starting shape. Keep private paths only in the local instance. Record:
 
 1. Case/question, scope, date and rights/disclosure status.

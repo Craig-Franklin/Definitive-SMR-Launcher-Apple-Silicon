@@ -10,6 +10,8 @@ A fresh metadata-only inventory inspected both known app locations without decom
 
 The next ready implementation is the private module/slice manifest and a small resumable runner around the existing ExportEngine.java, reusing any matching completed exports. Then build original subsystem notes and compact AI session handoffs. See README.md for acceptance. Keep compatibility automation paused and raw outputs out of cloud tool responses. No new smoke checks were needed for this documentation revision.
 
+Repository continuity now includes root AGENTS.md, a knowledge-consultation workflow, private case consultation fields, default PR prompts and developer-entry links. Scanner/corpus rule-reference enforcement and actual knowledge lookup are still implementation work; no automatic consultation or runtime verification is claimed.
+
 ## Historical synthetic validation — before scope expansion
 
 ## Observed results
