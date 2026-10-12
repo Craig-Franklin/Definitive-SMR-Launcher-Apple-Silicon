@@ -90,6 +90,7 @@ for line in sys.stdin:
                     "light": "grey",
                     "opens": 1 if recorded else 0,
                 },
+                "verification": configuration.get("verification", "Not verified"),
                 "history": [],
                 "recorded": 1,
             }

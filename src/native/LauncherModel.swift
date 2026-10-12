@@ -10,7 +10,7 @@ struct MapItem: Identifiable {
     let variant: String
     let build: String
     let metadata: [String: Any]
-    let verification: String
+    var verification: String
     var notice: String
     var summary: [String: Any]
     let historyError: String
@@ -368,6 +368,7 @@ final class ScrollMemory { var point: NSPoint? }
                     return
                 }
                 self.details[id] = value
+                if let verification = value["verification"] as? String { self.maps[index].verification = verification }
                 if let summary = value["summary"] as? [String: Any] { self.maps[index].summary = summary }
             }
         }

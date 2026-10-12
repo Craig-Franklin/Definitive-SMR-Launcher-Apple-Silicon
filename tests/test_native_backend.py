@@ -1156,6 +1156,55 @@ class NativeProtocolTests(TestCase):
         w.update_preferences.set_automatic.assert_not_called()
 
 
+class NativeVerificationRefreshTests(TestCase):
+    def test_details_reconcile_cached_badge_and_preserve_sibling(self):
+        from smr_launcher.verification import ScenarioStatus, VerificationSummary
+
+        with TemporaryDirectory(dir=Path(gettempdir()).resolve()) as folder:
+            application, model = app(folder), NativeLibrary()
+            second = replace(record(), profile_id="second", variant_id="d" * 64)
+            application.catalogue.return_value = (record(), second)
+            application.verification_for.return_value = VerificationSummary((), "Verified")
+            cached = model.snapshot(application)
+            sibling = dict(cached[1])
+            partial = VerificationSummary(
+                (
+                    ScenarioStatus(
+                        "Scenario.xml",
+                        "e" * 64,
+                        (("camera", "pass"), ("load", "unknown")),
+                        "Not verified",
+                    ),
+                ),
+                "Not verified",
+            )
+            application.verification_for.return_value = partial
+            details = model.details(application, dict(profile_id="synthetic"))
+            self.assertEqual(details["verification"], "Not verified")
+            self.assertIn("Camera: pass", details["verification_text"])
+            self.assertIn("Load: unknown", details["verification_text"])
+            self.assertEqual(model.snapshot(application)[0]["verification"], "Not verified")
+            self.assertEqual(cached[1], sibling)
+            application.verification_for.side_effect = ValueError("synthetic broken receipt")
+            details = model.details(application, dict(profile_id="synthetic"))
+            self.assertEqual(details["verification"], "Needs inspection")
+            self.assertIn("synthetic broken receipt", details["verification_text"])
+            self.assertEqual(model.snapshot(application)[0]["verification"], "Needs inspection")
+            self.assertEqual(cached[1], sibling)
+            model.annotations_save(
+                application,
+                dict(
+                    profile_id="synthetic",
+                    archive_sha256="a" * 64,
+                    variant_id="b" * 64,
+                    title="Personal title",
+                    notes="",
+                ),
+            )
+            self.assertEqual(model.snapshot(application)[0]["verification"], "Needs inspection")
+            self.assertEqual(cached[1], sibling)
+
+
 class NativePerformanceTests(TestCase):
     def test_warm_projection_has_zero_reads_and_one_annotation_updates_one_row(self):
         with TemporaryDirectory(dir=Path(gettempdir()).resolve()) as folder:

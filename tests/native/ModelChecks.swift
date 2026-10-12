@@ -92,6 +92,25 @@ import Foundation
 
         let reported = liveModel.maps[0], untouched = liveModel.maps[1]
         liveModel.selection = reported.id; liveModel.query = "Synthetic"; liveModel.sort = "Name Z–A"
+        _ = try await backend.call("fixture.configure", ["verification": "Verified"])
+        await liveModel.loadDetails(reported.id, force: true)
+        precondition(liveModel.maps[0].verification == "Verified")
+        liveModel.filter = "Verified"
+        precondition(liveModel.visible.map(\.id) == [reported.id], "Prime the Verified filter before evidence changes")
+        _ = try await backend.call("fixture.configure", ["verification": "Not verified"])
+        await liveModel.loadDetails(reported.id, force: true)
+        precondition(liveModel.maps[0].verification == "Not verified", "Fresh detail evidence must withdraw a stale badge")
+        precondition(liveModel.maps[1].verification == untouched.verification, "Detail evidence must not change sibling maps")
+        precondition(liveModel.visible.isEmpty, "Withdrawn verification must also leave the Verified filter")
+        liveModel.filter = "All maps"
+        _ = try await backend.call("fixture.configure", ["verification": "Needs inspection", "changed_edition": true])
+        await liveModel.loadDetails(reported.id, force: true)
+        precondition(liveModel.maps[0].verification == "Not verified", "Wrong-edition detail evidence must not replace the badge")
+        _ = try await backend.call("fixture.configure", ["verification": "Needs inspection", "changed_edition": false])
+        await liveModel.loadDetails(reported.id, force: true)
+        precondition(liveModel.maps[0].verification == "Needs inspection")
+        _ = try await backend.call("fixture.configure", ["verification": "Not verified"])
+        await liveModel.loadDetails(reported.id, force: true)
         liveModel.personal[untouched.id] = PersonalDraft(title: "Retain", notes: "Unsaved", dirty: true)
         liveModel.outcomes[reported.id] = OutcomeDraft(outcome: "Played", attempt: "synthetic-attempt", scenario: "Synthetic.xml")
         let before = try await backend.call("fixture.counts")

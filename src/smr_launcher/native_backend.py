@@ -156,7 +156,7 @@ class NativeLibrary:
     def _image_size(encoded):
         return len(encoded) // 4 * 3 - (len(encoded) - len(encoded.rstrip("=")))
 
-    def _update_summary(self, app, record, summary):
+    def _update_summary(self, app, record, summary, *, verification=None):
         if (
             self.cached_app is app
             and self.cached_identity == (str(app.library), app.installation.executable_sha256)
@@ -169,6 +169,8 @@ class NativeLibrary:
                     record.variant_id,
                 ):
                     row["summary"] = self._summary(summary)
+                    if verification is not None:
+                        row["verification"] = verification
                     self.history_dirty.discard(record.profile_id)
                     break
 
@@ -259,16 +261,18 @@ class NativeLibrary:
         ctx = context(record, app.installation.executable_sha256)
         rows = tuple(e for e in PlayHistoryStore(app.library).records() if same_map(e, ctx))
         summary = summarize(rows, ctx)
-        self._update_summary(app, record, summary)
         try:
             verification = app.verification_for(record)
+            verification_status = verification.status if verification else "Not verified"
             verification_text = (
                 LauncherWindow._verification_details(verification)
                 if verification
                 else "Not verified"
             )
         except Exception as exc:
+            verification_status = "Needs inspection"
             verification_text = "Gameplay record needs inspection: " + str(exc)
+        self._update_summary(app, record, summary, verification=verification_status)
         try:
             checks = _checks_text(app.import_checks(record))
         except Exception as exc:
@@ -285,6 +289,7 @@ class NativeLibrary:
                 if field.name != "events"
             },
             history_text=timeline_text(rows),
+            verification=verification_status,
             verification_text=verification_text,
             checks_text=checks,
         )
@@ -342,6 +347,7 @@ class NativeLibrary:
                         max(0, MAX_SNAPSHOT_ART_BYTES - used),
                     )
                     row["summary"] = self.cached_maps[index]["summary"]
+                    row["verification"] = self.cached_maps[index]["verification"]
                     self.cached_maps[index] = row
                     annotation, notice, art = row["annotation"], row["notice"], row["art"]
                     break
