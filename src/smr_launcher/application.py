@@ -52,7 +52,7 @@ from .scenario_evidence import (
 )
 from .collection import RemoteMap
 from .map_metadata import MapMetadata, read_map_metadata
-from . import removal
+from . import import_checks, removal
 from .import_checks import inspect_map
 from .launch_preferences import prepare_settings
 from .resource_identity import ContentHashCache, fingerprint_resources
@@ -444,7 +444,8 @@ class LauncherApplication:
             == record.variant_id
         )
 
-    def _write_import_checks(self, record: MapRecord) -> dict:
+    def _import_check_inputs(self, record: MapRecord):
+        """Bind supported checks; stock content/precedence is not inspected."""
         root = self._prepared_root(record)
         _assert_regular_tree(root)
         executable = getattr(self.installation, "executable", None)
@@ -462,6 +463,35 @@ class LauncherApplication:
             for p in root.rglob("*")
             if p.suffix.casefold() == ".xml" and p.is_file()
         }
+        snapshot = fingerprint_resources(
+            {"custom_assets": root / "CustomAssets", "user_maps": root / "UserMaps"},
+            hash_cache=self._resource_hash_cache,
+        )
+        # The model scanner counts directory entries toward its budget. Bind
+        # their membership, but not directory mtimes that no check consumes.
+        map_inputs = [
+            dict(
+                role=scope["role"],
+                entries=[
+                    entry if entry["kind"] == "file" else dict(kind="directory", path=entry["path"])
+                    for entry in scope["entries"]
+                ],
+            )
+            for scope in snapshot["roots"]
+        ]
+        binding = dict(
+            analyzer=import_checks.IMPORT_CHECKS_VERSION,
+            map_resources_sha256=hashlib.sha256(
+                json.dumps(map_inputs, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest(),
+            stock_xml_names_sha256=hashlib.sha256(
+                json.dumps(sorted(stock), separators=(",", ":")).encode()
+            ).hexdigest(),
+        )
+        return root, stock, binding
+
+    def _write_import_checks(self, record: MapRecord) -> dict:
+        root, stock, binding = self._import_check_inputs(record)
         report = inspect_map(root, stock)
         report.update(
             variant_id=record.variant_id,
@@ -469,7 +499,11 @@ class LauncherApplication:
             game_executable_sha256=record.game_executable_sha256,
             assets_sha256=self.profiles._asset_hash(root),
             checked_at=datetime.now(timezone.utc).isoformat(),
+            input_binding=binding,
+            input_scope="Prepared map file bytes/timestamps, directory membership and loose stock XML basenames only; dependency coverage is partial, not native provider resolution.",
         )
+        if self._import_check_inputs(record)[2] != binding:
+            raise ApplicationError("Import-check inputs changed during the scan; recheck required")
         path = removal._leaf(
             self.library / "import-checks", record.variant_id + ".json", r"[0-9a-f]{64}\.json"
         )
@@ -493,9 +527,10 @@ class LauncherApplication:
             if (
                 report.get("schema") != 1
                 or report.get("variant_id") != record.variant_id
+                or report.get("archive_sha256") != record.archive_sha256
                 or report.get("game_executable_sha256") != self.installation.executable_sha256
-                or report.get("assets_sha256")
-                != self.profiles._asset_hash(self._prepared_root(record))
+                or not isinstance(report.get("input_binding"), dict)
+                or report["input_binding"] != self._import_check_inputs(record)[2]
             ):
                 return None
             return report

@@ -10,6 +10,7 @@ from .model_checks import inspect_models
 MAX_XML_BYTES = 8 * 1024 * 1024
 MAX_TOTAL_XML = 64 * 1024 * 1024
 MAX_XML_FILES = 1000
+IMPORT_CHECKS_VERSION = "loose-xml-and-model-headers-v2"
 
 
 def inspect_map(root: Path, stock_names: set[str] | None = None) -> dict:
