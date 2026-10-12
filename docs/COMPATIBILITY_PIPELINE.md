@@ -194,11 +194,21 @@ resource timestamps, idempotence and refusal. A private check of the complete
 130-file original reproduces the three historical postimages exactly and leaves
 127 files unchanged. Raw assets are neither bundled nor published.
 
-This candidate is withheld from player recipe choices and remains on a task branch
-until applicable finite runtime and preservation acceptance. Its byte equality
-reuses the earlier experiment's content evidence; it does not establish the
-current installed resource winner, identify #193's faulting model, resolve the
-Oil/Power Plant or event concerns, or fix the other three captured incidents.
+The reviewed source recipe is integrated separately from game acceptance. The exact
+original offers **Arizona — experimental repair** under **Compatibility & Editions**
+in the native launcher (or the advanced Compatibility tab). Creating it uses the
+existing guarded preparation service to create or reuse a separate edition with
+its own saves. In the native UI, refresh the library to browse the edition; the
+advanced UI selects it after creation. Repeated creation keeps that exact edition
+and its existing saves. Creation does not activate the map or transfer original saves.
+
+Current-edition loading, saving, reopening and continued play remain unverified.
+The menu discloses the four industry aliases and outstanding Bank, Oil/Power Plant
+and event checks. Its byte equality reuses the earlier experiment's content
+evidence; it does not establish the current installed resource winner, identify
+#193's faulting model, resolve feature concerns, or fix the other three incidents.
+Source publication and player availability do not record a gameplay pass or close
+the crash issue.
 See [#188](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/188)
 and [#193](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/193).
 

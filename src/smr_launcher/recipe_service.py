@@ -112,7 +112,7 @@ _HILL_COWHIDE_ADDITIONS = (
 
 
 _RECIPES = {
-    # Held out of _CHOICES until current prepared-copy/runtime acceptance.
+    # Experimental preparation; player availability is separate from gameplay acceptance.
     # This reproduces the historical three-file experiment, not a diagnosis
     # selected automatically from a crash fingerprint or legacy model header.
     "az-canyon-v02-bank-and-industry-identifiers-v1": _IdentityRecipe(
@@ -208,6 +208,18 @@ class RecipeChoice:
 
 
 _CHOICES = {
+    "az-canyon-v02-bank-and-industry-identifiers-v1": RecipeChoice(
+        "az-canyon-v02-bank-and-industry-identifiers-v1",
+        "Arizona — experimental repair",
+        "Experimental repair for Arizona Gold V2.2. Converts the legacy Bank model "
+        "and updates four industry identifiers with their ownership goals. "
+        "Steamboat Company uses Wooden Horse Factory; Hotel uses Doll Factory; "
+        "Bank uses Bakery; Air Force Base uses Toy Soldier Factory. These names "
+        "may appear in menus. Placements, production and objective text are retained.\n\n"
+        "Loading, saving and reopening this edition remain unverified. Bank behavior, "
+        "Oil/Power Plant and custom events still need testing. Keep this edition's "
+        "own saves; it is not a verified crash fix.",
+    ),
     "great-lakes-industry-identities-v2": RecipeChoice(
         "great-lakes-industry-identities-v2",
         "Mac industry compatibility v2",

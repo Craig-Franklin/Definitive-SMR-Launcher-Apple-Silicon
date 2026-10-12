@@ -6,6 +6,7 @@ import hashlib
 import os
 import shutil
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from smr_launcher import bank_model, recipe_service
@@ -179,6 +180,48 @@ class CombinedRecipeTests(unittest.TestCase):
                     f.resolve(recipe)
                 self.assertEqual(self.snapshot(f.source), before)
 
-    def test_arizona_is_held_out_of_player_choices_until_runtime_acceptance(self):
-        # Source compilation may be reviewed independently of activation admission.
-        self.assertNotIn("az-canyon-v02-bank-and-industry-identifiers-v1", recipe_service._CHOICES)
+
+# Source compilation may be reviewed independently of activation admission.
+class ArizonaChoiceTests(unittest.TestCase):
+    RECIPE = "az-canyon-v02-bank-and-industry-identifiers-v1"
+    GAME = "981ca7180759d8578babf54cd9a4f76b93db503b33a7f1938c6b1427b95680f0"
+
+    def record(self, **changed):
+        fields = dict(
+            archive_sha256="399570b00bb4c3590dacd30b45322b65f72029237ee49ed25be0d4f5c637e5cf",
+            game_executable_sha256=self.GAME,
+            variant_id="53264553fb42395c05c750e3a6d9769adb6c05d4dfe16233d76f99ad89f760ab",
+            scenarios=("UserMaps/AZCanyonV2/RRT_Scenario_User_AZCanyonV2.xml",),
+        )
+        fields.update(changed)
+        return SimpleNamespace(**fields)
+
+    def test_exact_original_offers_experimental_choice_with_unverified_gameplay(self):
+        choices = recipe_service.recipe_choices(self.record(), self.GAME)
+        self.assertEqual(tuple(c.recipe_id for c in choices), (self.RECIPE,))
+        self.assertEqual(choices[0].title, "Arizona — experimental repair")
+        self.assertIn(
+            "Loading, saving and reopening this edition remain unverified", choices[0].description
+        )
+        for original, alias in (
+            ("Steamboat Company", "Wooden Horse Factory"),
+            ("Hotel", "Doll Factory"),
+            ("Bank", "Bakery"),
+            ("Air Force Base", "Toy Soldier Factory"),
+        ):
+            self.assertIn(original + " uses " + alias, choices[0].description)
+        self.assertIn("Oil/Power Plant", choices[0].description)
+        self.assertIn("events", choices[0].description)
+
+    def test_other_archives_builds_scenarios_and_prepared_editions_are_not_offered(self):
+        for changed in (
+            dict(archive_sha256="0" * 64),
+            dict(game_executable_sha256="0" * 64),
+            dict(variant_id="0" * 64),
+            dict(scenarios=("UserMaps/Other/Scenario.xml",)),
+        ):
+            with self.subTest(changed=changed):
+                self.assertEqual(
+                    recipe_service.recipe_choices(self.record(**changed), self.GAME), ()
+                )
+        self.assertEqual(recipe_service.recipe_choices(self.record(), "0" * 64), ())
