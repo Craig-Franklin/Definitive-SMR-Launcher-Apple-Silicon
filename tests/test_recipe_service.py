@@ -331,6 +331,24 @@ class SyntheticRecipeServiceTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuleError, message):
                     self.resolve()
 
+    def test_empty_identity_flags_refuse_without_mutating_any_fixture(self):
+        cases = (
+            (b"<bInCity>1</bInCity>", b"<bInCity/>"),
+            (b"<bInCity>1</bInCity>", b"<bInCity></bInCity>"),
+            (b"<bIsMountainous>0</bIsMountainous>", b"<bIsMountainous/>"),
+            (b"<bIsMountainous>0</bIsMountainous>", b"<bIsMountainous></bIsMountainous>"),
+        )
+        for explicit, empty in cases:
+            with self.subTest(empty=empty):
+                data = self.industry_data.replace(explicit, empty)
+                (self.source / self.INDUSTRY_PATH).write_bytes(data)
+                self.recipe = self._recipe(industry=data)
+                before = self.fixture_file_facts()
+                with self.assertRaisesRegex(RuleError, "explicit reviewed city/mountain fields"):
+                    self.resolve()
+                self.assertEqual(self.fixture_file_facts(), before)
+                self.assertFalse((self.root / "prepared").exists())
+
     def test_other_xml_alias_occurrence_and_case_variant_goal_are_rejected(self):
         exact_alias = b"<RRTScenario><Label>Test Mill</Label></RRTScenario>"
         path = self.source / "UserMaps/Synthetic/other.xml"
