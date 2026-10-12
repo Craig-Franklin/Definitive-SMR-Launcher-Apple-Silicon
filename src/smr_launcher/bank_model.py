@@ -9,6 +9,7 @@ transactions, and independent licensed-asset/runtime acceptance.
 import hashlib
 import struct
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Tuple
 
 
@@ -387,9 +388,24 @@ def convert_legacy_bank(data: bytes) -> bytes:
     _require(type(data) is bytes, "expected immutable bytes")
     _require(len(data) == SOURCE_SIZE, "unsupported bank source size")
     _require(hashlib.sha256(data).hexdigest() == SOURCE_SHA256, "unsupported bank source digest")
+    return _convert_reviewed_bank(
+        data,
+        (SOURCE_SHA256, SOURCE_SIZE, SOURCE_VERSION),
+        (OUTPUT_SHA256, OUTPUT_SIZE, OUTPUT_VERSION),
+    )
+
+
+@lru_cache(maxsize=8)
+def _convert_reviewed_bank(data, source_contract, output_contract):
+    """Cache successful immutable bytes by both complete byte contracts.
+
+    Input admission remains in the public function. Recipe context, provider and
+    timestamp applicability remains with callers and is never cached here.
+    """
+    expected_digest, expected_size, _version = output_contract
     output = _convert_supported_layout(data)
-    _require(len(output) == OUTPUT_SIZE, "HOLD: bank output size mismatch")
+    _require(len(output) == expected_size, "HOLD: bank output size mismatch")
     _require(
-        hashlib.sha256(output).hexdigest() == OUTPUT_SHA256, "HOLD: bank output digest mismatch"
+        hashlib.sha256(output).hexdigest() == expected_digest, "HOLD: bank output digest mismatch"
     )
     return output
