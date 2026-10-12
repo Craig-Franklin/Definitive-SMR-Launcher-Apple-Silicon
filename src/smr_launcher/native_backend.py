@@ -16,7 +16,8 @@ import sys
 from threading import Event, Lock, Thread
 import webbrowser
 
-from .activation import ORIGINAL
+from .native_tools import NativeTools
+from .updates import start_install_helper
 from .annotations import AnnotationStore
 from .gallery import MAX_SNAPSHOT_ART_BYTES, gallery_snapshot
 from .collection import fetch_catalogue, read_cached_catalogue, write_cached_catalogue
@@ -31,6 +32,7 @@ from .language import (
     translate_briefing,
 )
 from .voices import list_voices, open_voice_settings
+from .native_map_tools import NativePlayRequests, dispatch as dispatch_map_tools
 from .play_history import (
     CHECKPOINTS,
     FAILURES,
@@ -101,9 +103,13 @@ class NativeLibrary:
     """Worker-only presentation and explicit local history/annotation operations."""
 
     def __init__(self):
+        self.play_requests = NativePlayRequests()
         self.cached_app = None
         self.cached_history_error = ""
         self.cached_items = None
+        self.cached_maps = None
+        self.cached_identity = None
+        self.history_dirty = set()
         self.remote_records = ()
         self.collection_notice = ""
 
@@ -139,6 +145,32 @@ class NativeLibrary:
 
     def invalidate(self):
         self.cached_items = None
+        self.cached_maps = None
+        self.history_dirty.clear()
+
+    @staticmethod
+    def _summary(summary):
+        return {f.name: getattr(summary, f.name) for f in fields(summary) if f.name != "events"}
+
+    @staticmethod
+    def _image_size(encoded):
+        return len(encoded) // 4 * 3 - (len(encoded) - len(encoded.rstrip("=")))
+
+    def _update_summary(self, app, record, summary):
+        if (
+            self.cached_app is app
+            and self.cached_identity == (str(app.library), app.installation.executable_sha256)
+            and self.cached_maps is not None
+        ):
+            for row in self.cached_maps:
+                if (row["id"], row["archive_sha256"], row["variant_id"]) == (
+                    record.profile_id,
+                    record.archive_sha256,
+                    record.variant_id,
+                ):
+                    row["summary"] = self._summary(summary)
+                    self.history_dirty.discard(record.profile_id)
+                    break
 
     @staticmethod
     def record(app, profile_id):
@@ -148,69 +180,86 @@ class NativeLibrary:
         return record
 
     def snapshot(self, app, refresh=False, *, history_error=""):
+        identity = (str(app.library), app.installation.executable_sha256)
         if (
             self.cached_app is not app
             or refresh
             or self.cached_items is None
+            or self.cached_maps is None
+            or self.cached_identity != identity
             or self.cached_history_error != history_error
         ):
-            self.cached_items = gallery_snapshot(app, Event(), history_error=history_error)
-            self.cached_app = app
+            # Commit a new presentation only after all reads/projection succeed.
+            items = gallery_snapshot(app, Event(), history_error=history_error)
+            store, maps = AnnotationStore(app.library), []
+            remaining_art = MAX_SNAPSHOT_ART_BYTES
+            for item in items:
+                try:
+                    annotation, annotation_error = store.load(item.record), ""
+                except (OSError, ValueError, UnicodeError) as exc:
+                    annotation = dict(title="", notes="", image_png="")
+                    annotation_error = "Personal display details need inspection: " + str(exc)
+                row, used = self._project(app, item, annotation, remaining_art, annotation_error)
+                remaining_art -= used
+                maps.append(row)
+            self.cached_items, self.cached_maps = items, maps
+            self.cached_app, self.cached_identity = app, identity
             self.cached_history_error = history_error
-        store, maps = AnnotationStore(app.library), []
-        remaining_art = MAX_SNAPSHOT_ART_BYTES
-        for item in self.cached_items:
-            record = item.record
-            summary = item.history or summarize(
-                (), context(record, app.installation.executable_sha256)
+            self.history_dirty.clear()
+        if self.history_dirty:
+            rows = PlayHistoryStore(app.library).records()
+            for item in self.cached_items:
+                if item.record.profile_id in self.history_dirty:
+                    self._update_summary(
+                        app,
+                        item.record,
+                        summarize(rows, context(item.record, app.installation.executable_sha256)),
+                    )
+        return self.cached_maps
+
+    def _project(self, app, item, annotation, remaining_art, annotation_error=""):
+        record = item.record
+        annotation = dict(annotation)
+        notices = [item.notice, annotation_error]
+        image_size = self._image_size(annotation["image_png"])
+        used = 0
+        if image_size <= remaining_art:
+            used += image_size
+        else:
+            annotation["image_png"] = ""
+            notices.append(
+                "Personal image omitted from this snapshot to keep the library responsive; its stored original is unchanged."
             )
-            annotation_error = ""
-            try:
-                annotation = store.load(record)
-            except (OSError, ValueError, UnicodeError) as exc:
-                annotation = dict(title="", notes="", image_png="")
-                annotation_error = "Personal display details need inspection: " + str(exc)
-            notices = [item.notice, annotation_error]
-            image = annotation["image_png"]
-            image_padding = len(image) - len(image.rstrip("="))
-            image_size = len(image) // 4 * 3 - image_padding
-            if image_size <= remaining_art:
-                remaining_art -= image_size
-            else:
-                annotation["image_png"] = ""
-                notices.append(
-                    "Personal image omitted from this snapshot to keep the library responsive; its stored original is unchanged."
-                )
-            art = item.art
-            if len(art) <= remaining_art:
-                remaining_art -= len(art)
-            else:
-                art = b""
-                notices.append(
-                    "Package image omitted from this snapshot to keep the library responsive; its original is unchanged."
-                )
-            maps.append(
-                dict(
-                    id=record.profile_id,
-                    name=record.name,
-                    archive_sha256=record.archive_sha256,
-                    variant_id=record.variant_id,
-                    metadata=asdict(item.metadata),
-                    verification=item.verification,
-                    notice="\n".join(s for s in notices if s),
-                    art=base64.b64encode(art).decode("ascii"),
-                    summary={k: v for k, v in asdict(summary).items() if k != "events"},
-                    history_error=item.history_error,
-                    annotation=annotation,
-                )
+        art = item.art
+        if len(art) <= remaining_art - used:
+            used += len(art)
+        else:
+            art = b""
+            notices.append(
+                "Package image omitted from this snapshot to keep the library responsive; its original is unchanged."
             )
-        return maps
+        summary = item.history or summarize((), context(record, app.installation.executable_sha256))
+        return dict(
+            id=record.profile_id,
+            name=record.name,
+            archive_sha256=record.archive_sha256,
+            variant_id=record.variant_id,
+            game_executable_sha256=app.installation.executable_sha256,
+            metadata=asdict(item.metadata),
+            verification=item.verification,
+            notice="\n".join(s for s in notices if s),
+            art=base64.b64encode(art).decode("ascii"),
+            summary=self._summary(summary),
+            history_error=item.history_error,
+            annotation=annotation,
+        ), used
 
     def details(self, app, params):
         record = self.record(app, text(params, "profile_id"))
         ctx = context(record, app.installation.executable_sha256)
         rows = tuple(e for e in PlayHistoryStore(app.library).records() if same_map(e, ctx))
         summary = summarize(rows, ctx)
+        self._update_summary(app, record, summary)
         try:
             verification = app.verification_for(record)
             verification_text = (
@@ -257,10 +306,54 @@ class NativeLibrary:
             image = ""
         if image is not None and not isinstance(image, str):
             raise ValueError("image_png must be base64 text")
-        AnnotationStore(app.library).save(
+        annotation = AnnotationStore(app.library).save(
             record, title=text(params, "title"), notes=text(params, "notes"), image_png=image
         )
-        return dict(saved=True)
+        # An invalidated presentation cannot account for retained artwork in
+        # other rows. Persist the original, but defer its image to Refresh.
+        annotation = dict(annotation)
+        notice = (
+            "Personal details saved. Refresh to load images into the current library presentation."
+        )
+        art = ""
+        saved_image = annotation["image_png"]
+        annotation["image_png"] = ""
+        if (
+            self.cached_app is app
+            and self.cached_identity == (str(app.library), app.installation.executable_sha256)
+            and self.cached_maps is not None
+        ):
+            for index, item in enumerate(self.cached_items):
+                if (item.record.profile_id, item.record.archive_sha256, item.record.variant_id) == (
+                    record.profile_id,
+                    record.archive_sha256,
+                    record.variant_id,
+                ):
+                    used = sum(
+                        self._image_size(row["art"])
+                        + self._image_size(row["annotation"]["image_png"])
+                        for i, row in enumerate(self.cached_maps)
+                        if i != index
+                    )
+                    row, _ = self._project(
+                        app,
+                        item,
+                        {**annotation, "image_png": saved_image},
+                        max(0, MAX_SNAPSHOT_ART_BYTES - used),
+                    )
+                    row["summary"] = self.cached_maps[index]["summary"]
+                    self.cached_maps[index] = row
+                    annotation, notice, art = row["annotation"], row["notice"], row["art"]
+                    break
+        return dict(
+            saved=True,
+            profile_id=record.profile_id,
+            archive_sha256=record.archive_sha256,
+            variant_id=record.variant_id,
+            annotation=annotation,
+            notice=notice,
+            art=art,
+        )
 
     def briefing_translate(self, app, params):
         record = self.record(app, text(params, "profile_id"))
@@ -353,7 +446,7 @@ class NativeLibrary:
             checkpoint=checkpoint,
             continued=continued,
         )
-        self.invalidate()
+        self.history_dirty.add(record.profile_id)
         return dict(recorded=len(added))
 
 
@@ -361,6 +454,11 @@ class NativeBackendWindow(LauncherWindow):
     def __init__(self, input_stream=None, output_stream=None):
         self.native_library = NativeLibrary()
         self._native_requests = Queue(maxsize=64)
+        self._native_controls = Queue(maxsize=64)
+        self._native_queued_ids = set()
+        self._native_queue_lock = Lock()
+        self.native_tools = NativeTools(self)
+        self._native_update_choice = ""
         self._native_input_ended = Event()
         self._native_parent_approved_close = False
         self._native_shutdown_started = False
@@ -412,6 +510,65 @@ class NativeBackendWindow(LauncherWindow):
             or self._native_input_ended.is_set()
         ):
             self._native_shutdown_started = True
+            if (
+                getattr(self, "pending_update", None) is not None
+                and not self.busy
+                and not self.bulk_active
+            ):
+                choice = getattr(self, "_native_update_choice", "")
+                parent_lost = self._native_disconnected or self._native_input_ended.is_set()
+                install_approved = choice == "install" or (
+                    not self.pending_update_manual and self.auto_updates.get()
+                )
+                # Manual staging promises a later install decision. Losing the
+                # frontend cannot supply it, even if automatic updates are on.
+                if choice == "skip" or (
+                    not install_approved and (parent_lost or not self.pending_update_manual)
+                ):
+                    return self._finish_close()
+                if choice != "install" and not parent_lost:
+                    self.close_when_idle = False
+                    self._native_parent_approved_close = False
+                    self._native_shutdown_started = False
+                    self._emit_native(dict(event="close.cancelled", data={}))
+                    return
+
+                def installed(ok, value):
+                    self.busy = False
+                    if ok:
+                        self._finish_close()
+                    else:
+                        self.close_when_idle = False
+                        self._native_parent_approved_close = False
+                        self._native_shutdown_started = False
+                        self._native_update_choice = ""
+                        if self._native_disconnected or self._native_input_ended.is_set():
+                            self._finish_close()
+                            return
+                        self._emit_native(
+                            dict(
+                                event="close.cancelled",
+                                data=dict(
+                                    error="The verified update could not start. Launcher and drafts remain open. Inspect update state before trying again."
+                                ),
+                            )
+                        )
+
+                self.busy = True
+                self._background(
+                    lambda: start_install_helper(self.pending_update, self.update_library),
+                    installed,
+                    label=None,
+                )
+                return
+            tools = getattr(self, "native_tools", None)
+            if (
+                tools is not None
+                and self.busy
+                and tools.job.get("state") == "running"
+                and tools.job.get("cancellable")
+            ):
+                tools.cancel(tools.job["job_id"])
             return super()._close()
         self._emit_native(dict(event="close.requested", data={}))
 
@@ -438,20 +595,77 @@ class NativeBackendWindow(LauncherWindow):
         super()._library_chosen(result)
         self._emit_native(dict(event="library.changed", data={}))
 
+    def _operation_warning(self, title, message):
+        # Resource protection can report an unconfirmed stop. Keep the alert
+        # private and neutral until the local outcome is inspected.
+        self._emit_native(
+            dict(
+                event="tools.alert",
+                data=dict(
+                    message="Railroads memory protection needs inspection. Check local Activity and confirm whether the game stopped."
+                ),
+            )
+        )
+
+    def _operation_error(self, title, error):
+        self._emit_native(
+            dict(
+                event="tools.alert",
+                data=dict(
+                    message="The operation stopped. Inspect local state before retrying; an unfinished mutation may have completed."
+                ),
+            )
+        )
+
+    def check_for_updates(self):
+        if not self.busy and self.pending_update is None and not self.initializing:
+            self.native_tools.start("update.check", {})
+
     def _native_status(self):
         return dict(
             available=self.app is not None,
             enrolled=self.app is not None and self.app.profiles.state_file.exists(),
             initializing=self.initializing,
             busy=self.busy,
-            status=self.status.get(),
-            crash_status=self.crash_status.get(),
+            status=(
+                "An operation needs inspection; no automatic retry occurred."
+                if any(
+                    word in self.status.get().lower()
+                    for word in ("inspection:", "stopped:", "failed:", "unavailable:")
+                )
+                else self.status.get()
+            ),
+            crash_status="Crash monitor available; full reports stay private."
+            if self.crash_monitor
+            else "Crash monitor unavailable.",
         )
 
     def _queue_native_request(self, request):
+        control = request and request.get("method") in {"tools.status", "tools.cancel"}
+        if request and not control and hasattr(self, "_native_queue_lock"):
+            with self._native_queue_lock:
+                if request["id"] in self._native_queued_ids:
+                    # A duplicate reply would disconnect the native client. Keep
+                    # the first queued/in-flight request as the sole owner; a
+                    # completed mutation may still replay its bounded receipt.
+                    self._emit_native(
+                        dict(
+                            event="tools.request_rejected",
+                            data=dict(
+                                message="Request identity overlaps a queued operation; duplicate ignored."
+                            ),
+                        )
+                    )
+                    return
+                self._native_queued_ids.add(request["id"])
         while not self.closed:
             try:
-                self._native_requests.put(request, timeout=0.1)
+                queue = (
+                    self._native_controls
+                    if request and request.get("method") in {"tools.status", "tools.cancel"}
+                    else self._native_requests
+                )
+                queue.put(request, timeout=0.1)
                 return
             except Full:
                 continue
@@ -488,14 +702,24 @@ class NativeBackendWindow(LauncherWindow):
     def _native_reply(self, request, ok, value):
         response = dict(id=request["id"], ok=ok)
         response["data" if ok else "error"] = value if ok else str(value)
-        if request["method"] in {"workflow", "annotations.save", "history.record", "prefs.save"}:
+        if request["method"] in {
+            "workflow",
+            "annotations.save",
+            "history.record",
+            "prefs.save",
+            "tools.start",
+        } or request["method"].startswith("maptools."):
             self._native_completed[request["id"]] = (
                 digest(json.dumps(request, sort_keys=True)),
                 response,
             )
         while len(self._native_completed) > 64:
             self._native_completed.popitem(last=False)
-        self._native_inflight = None
+        if request["method"] not in {"tools.status", "tools.cancel"}:
+            self._native_inflight = None
+            if hasattr(self, "_native_queue_lock"):
+                with self._native_queue_lock:
+                    self._native_queued_ids.discard(request["id"])
         self._emit_native(response)
 
     def _native_tick(self):
@@ -512,6 +736,30 @@ class NativeBackendWindow(LauncherWindow):
             self._native_parent_approved_close = False
             self._native_shutdown_started = False
             self._emit_native(dict(event="close.cancelled", data={}))
+        controls = getattr(self, "_native_controls", None)
+        if controls is not None:
+            for _ in range(8):
+                try:
+                    control = controls.get_nowait()
+                except Empty:
+                    break
+                with self._native_queue_lock:
+                    overlaps = control["id"] in self._native_queued_ids
+                if (
+                    overlaps
+                    or control["id"] == self._native_inflight
+                    or control["id"] in self._native_completed
+                ):
+                    self._emit_native(
+                        dict(
+                            event="tools.control_rejected",
+                            data=dict(
+                                message="Control request identity overlaps an operation; request ignored."
+                            ),
+                        )
+                    )
+                else:
+                    self._native_dispatch(control)
         status = self._native_status()
         if status != self._native_last_status:
             self._native_last_status = status
@@ -526,6 +774,9 @@ class NativeBackendWindow(LauncherWindow):
             elif request:
                 previous = self._native_completed.get(request["id"])
                 if previous:
+                    if hasattr(self, "_native_queue_lock"):
+                        with self._native_queue_lock:
+                            self._native_queued_ids.discard(request["id"])
                     if previous[0] == digest(json.dumps(request, sort_keys=True)):
                         self._emit_native(previous[1])
                     else:
@@ -546,6 +797,15 @@ class NativeBackendWindow(LauncherWindow):
         try:
             if request.get("error"):
                 raise ValueError(request["error"])
+            if method in {"tools.status", "tools.cancel", "tools.start"}:
+                if method == "tools.status":
+                    value = self.native_tools.status(params.get("job_id"))
+                elif method == "tools.cancel":
+                    value = self.native_tools.cancel(text(params, "job_id"))
+                else:
+                    value = self.native_tools.start(text(params, "action"), params)
+                self._native_reply(request, True, value)
+                return
             if method == "workflow":
                 self._native_reply(request, True, self._native_workflow(params))
                 return
@@ -593,6 +853,14 @@ class NativeBackendWindow(LauncherWindow):
                     operation = lambda: self.native_library.annotations_save(app, params)
                 elif method == "history.record":
                     operation = lambda: self.native_library.history_record(app, params)
+                elif method.startswith("maptools."):
+                    operation = lambda: dispatch_map_tools(
+                        self.native_library,
+                        app,
+                        method,
+                        params,
+                        launch=lambda profile: self._native_launch(app, profile),
+                    )
                 else:
                     raise ValueError("Unknown native method: " + method)
             self._native_inflight = request["id"]
@@ -612,11 +880,24 @@ class NativeBackendWindow(LauncherWindow):
                     self.auto_updates.set(value["automatic_updates"])
                     if params.get("automatic_updates") is True and self.pending_update is None:
                         self.root.after(0, self.check_for_updates)
+                if (
+                    not ok
+                    and method == "prefs.save"
+                    and set(params) & {"crash_enabled", "crash_automatic", "resource_protection"}
+                ):
+                    value = ValueError(
+                        "Crash reporting preferences could not be saved. Inspect local settings before trying again."
+                    )
                 self._native_reply(request, ok, value)
 
             self._background(operation, completed, label=None)
         except Exception as exc:
             self._native_reply(request, False, exc)
+
+    def _native_launch(self, app, profile):
+        if self.closed or self.close_when_idle or self.initializing or self.app is not app:
+            raise ValueError("The launcher owner changed or is closing; launch cancelled")
+        return self._play_with_crash_monitor(profile)
 
     def _native_preferences(self):
         monitor = self.crash_monitor
@@ -682,9 +963,34 @@ class NativeBackendWindow(LauncherWindow):
     def _native_workflow(self, params):
         action = text(params, "action")
         if action == "quit":
+            choice = text(params, "update_choice")
+            if choice not in {"", "install", "skip"}:
+                raise ValueError("Choose whether to install the staged update before quitting")
+            if getattr(self, "pending_update", None) is not None and choice not in {
+                "install",
+                "skip",
+            }:
+                raise ValueError("Review the staged update before quitting")
+            self._native_update_choice = choice
             self._native_parent_approved_close = True
             self._native_shutdown_started = False
             self.root.after_idle(self._close)
+            return dict(accepted=True)
+        if action in {"collection", "updates", "setup", "preferences", "crash-reports"}:
+            category = {
+                "updates": "Updates",
+                "setup": "Library",
+                "crash-reports": "Crash Reporting",
+            }.get(action, "General")
+            self._emit_native(
+                dict(
+                    event="tools.navigate",
+                    data=dict(
+                        destination="Collection" if action == "collection" else "Preferences",
+                        category=category,
+                    ),
+                )
+            )
             return dict(accepted=True)
         if action == "hide-advanced":
             self._native_advanced = False
@@ -693,10 +999,9 @@ class NativeBackendWindow(LauncherWindow):
             set_activation_policy()
             return dict(accepted=True)
         if action == "play":
-            if self.app is None or not self.app.profiles.state_file.exists():
-                raise ValueError("Complete setup before playing")
-            profile_id = text(params, "profile_id", ORIGINAL)
-            self._play(profile_id)
+            raise ValueError(
+                "Use contextual native Play to review the exact map and current warning"
+            )
         elif action == "download":
             if self.app is None or not self.app.profiles.state_file.exists():
                 raise ValueError("Complete setup before downloading a map")
@@ -740,13 +1045,16 @@ class NativeBackendWindow(LauncherWindow):
                 "Reading map briefing…",
                 lambda: app.map_metadata(self.native_library.record(app, profile_id)).description,
                 self._read_briefing,
+                maps_changed=False,
             )
         elif action == "stop-reading":
             self._stop_speech()
         elif action == "voice-settings":
-            self._submit("Opening macOS voice settings…", open_voice_settings)
+            self._submit("Opening macOS voice settings…", open_voice_settings, maps_changed=False)
         elif action == "translation-settings":
-            self._submit("Opening translation settings…", open_translation_settings)
+            self._submit(
+                "Opening translation settings…", open_translation_settings, maps_changed=False
+            )
         elif action == "installation-help":
             webbrowser.open(
                 "https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/blob/main/MACOS_README.md"
@@ -779,6 +1087,7 @@ class NativeBackendWindow(LauncherWindow):
                     "Opening advanced map tools…",
                     lambda: self.native_library.record(app, profile_id),
                     self._map_details,
+                    maps_changed=False,
                 )
             elif action == "crash-reports":
                 self.crash_reports()
@@ -787,7 +1096,6 @@ class NativeBackendWindow(LauncherWindow):
                 self.check_for_updates()
             else:
                 self._show(action if action != "advanced" else "maps")
-        self.native_library.invalidate()
         return dict(accepted=True)
 
     def _history_exit_prompt(self, event):

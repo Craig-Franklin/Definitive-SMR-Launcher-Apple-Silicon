@@ -1758,7 +1758,7 @@ class LauncherWindow:
             )
             self._speech_activity = self._activity_begin("Reading briefing aloud…")
         except Exception as exc:
-            messagebox.showerror(tr("Read Briefing Aloud"), str(exc), parent=self.root)
+            self._operation_error(tr("Read Briefing Aloud"), exc)
 
     def _map_details(self, record: MapRecord) -> None:
         app = self.app
@@ -2873,11 +2873,13 @@ class LauncherWindow:
         finished: Optional[Callable[[object], None]] = None,
         *,
         failed=None,
+        maps_changed=True,
     ) -> None:
         if self.busy or getattr(self, "initializing", False) or self.closed:
             return
         self.busy = True
-        self._maps_dirty = True
+        if maps_changed:
+            self._maps_dirty = True
         self._cancel_gallery()
         self._operation_panel = None
         if (
@@ -2909,6 +2911,12 @@ class LauncherWindow:
             # close/update handling also run when no worker could be started.
             self.results.put((False, exc, None))
 
+    def _operation_warning(self, title, message):
+        messagebox.showwarning(title, message, parent=self.root)
+
+    def _operation_error(self, title, error):
+        messagebox.showerror(title, str(error), parent=self.root)
+
     def _poll(self) -> None:
         if self.closed:
             return
@@ -2936,7 +2944,7 @@ class LauncherWindow:
             for event in self.crash_monitor.take_events():
                 self.status.set(event)
                 self._log("Game resource protection", "Stopped", event)
-                messagebox.showwarning("Railroads memory protection", event, parent=self.root)
+                self._operation_warning("Railroads memory protection", event)
             for event in self.crash_monitor.take_history_exits():
                 self.root.after_idle(lambda item=event: self._history_exit_prompt(item))
         speech = self.speech_process
@@ -2982,7 +2990,7 @@ class LauncherWindow:
                                 "Action stopped; displaying its error failed: " + str(exc)
                             )
                     else:
-                        messagebox.showerror("Railroads launcher", str(value), parent=self.root)
+                        self._operation_error("Railroads launcher", value)
                 if self.closed:
                     return
                 if self.view == "maps" and not self.busy and getattr(self, "_maps_dirty", False):

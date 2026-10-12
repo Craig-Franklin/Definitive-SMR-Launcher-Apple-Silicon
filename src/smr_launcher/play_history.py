@@ -103,6 +103,10 @@ class HistoryError(ValueError):
     """History needs inspection; callers must not infer green or zero counts."""
 
 
+class HistoryWriteOutcomeUnknown(HistoryError):
+    """An append attempted writes; its durable result needs inspection."""
+
+
 def digest(*parts):
     return hashlib.sha256(canonical(parts)).hexdigest()
 
@@ -540,7 +544,9 @@ class PlayHistoryStore:
         while data:
             written = os.write(fd, data)
             if written <= 0:
-                raise HistoryError("History append failed")
+                raise HistoryWriteOutcomeUnknown(
+                    "History append failed; partial write needs inspection"
+                )
             data = data[written:]
         os.fsync(fd)
         _fsync_dir(self.root)

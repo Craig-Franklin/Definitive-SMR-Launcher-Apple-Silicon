@@ -47,3 +47,83 @@ Separate Python in-memory benchmarks used fictional event dictionaries and mocke
 - A summary with 10,000 events: recursive conversion then discarding events median 25.805 ms; selecting scalar fields first median 0.001 ms.
 
 The local raw samples, UI state and diagnostic receipts stay private. Source and synthetic evidence do not establish packaged rendering, full game exit or gameplay acceptance. Ordinary map search already works from memory, the grid uses `LazyVGrid`, Collection uses `List`, Activity uses `LazyVStack`, image sizes are bounded, and the large-reply Swift decoder is off the main actor. Preserve those properties. No engine rule changed or new game-compatibility claim follows from this audit.
+
+
+## Stable presentation correction for #218 and #219
+
+The correction retains the native in-memory projection until explicit Refresh,
+a library/build change, a monitor-history error change or an existing invalidation.
+Refresh still rereads secure metadata, artwork, annotations and verification.
+External file edits are discovered by Refresh; the library labels displayed summaries
+as potentially stale. No disk startup cache was added. Operation validation continues
+to use current records and the existing protected Python paths.
+
+One annotation save now returns its validated, identity-bound presentation and changes
+only that map. Its stored image still obeys the aggregate projection budget. One history
+confirmation updates the affected summary through the existing fresh detail read. Other
+cards, query, sort, selection, scroll memory and drafts remain in place. Failed reads
+retain last good presentation, and changed-edition replies cannot replace it. Read-only
+speech/settings/navigation no longer invalidate every map. The inherited submission
+helper keeps conservative invalidation as its default for mutations.
+
+The native model reuses search text and query/sort results until their inputs change.
+Repeated detail reads coalesce by edition and library revision; a brief selection delay
+avoids submitting superseded selections. Read requests do not own the model's mutation
+busy flag, while the service keeps its existing serial dispatch and guarded operations.
+Concurrent refresh requests coalesce, with a follow-up refresh retained when the library
+changes during a read. Package artwork is constructed once when no personal override
+exists. Selected-image reading, thumbnail creation and PNG encoding run off the main
+actor; the draft retains one prepared preview and survives unsupported/oversized files.
+Saving waits for that image preparation, and late work checks its map and draft identity.
+
+The history gallery partitions already validated events once by all three exact map/build
+identities before calling the unchanged reducer. Scalar summary projection excludes
+history events before recursive conversion. Warm native snapshots reuse annotations and
+encoded artwork; an annotation save rereads only that map's prior document. Explicit
+Refresh and guarded mutations retain their secure reads and failures.
+
+The following source/synthetic measurements compare `d8e3f755` with this correction on
+an arm64 Mac16,8, macOS 27.2 (26B5101f), Apple Swift 6.4 in optimized Swift 5 language
+mode with a macOS 13 target, and Python 3.12. Runs used reduced scheduling priority on
+a non-idle host. Swift scenarios used one warm-up followed by 30 samples, alternating
+the query and sort and reading the resulting array three times per sample. They measure
+model computation, **not an updated viewport**.
+
+| Model scenario | Before p95 | After p95 |
+| --- | ---: | ---: |
+| 250 maps, 128-character descriptions, matching queries | 2.09 ms | 0.71 ms |
+| 1,000 maps, 128-character descriptions, matching queries | 8.15 ms | 2.35 ms |
+| 250 maps, 4,096-character descriptions, no matching query | 12.60 ms | 4.06 ms |
+| 1,000 maps, 4,096-character descriptions, no matching query | 48.01 ms | 15.95 ms |
+
+Each Python scenario used 20 measured samples, with one warm-up for history. Generated
+history events passed the existing schema and relation validators. Metadata, artwork,
+verification and annotation reads were mocked; secure disk access, JSON encoding, pipe
+backpressure and frontend processing are excluded. Full summary/projection outputs
+matched before and after.
+
+| Python scenario | Before median | After median |
+| --- | ---: | ---: |
+| 250 maps, 2,500 history events, full gallery | 174.67 ms | 4.58 ms |
+| 1,000 maps, 10,000 history events, full gallery | 2,831.27 ms | 18.58 ms |
+| 250 maps, warm native projection with 32 KiB art per map | 16.34 ms | <0.001 ms |
+| 1,000 maps, warm native projection with 32 KiB art per map | 64.04 ms | <0.001 ms |
+
+Over 20 warm native projections, annotation loads fell from 5,000 to zero at 250 maps
+and from 20,000 to zero at 1,000 maps. Focused regressions also check zero repeated
+query builds for unchanged navigation/status/drafts, one read for duplicate delayed
+details, one affected annotation read, exact-build/history-order equivalence, and no
+full snapshot after annotation/history confirmation. Retained search text has a memory
+cost: the complete Swift benchmark's maximum RSS increased from 17,170,432 to
+23,461,888 bytes. That is process-level synthetic peak memory, not a leak or production
+memory-growth measurement.
+
+The final large-response check used 1,000 fictional maps and 16 MiB fragmented text:
+49 main-actor scheduling ticks, a maximum gap of 2.15 ms and about 95 ms total. This
+single transport/model run and delayed-read interaction checks do not establish frame
+latency. Full frontend compilation for arm64 macOS 13 passed without warnings.
+No visible preview, real launcher service, installed-app replacement, game/profile/save
+action or live collector ran. Packaged viewport p95, accessibility/scroll/focus behavior,
+real-library refresh costs and #219 manual-action/visible workflow acceptance remain
+open. Independent review and cross-lane integration belong to the coordinator.
+Engine knowledge consultation is not applicable; no engine rule changed.

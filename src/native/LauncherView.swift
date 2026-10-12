@@ -1,5 +1,4 @@
 import AppKit
-import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -8,7 +7,7 @@ private typealias ViewState<Value> = SwiftUI.State<Value>
 
 struct LauncherView: View {
     @ObservedObject var model: LauncherModel
-    @ViewState private var preference = "General"
+    @StateObject private var mapTools = NativeMapToolsState()
     @ViewState private var discardMap: String?
     @ViewState private var showingDiscard = false
     @FocusState private var searchFocused: Bool
@@ -60,17 +59,18 @@ struct LauncherView: View {
                     }
                     Menu {
                         Button("Refresh Library") { Task { await model.refresh() } }
-                        Button("Choose Steam Library…", action: chooseLibrary)
+                        Button("Choose Steam Library…", action: openLibraryPreferences)
                         Divider()
-                        Button("Advanced Map Tools…") { advanced("details") }.disabled(model.selected == nil)
-                        Button("Collection Tools…") { advanced("collection") }
-                        Button("Installation & Recovery…") { advanced("setup") }
-                        Button("Crash Reports…") { advanced("crash-reports") }
-                        Button("Check for Updates…") { advanced("updates") }
+                        Button("Map Compatibility & Editions…") { model.section = "Compatibility & Editions"; model.destination = "Map Library"; model.narrowDetail = true }.disabled(model.selected == nil)
+                        Button("Collection") { model.destination = "Collection" }
+                        Button("Installation & Recovery…") { model.preferenceCategory = "Library"; model.destination = "Preferences" }
+                        Button("Crash Reports…") { model.preferenceCategory = "Crash Reporting"; model.destination = "Preferences" }
+                        Button("Check for Updates…") { model.preferenceCategory = "Updates"; model.destination = "Preferences" }
                     } label: { Label("More", systemImage: "ellipsis.circle") }
                     .disabled(model.working || !model.connected)
                 }
             }
+            .modifier(NativePlayReviewModifier(model: model, tools: mapTools))
             .onChange(of: model.destination) { destination in
                 if destination == "Preferences" { Task { await model.loadPreferences() } }
                 if destination == "Activity" { Task { await model.loadActivity() } }
@@ -115,8 +115,11 @@ struct LauncherView: View {
                     Button("Dismiss") { model.error = "" }
                 }
             }
+            if model.destination == "Map Library" && model.loaded && !model.maps.isEmpty {
+                Text("Displayed summaries may be stale. Refresh checks external changes; actions validate current records.").foregroundStyle(.secondary)
+            }
             HStack {
-                if model.working || !model.loaded { ProgressView().controlSize(.small) }
+                if model.working || model.reading > 0 || !model.loaded { ProgressView().controlSize(.small) }
                 Text(model.status).lineLimit(2).textSelection(.enabled)
                 Spacer()
                 Button(model.error.isEmpty ? "Refresh" : "Refresh Library") { Task { await model.refresh() } }
@@ -141,12 +144,12 @@ struct LauncherView: View {
                 empty("Opening your library", symbol: "map", text: "Reading local information. This is not an empty library.")
             } else if !model.available {
                 empty("Steam Mac game unavailable", symbol: "externaldrive.badge.questionmark", text: "Choose the steamapps folder or inspect Installation & Recovery.") {
-                    Button("Choose Steam Library…", action: chooseLibrary)
-                    Button("Installation & Recovery…") { advanced("setup") }
+                    Button("Choose Steam Library…", action: openLibraryPreferences)
+                    Button("Installation & Recovery…") { model.preferenceCategory = "Library"; model.destination = "Preferences" }
                 }
             } else if model.maps.isEmpty {
                 empty("No maps yet", symbol: "map", text: model.enrolled ? "Import a map archive or browse Collection." : "Complete setup before importing maps.") {
-                    Button(model.enrolled ? "Import Map…" : "Installation & Recovery…") { model.enrolled ? importMap() : advanced("setup") }
+                    Button(model.enrolled ? "Import Map…" : "Installation & Recovery…") { model.enrolled ? importMap() : openLibraryPreferences() }
                     Button("Browse Collection") { model.destination = "Collection" }
                 }
             } else if model.visible.isEmpty {
@@ -179,9 +182,9 @@ struct LauncherView: View {
 
     @ViewBuilder private var destination: some View {
         switch model.destination {
-        case "Preferences": preferences
+        case "Preferences": NativePreferences(model: model)
         case "Activity": activity
-        case "Collection": collection
+        case "Collection": NativeCollection(model: model)
         case "Original Game": original
         default:
             if let map = model.selected, model.visible.contains(where: { $0.id == map.id }) {
@@ -202,7 +205,7 @@ struct LauncherView: View {
                     }
                     Spacer()
                     if model.section == "Overview" {
-                        Button("Play", systemImage: "play.fill") { Task { await model.workflow("play", profile: map.id) } }
+                        Button("Play", systemImage: "play.fill") { Task { await mapTools.beginPlay(model, map) } }
                             .primaryPlayStyle().accessibilityLabel("Play selected map").disabled(model.working || !model.enrolled || !model.connected)
                     }
                 }
@@ -223,7 +226,7 @@ struct LauncherView: View {
                     Button("Record Outcome…") { model.record(map) }
                 }.disabled(model.working)
                 Picker("Map section", selection: $model.section) {
-                    ForEach(["Overview", "Play History", "Issues & Evidence", "Edit Details", "Record Outcome"], id: \.self) { Text($0) }
+                    ForEach(["Overview", "Play History", "Issues & Evidence", "Compatibility & Editions", "History Scope", "Legacy Mac Test", "Edit Details", "Record Outcome"], id: \.self) { Text($0) }
                 }.labelsHidden().pickerStyle(.menu)
                 Divider()
                 switch model.section {
@@ -231,6 +234,8 @@ struct LauncherView: View {
                 case "Record Outcome": recorder(map)
                 case "Play History": history(map)
                 case "Issues & Evidence": evidence(map)
+                case "Compatibility & Editions", "History Scope", "Legacy Mac Test":
+                    NativeMapToolsView(model: model, tools: mapTools, map: map, section: model.section)
                 default: overview(map)
                 }
             }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
@@ -320,11 +325,11 @@ struct LauncherView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Button("Choose Local Image…") { chooseImage(map) }
                     Button("Use Package Image") {
-                        var draft = model.personal[map.id] ?? PersonalDraft(title: map.title, notes: map.notes)
-                        draft.imagePNG = ""; draft.dirty = true; model.personal[map.id] = draft
+                        model.usePackageImage(map)
                     }
                 }
             }
+            if model.imageReads[map.id] != nil { ProgressView("Preparing selected image…").controlSize(.small) }
             Text("A bounded copy is saved for this edition. Original package images remain intact.").font(.caption).foregroundStyle(.secondary)
             HStack {
                 Button("Cancel") {
@@ -334,6 +339,7 @@ struct LauncherView: View {
                 Spacer()
                 Button("Keep Draft & Close") { model.section = "Overview" }
                 Button("Save Details") { Task { await model.savePersonal(map) } }.buttonStyle(.borderedProminent)
+                    .disabled(model.imageReads[map.id] != nil)
             }.disabled(model.working)
         }
     }
@@ -351,7 +357,7 @@ struct LauncherView: View {
             if opens.isEmpty {
                 Text("No recorded launch session for this edition/build. A report needs an existing attempt or confirmed process.")
                 Button("Refresh History") { Task { await model.loadDetails(map.id, force: true) } }
-                Button("Record Legacy Mac Test…") { advanced("legacy-test", profile: map.id) }
+                Button("Record Legacy Mac Test…") { model.section = "Legacy Mac Test" }
             } else {
                 Picker("Launch session", selection: outcomeBinding(map.id, \.attempt)) {
                     Text("Choose recorded session").tag("")
@@ -448,8 +454,9 @@ struct LauncherView: View {
             }
             HStack {
                 Button("Record Outcome…") { model.record(map) }
-                Button("Record Legacy Mac Test…") { advanced("legacy-test", profile: map.id) }
+                Button("Record Legacy Mac Test…") { model.section = "Legacy Mac Test" }
             }
+            Button("History Scope…") { model.section = "History Scope" }
         }
     }
 
@@ -468,69 +475,16 @@ struct LauncherView: View {
                 Text(model.details[map.id]?.text("checks_text", "No scan result available.") ?? "No scan result available.").textSelection(.enabled).padding(.top, 8)
                 Text("Static findings do not establish gameplay compatibility.").font(.caption)
             }
-            DisclosureGroup("Compatibility, Issues & Fixes") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Existing protected tools retain exact identities, prerequisites and confirmations.")
-                    Button("Compatibility & Edition Tools…") { advanced("details", profile: map.id) }
-                    Button("Link Issue or Record Fix / Test…") { advanced("fix-test", profile: map.id) }
-                    Button("Record Legacy Mac Test…") { advanced("legacy-test", profile: map.id) }
-                }.padding(.top, 8)
-            }
+            NativeMapToolsView(model: model, tools: mapTools, map: map, section: "Issues & Evidence")
         }
-    }
-
-    private var preferences: some View {
-        Form {
-            Picker("Category", selection: $preference) {
-                ForEach(["General", "Updates", "Library", "Crash Reporting"], id: \.self) { Text($0) }
-            }
-            Section(preference) {
-                if preference == "General" {
-                    Picker("Interface language", selection: preferenceText("language", fallback: "en")) {
-                        ForEach(model.preferences.rows("languages").indices, id: \.self) { i in
-                            let row = model.preferences.rows("languages")[i]
-                            Text(row.text("name")).tag(row.text("id"))
-                        }
-                    }
-                    Picker("Briefing voice", selection: preferenceText("voice")) {
-                        Text("System default").tag("")
-                        ForEach(model.preferences.rows("voices").indices, id: \.self) { i in
-                            let row = model.preferences.rows("voices")[i]
-                            Text("\(row.text("name")) · \(row.text("language"))").tag(row.text("id"))
-                        }
-                    }
-                    HStack {
-                        Button("Refresh Voices") { Task { await model.request("prefs", ["refresh_voices": true]) { model.preferences = $0 } } }
-                        Button("Manage Voices…") { advanced("voice-settings") }
-                        Button("Translation Languages…") { advanced("translation-settings") }
-                    }
-                    Text("Language and voice save immediately. Appearance, Liquid Glass tint and accessibility settings follow macOS.")
-                    Text("Existing translations cover shared library labels and advanced tools. New workflow copy currently uses English.").font(.caption).foregroundStyle(.secondary)
-                    if !model.preferences.text("voice_notice").isEmpty { Text(model.preferences.text("voice_notice")).foregroundStyle(.orange) }
-                } else if preference == "Updates" {
-                    Toggle("Automatically check for launcher updates", isOn: preferenceFlag("automatic_updates"))
-                    Button("Check for Updates…") { advanced("updates") }
-                    Text("Updates verify the publisher and staged app before installation.")
-                } else if preference == "Library" {
-                    Button("Choose Steam Library…", action: chooseLibrary)
-                    Button("Installation & Recovery…") { advanced("setup") }
-                    Text("Setup, activation and restoration retain the existing stopped-game and preservation checks.")
-                } else {
-                    Toggle("Monitor game crashes", isOn: preferenceFlag("crash_enabled")).disabled(model.preferences["crash_enabled"] is NSNull)
-                    Toggle("Stop runaway game memory use", isOn: preferenceFlag("resource_protection")).disabled(model.preferences["resource_protection"] is NSNull)
-                    Toggle("Automatically report sanitized crashes to GitHub", isOn: preferenceFlag("crash_automatic")).disabled(model.preferences["crash_automatic"] is NSNull)
-                    Text(model.crashStatus).foregroundStyle(.secondary)
-                    Text("Crash preferences save immediately. Full diagnostics stay private. Public reports exclude personal paths, save names, raw logs and attachments.")
-                    Button("Review Local Reports…") { advanced("crash-reports") }
-                }
-            }
-        }.formStyle(.grouped).disabled(model.working || !model.connected)
     }
 
     private var activity: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
                 Text("Activity").font(.title2.weight(.semibold))
+                NativeToolProgress(model: model)
+                Button("Crash Reporting Preferences") { model.preferenceCategory = "Crash Reporting"; model.destination = "Preferences" }
                 if model.activity.isEmpty { Text("No launcher activity recorded.").foregroundStyle(.secondary) }
                 ForEach(model.activity.indices, id: \.self) { index in
                     let event = model.activity[index]
@@ -544,38 +498,14 @@ struct LauncherView: View {
         }.hardScrollEdge()
     }
 
-    private var collection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Collection").font(.title2.weight(.semibold))
-            TextField("Search collection", text: $model.collectionQuery).textFieldStyle(.roundedBorder)
-            Text(model.collectionNotice).font(.caption).foregroundStyle(.secondary)
-            let records = model.collection.filter { model.collectionQuery.isEmpty || $0.text("name").localizedCaseInsensitiveContains(model.collectionQuery) }
-            List(selection: $model.selectedRemote) {
-                ForEach(records.indices, id: \.self) { index in
-                    let item = records[index]
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(item.text("name")).fixedSize(horizontal: false, vertical: true)
-                        Text(ByteCountFormatter.string(fromByteCount: Int64(item["size"] as? Int ?? 0), countStyle: .file)).font(.caption).foregroundStyle(.secondary)
-                    }.tag(item.text("name"))
-                }
-            }
-            HStack {
-                Button("Refresh from Internet Archive") { Task { await model.loadCollection(refresh: true) } }
-                Spacer()
-                Button("Download & Import") { if let name = model.selectedRemote { Task { await model.workflow("download", extras: ["name": name]) } } }
-                    .buttonStyle(.borderedProminent).disabled(model.selectedRemote == nil || !model.enrolled)
-            }
-            Button("Bulk Download & Collection Tools…") { advanced("collection") }
-        }.padding(24).disabled(model.working || !model.connected)
-    }
-
     private var original: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Original Game").font(.title2.weight(.semibold))
             Text("Play the original Steam Mac edition. Existing profile and preservation guards run before launch.")
-            Button("Play Original Game", systemImage: "play.fill") { Task { await model.workflow("play", profile: "original-game") } }.primaryPlayStyle()
+            Button("Play Original Game", systemImage: "play.fill") { Task { await mapTools.beginPlay(model, nil) } }.primaryPlayStyle()
                 .disabled(!model.enrolled || model.working || !model.connected)
-            Button("Installation & Recovery…") { advanced("setup") }
+            OriginalActivationControls(model: model, tools: mapTools)
+            Button("Installation & Recovery…") { model.preferenceCategory = "Library"; model.destination = "Preferences" }
             Spacer()
         }.padding(24)
     }
@@ -584,7 +514,7 @@ struct LauncherView: View {
         LabeledContent(label, value: value.isEmpty ? "Not provided" : value).textSelection(.enabled)
     }
     private func artwork(_ map: MapItem, draft: String? = nil) -> some View {
-        let picture = draft == "" ? map.packageImage : draft.flatMap { Data(base64Encoded: $0) }.flatMap { NSImage(data: $0) } ?? map.image
+        let picture = draft == nil ? map.image : draft == "" ? map.packageImage : model.personal[map.id]?.image ?? map.image
         return ZStack {
             RoundedRectangle(cornerRadius: 5).fill(.quaternary)
             if let picture { Image(nsImage: picture).resizable().scaledToFit().padding(3) }
@@ -616,12 +546,6 @@ struct LauncherView: View {
             model.outcomes[id] = draft
         })
     }
-    private func preferenceText(_ key: String, fallback: String = "") -> Binding<String> {
-        Binding(get: { model.preferences.text(key, fallback) }, set: { value in Task { await model.savePreference(key, value) } })
-    }
-    private func preferenceFlag(_ key: String) -> Binding<Bool> {
-        Binding(get: { model.preferences.flag(key) }, set: { value in Task { await model.savePreference(key, value) } })
-    }
     private func confirmation(_ draft: OutcomeDraft) -> String {
         switch draft.outcome {
         case "Played": return "Record only if you confirm track, stations and trains worked. This does not confirm completion, saving or reopening."
@@ -641,7 +565,7 @@ struct LauncherView: View {
     }
     private func moveSelection(_ direction: MoveCommandDirection) {
         let rows = model.visible
-        guard !rows.isEmpty, !model.working else { return }
+        guard !rows.isEmpty else { return }
         let index = rows.firstIndex { $0.id == model.selection } ?? 0
         let change = direction == .left || direction == .up ? -1 : 1
         model.select(rows[min(max(index + change, 0), rows.count - 1)])
@@ -652,11 +576,9 @@ struct LauncherView: View {
         let panel = NSOpenPanel(); panel.title = "Choose a custom map archive"; panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url { Task { await model.workflow("import", extras: ["path": url.path]) } }
     }
+    private func openLibraryPreferences() { model.preferenceCategory = "Library"; model.destination = "Preferences" }
     private func chooseLibrary() {
-        guard !model.working else { return }
-        if model.fixture { model.status = "Synthetic fixture: library switching disabled."; return }
-        let panel = NSOpenPanel(); panel.title = "Choose the steamapps folder, not Steam.app"; panel.canChooseDirectories = true; panel.canChooseFiles = false
-        if panel.runModal() == .OK, let url = panel.url { Task { await model.workflow("choose-library", extras: ["path": url.path]) } }
+        openLibraryPreferences()
     }
     private func chooseSave(_ map: MapItem) {
         if model.fixture { model.status = "Synthetic fixture: save access disabled."; return }
@@ -671,18 +593,7 @@ struct LauncherView: View {
         if model.fixture { model.status = "Synthetic fixture: image file access disabled."; return }
         let panel = NSOpenPanel(); panel.title = "Choose a local map image"; panel.allowedContentTypes = [.image]
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            let file = try FileHandle(forReadingFrom: url); defer { try? file.close() }
-            let data = try file.read(upToCount: 8 * 1024 * 1024 + 1) ?? Data()
-            guard data.count <= 8 * 1024 * 1024, let source = CGImageSourceCreateWithData(data as CFData, nil),
-                  let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 360, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary) else {
-                throw NativeError.message("Image could not be read. Choose a supported image of at most 8 MiB; the previous image and draft are retained.")
-            }
-            let representation = NSBitmapImageRep(cgImage: thumbnail)
-            guard let png = representation.representation(using: .png, properties: [:]), png.count <= 1024 * 1024 else { throw NativeError.message("The prepared image exceeds 1 MiB. Previous image and draft retained.") }
-            var draft = model.personal[map.id] ?? PersonalDraft(title: map.title, notes: map.notes)
-            draft.imagePNG = png.base64EncodedString(); draft.dirty = true; model.personal[map.id] = draft
-        } catch { model.error = error.localizedDescription }
+        Task { await model.prepareImage(url, for: map) }
     }
 }
 

@@ -374,11 +374,13 @@ class NativeLibraryTests(TestCase):
             store = AnnotationStore(folder)
             for r in records:
                 store.save(r, title="Mine", notes="Retain", image_png=image)
-            model.cached_app = application
-            model.cached_items = tuple(
+            items = tuple(
                 GalleryItem(r, MapMetadata(), "Not verified", art=binary) for r in records
             )
-            with patch("smr_launcher.native_backend.MAX_SNAPSHOT_ART_BYTES", len(binary) + 1):
+            with (
+                patch("smr_launcher.native_backend.MAX_SNAPSHOT_ART_BYTES", len(binary) + 1),
+                patch("smr_launcher.native_backend.gallery_snapshot", return_value=items),
+            ):
                 result = model.snapshot(application)
             total = sum(
                 len(base64.b64decode(m["art"]))
@@ -390,17 +392,84 @@ class NativeLibraryTests(TestCase):
             self.assertEqual(result[1]["annotation"]["image_png"], "")
             self.assertIn("Personal image omitted", result[1]["notice"])
             self.assertEqual(store.load(records[1])["image_png"], image)
-            model.annotations_save(
+            with patch("smr_launcher.native_backend.MAX_SNAPSHOT_ART_BYTES", len(binary) + 1):
+                reply = model.annotations_save(
+                    application,
+                    dict(
+                        profile_id="second",
+                        archive_sha256="a" * 64,
+                        variant_id="d" * 64,
+                        title="Edited",
+                        notes="Retain",
+                    ),
+                )
+                self.assertEqual(reply["annotation"]["image_png"], "")
+                self.assertIn("Personal image omitted", reply["notice"])
+                current = model.snapshot(application)
+                self.assertLessEqual(
+                    sum(
+                        model._image_size(row["art"])
+                        + model._image_size(row["annotation"]["image_png"])
+                        for row in current
+                    ),
+                    len(binary) + 1,
+                )
+            self.assertEqual(store.load(records[1])["image_png"], image)
+
+    def test_annotation_reply_replaces_both_art_layers_within_projection_budget(self):
+        from smr_launcher.gallery import GalleryItem
+
+        with TemporaryDirectory(dir=Path(gettempdir()).resolve()) as folder:
+            application, model = app(folder), NativeLibrary()
+            binary = base64.b64decode(png())
+            item = GalleryItem(record(), MapMetadata(), "Not verified", art=binary)
+            with (
+                patch("smr_launcher.native_backend.MAX_SNAPSHOT_ART_BYTES", len(binary)),
+                patch("smr_launcher.native_backend.gallery_snapshot", return_value=(item,)),
+            ):
+                before = model.snapshot(application)
+                self.assertTrue(before[0]["art"])
+                self.assertEqual(before[0]["game_executable_sha256"], "c" * 64)
+                application.catalogue.return_value = (replace(record(), name="Metadata renamed"),)
+                reply = model.annotations_save(
+                    application,
+                    dict(
+                        profile_id="synthetic",
+                        archive_sha256="a" * 64,
+                        variant_id="b" * 64,
+                        title="Mine",
+                        notes="Retain",
+                        image_png=png(),
+                    ),
+                )
+                self.assertEqual(reply["art"], "")
+                self.assertEqual(reply["annotation"]["image_png"], png())
+                self.assertLessEqual(
+                    model._image_size(reply["art"])
+                    + model._image_size(reply["annotation"]["image_png"]),
+                    len(binary),
+                )
+                self.assertEqual(model.snapshot(application)[0]["annotation"], reply["annotation"])
+                self.assertEqual(AnnotationStore(folder).load(record())["image_png"], png())
+
+    def test_annotation_save_without_projection_defers_images_until_refresh(self):
+        with TemporaryDirectory(dir=Path(gettempdir()).resolve()) as folder:
+            application, model = app(folder), NativeLibrary()
+            reply = model.annotations_save(
                 application,
                 dict(
-                    profile_id="second",
+                    profile_id="synthetic",
                     archive_sha256="a" * 64,
-                    variant_id="d" * 64,
-                    title="Edited",
+                    variant_id="b" * 64,
+                    title="Mine",
                     notes="Retain",
+                    image_png=png(),
                 ),
             )
-            self.assertEqual(store.load(records[1])["image_png"], image)
+            self.assertEqual(reply["art"], "")
+            self.assertEqual(reply["annotation"]["image_png"], "")
+            self.assertIn("Refresh", reply["notice"])
+            self.assertEqual(AnnotationStore(folder).load(record())["image_png"], png())
 
     def test_native_empty_game_reuses_only_unique_binding_and_rejects_ambiguity(self):
         from smr_launcher.history_ui import confirm_checkpoint
@@ -953,7 +1022,7 @@ class NativeProtocolTests(TestCase):
 
         w = window()
         w._show = Mock()
-        w._native_workflow(dict(action="preferences"))
+        w._native_workflow(dict(action="advanced"))
         self.activation_policy.assert_called_once_with(advanced=True)
         name, red_close = w.root.protocol.call_args.args
         self.assertEqual(name, "WM_DELETE_WINDOW")
@@ -975,18 +1044,19 @@ class NativeProtocolTests(TestCase):
         w = window()
         self.activation_policy.side_effect = RuntimeError("Synthetic policy refusal")
         with self.assertRaisesRegex(RuntimeError, "Synthetic policy refusal"):
-            w._native_workflow(dict(action="preferences"))
+            w._native_workflow(dict(action="advanced"))
         self.assertFalse(getattr(w, "_native_advanced", False))
         w.root.deiconify.assert_not_called()
 
-    def test_quit_and_play_use_existing_guarded_paths(self):
+    def test_quit_remains_guarded_and_native_play_requires_contextual_review(self):
         w = window()
         w._play, w._close = Mock(), Mock()
         w.app = SimpleNamespace(
             profiles=SimpleNamespace(state_file=SimpleNamespace(exists=lambda: True))
         )
-        w._native_workflow(dict(action="play", profile_id="synthetic"))
-        w._play.assert_called_once_with("synthetic")
+        with self.assertRaisesRegex(ValueError, "Use contextual native Play"):
+            w._native_workflow(dict(action="play", profile_id="synthetic"))
+        w._play.assert_not_called()
         w._native_workflow(dict(action="quit"))
         self.assertEqual(w.root.after_idle.call_args.args, (w._close,))
 
@@ -1008,13 +1078,17 @@ class NativeProtocolTests(TestCase):
         w._download_selected.assert_called_once_with()
         self.assertEqual(w.selected_remote, remote)
 
-    def test_setup_only_shows_existing_consent_view_and_choose_path_keeps_guard(self):
+    def test_setup_routes_to_native_consent_and_choose_path_keeps_guard(self):
         w = window()
         w.app = Mock()
         w._show, w.setup, w._submit, w._library_chosen = Mock(), Mock(), Mock(), Mock()
         w._native_workflow(dict(action="setup", stock_verified=True))
-        w._show.assert_called_once_with("setup")
+        w._show.assert_not_called()
         w.setup.assert_not_called()
+        self.assertEqual(
+            w._emit_native.call_args.args[0],
+            dict(event="tools.navigate", data=dict(destination="Preferences", category="Library")),
+        )
         w._native_workflow(dict(action="choose-library", path="/synthetic/steamapps"))
         operation, completed = w._submit.call_args.args[1:]
         with patch(
@@ -1080,3 +1154,165 @@ class NativeProtocolTests(TestCase):
         with self.assertRaises(ValueError):
             w._native_save_preferences(dict(automatic_updates="yes"))
         w.update_preferences.set_automatic.assert_not_called()
+
+
+class NativePerformanceTests(TestCase):
+    def test_warm_projection_has_zero_reads_and_one_annotation_updates_one_row(self):
+        with TemporaryDirectory(dir=Path(gettempdir()).resolve()) as folder:
+            application, model = app(folder), NativeLibrary()
+            second = replace(record(), profile_id="second", variant_id="d" * 64)
+            application.catalogue.return_value = (record(), second)
+            load = AnnotationStore.load
+            with patch.object(AnnotationStore, "load", autospec=True, side_effect=load) as reads:
+                first = model.snapshot(application)
+                untouched = first[1]
+                self.assertEqual(reads.call_count, 2)
+                for _ in range(5):
+                    self.assertIs(model.snapshot(application), first)
+                self.assertEqual(reads.call_count, 2)
+                reply = model.annotations_save(
+                    application,
+                    dict(
+                        profile_id="synthetic",
+                        archive_sha256="a" * 64,
+                        variant_id="b" * 64,
+                        title="Mine",
+                        notes="Retain",
+                    ),
+                )
+                self.assertEqual(
+                    reads.call_count, 3, "Only the saved map's prior annotation is read"
+                )
+                self.assertEqual(reply["annotation"]["title"], "Mine")
+                self.assertIs(model.snapshot(application)[1], untouched)
+                self.assertEqual(application.map_metadata.call_count, 2)
+                self.assertEqual(application.verification_for.call_count, 2)
+                self.assertEqual(application.map_icon.call_count, 2)
+                # Outside edits stay explicitly stale until Refresh checks disk.
+                AnnotationStore(folder).save(second, title="External", notes="")
+                self.assertEqual(model.snapshot(application)[1]["annotation"]["title"], "")
+                self.assertEqual(
+                    model.snapshot(application, True)[1]["annotation"]["title"], "External"
+                )
+                self.assertEqual(application.map_metadata.call_count, 4)
+
+    def test_failed_refresh_retains_last_good_projection_and_build_changes_rebuild(self):
+        with TemporaryDirectory(dir=Path(gettempdir()).resolve()) as folder:
+            application, model = app(folder), NativeLibrary()
+            first = model.snapshot(application)
+            application.map_metadata.side_effect = OSError("synthetic read failure")
+            with self.assertRaisesRegex(OSError, "synthetic read failure"):
+                model.snapshot(application, True)
+            self.assertIs(model.snapshot(application), first)
+            application.map_metadata.side_effect = None
+            application.installation.executable_sha256 = "f" * 64
+            self.assertIsNot(model.snapshot(application), first)
+            model.invalidate()
+            self.assertIsNot(model.snapshot(application), first)
+
+    def test_grouped_history_preserves_exact_builds_scenarios_and_ledger_order(self):
+        from smr_launcher.gallery import gallery_snapshot
+        from smr_launcher.play_history import summarize, same_map
+
+        with TemporaryDirectory(dir=Path(gettempdir()).resolve()) as folder:
+            application = app(folder)
+            records = tuple(
+                replace(record(), profile_id=f"map-{i}", variant_id=digest(str(i)))
+                for i in range(250)
+            )
+            application.catalogue.return_value = records
+            store = PlayHistoryStore(folder)
+            history = tuple(
+                store.event(
+                    context(r, build, scenario),
+                    "process_confirmed",
+                    attempt_id=digest(f"{r.profile_id}-{build}-{scenario}"),
+                    source="observed",
+                )
+                for scenario in ("A.xml", "B.xml")
+                for r in records
+                for build in ("c" * 64, "f" * 64)
+            )
+            expected = [summarize(history, context(r, "c" * 64)) for r in records]
+            with (
+                patch.object(PlayHistoryStore, "records", return_value=history),
+                patch("smr_launcher.play_history.same_map", wraps=same_map) as comparisons,
+            ):
+                actual = gallery_snapshot(application, Event())
+            self.assertEqual([item.history for item in actual], expected)
+            self.assertEqual(
+                comparisons.call_count, 500, "Reducer sees only this exact build's events"
+            )
+            self.assertEqual([e["scenario"] for e in actual[0].history.events], ["A.xml", "B.xml"])
+
+    def test_scalar_summary_does_not_deepcopy_history(self):
+        from smr_launcher.gallery import GalleryItem
+        from smr_launcher.play_history import summarize
+
+        class PrivateHistory:
+            def __deepcopy__(self, memo):
+                raise AssertionError("History must not be copied into presentation")
+
+        with TemporaryDirectory(dir=Path(gettempdir()).resolve()) as folder:
+            application, model = app(folder), NativeLibrary()
+            summary = replace(
+                summarize((), context(record(), "c" * 64)), events=(PrivateHistory(),)
+            )
+            item = GalleryItem(record(), MapMetadata(), "Not verified", history=summary)
+            with patch("smr_launcher.native_backend.gallery_snapshot", return_value=(item,)):
+                result = model.snapshot(application)
+            self.assertNotIn("events", result[0]["summary"])
+
+    def test_confirmation_refreshes_only_summary_without_metadata_or_annotation_reads(self):
+        from smr_launcher.play_history import summarize
+
+        with TemporaryDirectory(dir=Path(gettempdir()).resolve()) as folder:
+            application, model = app(folder), NativeLibrary()
+            store, ctx = PlayHistoryStore(folder), context(record(), "c" * 64, "Scenario.xml")
+            attempt = digest("performance open")
+            store.append(
+                store.event(ctx, "process_confirmed", attempt_id=attempt, source="observed")
+            )
+            first = model.snapshot(application)
+            model.history_record(
+                application,
+                dict(profile_id="synthetic", **ctx, kind="playable", attempt_id=attempt),
+            )
+            with patch.object(
+                AnnotationStore, "load", side_effect=AssertionError("No annotation reread")
+            ):
+                current = model.snapshot(application)
+            self.assertIs(current, first)
+            self.assertEqual(current[0]["summary"], model._summary(summarize(store.records(), ctx)))
+            self.assertEqual(application.map_metadata.call_count, 1)
+            self.assertEqual(application.verification_for.call_count, 1)
+
+    def test_read_only_workflows_do_not_mark_gallery_dirty(self):
+        from smr_launcher.gui import LauncherWindow
+
+        w = window()
+        w.app, w._submit, w._read_briefing = app("/synthetic-not-read"), Mock(), Mock()
+        cached = w.native_library.cached_items = object()
+        for action in (
+            "read",
+            "voice-settings",
+            "translation-settings",
+            "stop-reading",
+            "installation-help",
+        ):
+            with (
+                patch("smr_launcher.native_backend.webbrowser.open"),
+                patch.object(w, "_stop_speech"),
+            ):
+                w._native_workflow(dict(action=action, profile_id="synthetic"))
+            self.assertIs(w.native_library.cached_items, cached)
+            if action in ("read", "voice-settings", "translation-settings"):
+                self.assertFalse(w._submit.call_args.kwargs["maps_changed"])
+        w._maps_dirty, w.view = False, "setup"
+        w._cancel_gallery, w._activity_begin, w.status = Mock(), Mock(), Mock()
+        with patch("smr_launcher.gui.Thread"):
+            LauncherWindow._submit(w, "Read only", lambda: None, maps_changed=False)
+            self.assertFalse(w._maps_dirty)
+            w.busy = False
+            LauncherWindow._submit(w, "Default mutation", lambda: None)
+            self.assertTrue(w._maps_dirty, "Mutation default must remain conservative")

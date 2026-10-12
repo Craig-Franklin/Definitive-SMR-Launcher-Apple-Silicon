@@ -90,6 +90,7 @@ class NativeFrontendTests(unittest.TestCase):
                     "src/native/Backend.swift",
                     "src/native/LauncherModel.swift",
                     "tests/native/ModelChecks.swift",
+                    "tests/native/PerformanceChecks.swift",
                     "-o",
                     str(executable),
                 ],

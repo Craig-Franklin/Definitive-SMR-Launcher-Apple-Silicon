@@ -36,7 +36,34 @@ for line in sys.stdin:
         )
         print(json.dumps(value), flush=True)
         continue
+    if method == "annotations.save":
+        if configuration.get("slow_annotations"):
+            time.sleep(0.15)
+        params = request["params"]
+        failed = configuration.get("reject_annotations")
+        value = {"id": request["id"], "ok": not failed}
+        value["error" if failed else "data"] = (
+            "synthetic annotations failure"
+            if failed
+            else {
+                **params,
+                "saved": True,
+                "variant_id": "wrong"
+                if configuration.get("changed_annotation_edition")
+                else params["variant_id"],
+                "annotation": {
+                    "title": params["title"],
+                    "notes": params["notes"],
+                    "image_png": params.get("image_png", ""),
+                },
+                "art": "",
+            }
+        )
+        print(json.dumps(value), flush=True)
+        continue
     if method in ("details", "history.record"):
+        if method == "details" and configuration.get("slow_details"):
+            time.sleep(0.15)
         failed = configuration.get(
             "reject_record" if method == "history.record" else "reject_details"
         )
@@ -51,7 +78,8 @@ for line in sys.stdin:
                 "context": {
                     "archive_sha256": "a" * 64,
                     "variant_id": ("d" if configuration.get("changed_edition") else "b") * 64,
-                    "game_executable_sha256": "c" * 64,
+                    "game_executable_sha256": ("f" if configuration.get("changed_build") else "c")
+                    * 64,
                 },
                 "summary": {
                     "label": "Wrong edition"
@@ -76,6 +104,18 @@ for line in sys.stdin:
     if method == "echo":
         print(json.dumps({"event": "fixture", "data": {"synthetic": True}}), flush=True)
     if method == "snapshot":
+        if configuration.pop("library_changed_during_snapshot", False):
+            print(json.dumps({"event": "library.changed", "data": {}}), flush=True)
+        if configuration.get("slow_snapshot"):
+            time.sleep(0.15)
+        if configuration.get("reject_snapshot"):
+            print(
+                json.dumps(
+                    {"id": request["id"], "ok": False, "error": "synthetic snapshot failure"}
+                ),
+                flush=True,
+            )
+            continue
         # A large, entirely fictional library exercises fragmented framing and
         # background presentation preparation without importing real services.
         rows = [
@@ -84,6 +124,7 @@ for line in sys.stdin:
                 "name": f"Synthetic {index}",
                 "archive_sha256": "a" * 64,
                 "variant_id": "b" * 64,
+                "game_executable_sha256": "c" * 64,
                 "metadata": {"description": "x" * (16 * 1024)},
             }
             for index in range(1000)

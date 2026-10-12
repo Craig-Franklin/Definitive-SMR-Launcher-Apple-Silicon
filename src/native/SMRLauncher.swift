@@ -81,7 +81,7 @@ import SwiftUI
                 Button("Preferences…") { model.destination = "Preferences" }.keyboardShortcut(",")
             }
             CommandGroup(after: .appInfo) {
-                Button("Check for Updates…") { Task { await model.workflow("updates") } }
+                Button("Check for Updates…") { model.preferenceCategory = "Updates"; model.destination = "Preferences"; Task { await model.runTool("update.check") } }
             }
         }
     }

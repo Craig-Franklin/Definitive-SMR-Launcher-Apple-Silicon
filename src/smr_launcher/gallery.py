@@ -8,7 +8,7 @@ import stat
 import struct
 
 from .map_metadata import MapMetadata
-from .play_history import PlayHistoryStore, context, summarize
+from .play_history import IDENTITIES, PlayHistoryStore, context, summarize
 
 # Prepared icons are at most 360px. Oversized/invalid art and icons beyond
 # the operation's aggregate budget use the existing placeholder card artwork.
@@ -76,6 +76,11 @@ def gallery_snapshot(app, cancelled, progress=None, *, history_error=""):
         history = PlayHistoryStore(app.library).records()
     except (OSError, ValueError, AttributeError, TypeError) as exc:
         history, history_error = (), str(exc)
+    # The store has validated all events and their relations. Partition by every
+    # map/build identity once, preserving ledger order and reducer semantics.
+    history_by_map = {}
+    for event in history:
+        history_by_map.setdefault(tuple(event[k] for k in IDENTITIES), []).append(event)
     remaining_art = MAX_SNAPSHOT_ART_BYTES
     records = app.catalogue()
     if progress:
@@ -99,7 +104,8 @@ def gallery_snapshot(app, cancelled, progress=None, *, history_error=""):
         remaining_art -= len(art)
         error = history_error
         try:
-            summary = summarize(history, context(record, app.installation.executable_sha256))
+            ctx = context(record, app.installation.executable_sha256)
+            summary = summarize(history_by_map.get(tuple(ctx[k] for k in IDENTITIES), ()), ctx)
         except (ValueError, AttributeError, TypeError) as exc:
             summary, error = None, str(exc)
         result.append(

@@ -56,9 +56,9 @@ appearance and accessibility settings determine material appearance. Standard na
 chrome receives Liquid Glass on supported systems; content remains readable. The
 build retains a macOS 13 deployment target with guarded macOS 26 material APIs.
 Compatibility recipes, legacy tests, fix testing, recovery, translation, bulk collection
-and diagnostic/update dialogs remain reachable in the existing advanced Tk tools.
-Those dialogs have not yet been replaced with SwiftUI. Read Aloud has a Stop Reading
-control. Setup opens its existing consent UI; the bridge cannot bypass it.
+and diagnostic/update presentation now use integrated native destinations. Read Aloud
+has a Stop Reading control. Native consent calls the existing protected operations;
+the bridge cannot bypass their guards.
 
 ## Service and packaging boundary
 
@@ -69,7 +69,8 @@ snapshot metadata and image preparation run outside the main actor. The main act
 applies completed presentation state. Pipe writes stay ordered on their own queue.
 There is no listening socket, web runtime or new third-party dependency. The hidden
 Tk owner retains initialization, polling, crash observation, guarded operations,
-update handling and safe shutdown. Advanced tools appear only on explicit navigation.
+update handling and safe shutdown. Normal native navigation uses integrated tools;
+legacy routes remain only as a compatibility boundary.
 
 Browsing caches never authorize an operation. Annotation and report mutations check
 fresh exact identities. Report events use existing ledger validation. Lost transport
@@ -104,9 +105,10 @@ Integrate these workflows into the relevant native destinations and contextual
 inspectors, preserving validation and explicit consent. Remove Tk ownership once
 its remaining UI and event-loop responsibilities have native replacements. A full
 Python service rewrite is not a prerequisite for this interface integration.
-The [native tool destination map](NATIVE_TOOLS.md) records that direction. Briefing
-translation is now integrated directly into Overview, with edition-bound results,
-language choices and Show Original. Other advanced workflows remain to be migrated.
+The [native tool destination map](NATIVE_TOOLS.md) records the integrated destinations.
+Briefing translation uses edition-bound results, language choices and Show Original.
+Contextual tools, Preferences and Collection now have native presentation. The hidden
+Tk owner remains a lifecycle migration boundary.
 
 ## Verification and limits
 
@@ -159,6 +161,61 @@ acceptance. Regression checks also cover split UTF-8, coalesced ordered replies,
 malformed/nonobject JSON, oversize rejection and unknown disconnected results.
 Private live-process samples remain local. No running launcher was stopped or
 replaced for this diagnosis.
+
+## Parallel native integration
+
+The current integration combines three isolated lanes: stable library presentation, contextual map tools and global
+Preferences/Collection tools. Review corrections bind detail replies to the exact
+executable build, preserve newer image edits across asynchronous saves, apply the
+same aggregate artwork budget to targeted replies, reject overlapping queued request
+identities and require explicit installation consent for manually staged updates.
+Partial history appends and removal failures with retained transaction journals hold
+UNKNOWN and preserve drafts. They never automatically repeat protected operations.
+
+Warm library reads reuse the complete presentation. Explicit Refresh and relevant
+library/build/history changes invalidate it. History projection validates the ledger
+once, partitions by exact identities and uses the existing reducer. Read-only details
+are coalesced and do not own the frontend mutation gate. Image reading, thumbnail
+preparation and decoding run off the main actor. Protected operations remain ordered.
+Cached presentation is never verification authority.
+
+Independent synthetic before/after measurements used 20 Python samples and 30 Swift
+samples per scenario. At 1,000 maps and 10,000 fictional history events, history
+projection median fell from about 2,734 ms to 18.7 ms. Twenty warm projection reads
+fell from 20,000 annotation reads to zero. The query cache trades roughly 6 MiB of
+peak model RSS for reuse. These figures measure injected I/O and model computation,
+not actual viewport timing or production startup. Initial real-library verification
+remains costly; this change adds no persistent verification cache and does not weaken
+verification requirements.
+
+Native task-step comparisons with already loaded identities reduce legacy-test
+entry from two navigation actions to one, history scope from three to one and fix
+record entry from four to one. No-warning Play remains one user action; known-warning
+Play requires a separate exact-target confirmation. These are source-derived and
+injected counts, not a complete observed multi-checkpoint workflow or acceptance of
+the 50% action-reduction target.
+
+Local integrated verification passed **1,095 tests**, maintained Python quality and
+formatting checks, and a full optimized arm64 frontend compile with warnings as
+errors and macOS 13 deployment target. The image/save regression uses generated PNGs
+and temporary FIFOs to control both completion orders. No real user file or service
+is involved.
+
+A batched synthetic render inspection covered wide light and 900-point dark layouts,
+General/Updates/Library/Crash Reporting preferences, available/staged updates,
+Collection unknown/partial outcomes, compatibility and play history. Long map names,
+explicit failure text and disabled controls remained visible. Private copied-source
+fixture overrides seeded category/update/job states only; no provider, collector,
+installation, map or game operation ran. Captures stay local. No visual correction
+was needed in that batch. Provider menus/button names and focus delivery remain
+partly unverified; these renders do not establish keyboard or VoiceOver acceptance.
+
+The canonical issues remain open for packaged accessibility and viewport timing,
+complete observed action reductions, cold-start verification and authorized real
+operation walkthroughs. The hidden Tk owner remains. Synthetic passes do not prove
+actual game launch/exit, gameplay, save/reopen, live translation or production update
+installation. Engine knowledge consultation is not applicable to this UI glue;
+existing evidence and preservation rules remain authoritative.
 
 ## Build and isolated preview
 

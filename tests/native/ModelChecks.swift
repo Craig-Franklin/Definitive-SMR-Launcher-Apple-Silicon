@@ -153,6 +153,7 @@ import Foundation
         await translationTask.value
         precondition(liveModel.translation(reported).text != nil && liveModel.translation(untouched).text == nil && liveModel.selection == untouched.id)
         print("Integrated translation checks passed; map-scoped result, unchanged original/library/drafts, rejected provider and wrong edition")
+        try await checkPerformance(liveModel, backend)
         do { _ = try await backend.call("disconnect"); preconditionFailure("Lost mutation result was swallowed") }
         catch { precondition(error.localizedDescription.contains("unknown") || error.localizedDescription.contains("inspect")) }
         print("Native pipe checks passed; partial replies, events, explicit rejection and unknown disconnect")
