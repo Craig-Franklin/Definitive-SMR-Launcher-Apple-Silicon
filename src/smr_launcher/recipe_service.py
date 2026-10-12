@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import stat
 
+from . import bank_model
 from .activation import _assert_no_symlink_ancestor, _assert_regular_tree
 from .compatibility_recipes import COMPILER_VERSION, IdentityEdit, _parse, compile_identity_patch
 from .industry_registry import extract_supported_industry_registry
@@ -24,6 +25,7 @@ from .rules import (
     PRESERVE_RESOURCE_MTIMES,
     CompatibilityRule,
     RuleError,
+    TokenPatch,
 )
 from . import removal
 from .variants import assets_manifest_hash
@@ -45,6 +47,9 @@ class _IdentityRecipe:
     stock_depots_sha256: str
     aliases: tuple[tuple[str, int, str], ...]
     additions: tuple[tuple[str, str, str], ...] = ()
+    scenario_after: str = ""
+    ownership_edits: tuple[IdentityEdit, ...] = ()
+    legacy_bank_path: str = ""
 
 
 _HILL_COWHIDE_ADDITIONS = (
@@ -107,6 +112,53 @@ _HILL_COWHIDE_ADDITIONS = (
 
 
 _RECIPES = {
+    # Held out of _CHOICES until current prepared-copy/runtime acceptance.
+    # This reproduces the historical three-file experiment, not a diagnosis
+    # selected automatically from a crash fingerprint or legacy model header.
+    "az-canyon-v02-bank-and-industry-identifiers-v1": _IdentityRecipe(
+        recipe_id="az-canyon-v02-bank-and-industry-identifiers-v1",
+        archive_sha256="399570b00bb4c3590dacd30b45322b65f72029237ee49ed25be0d4f5c637e5cf",
+        game_sha256="981ca7180759d8578babf54cd9a4f76b93db503b33a7f1938c6b1427b95680f0",
+        assets_sha256="444f390791371683be8c91ef373b21635dc67bae5eff0e78ecb268c69cfd900f",
+        scenario_path="UserMaps/AZCanyonV2/RRT_Scenario_User_AZCanyonV2.xml",
+        scenario_sha256="fcd995f3a77cab0f68a627dcd8ae8f2a68daa8a868ce323f821769d1044514d0",
+        industry_path="UserMaps/AZCanyonV2/RRT_Industries_AZCanyonV2.xml",
+        industry_before="24489221ca8613610acfbbaed1911195ed98a6f0dda3c7fb91df36eabb16564c",
+        industry_after="6313b5f778055123b4c5d6c0d5cb47143987eda090f477fb748f609126a2203e",
+        stock_industries_sha256="db8210cde6325ad9ffe0b40b53c1d01393e3ef3b9c7a9c5e82aa0599ef5342b6",
+        stock_depots_sha256="35c0bd07ed3f38e2ab1bad8ea5adc85499d0d737c6530e6e79414110686f7bd5",
+        aliases=(
+            ("Steamboat Company", 35, "Wooden Horse Factory"),
+            ("Hotel", 33, "Doll Factory"),
+            ("Bank", 34, "Bakery"),
+            ("Air Force Base", 32, "Toy Soldier Factory"),
+        ),
+        scenario_after="928417ddb46a98fd67c75c5c44aa5f160a81a49547150bbaf66b1e2fb36de6fa",
+        ownership_edits=tuple(
+            IdentityEdit(
+                "industry-goal",
+                old,
+                target,
+                count,
+                (
+                    "RRTScenario",
+                    "Eras",
+                    "Era",
+                    "VictoryConditions",
+                    "Condition",
+                    "OwnList",
+                    "OwnListItem",
+                    "szObjectName",
+                ),
+            )
+            for old, target, count in (
+                ("Bank", "Bakery", 1),
+                ("Hotel", "Doll Factory", 2),
+                ("Air Force Base", "Toy Soldier Factory", 1),
+            )
+        ),
+        legacy_bank_path="UserMaps/AZCanyonV2/warehouse/bank.nif",
+    ),
     "great-lakes-industry-identities-v2": _IdentityRecipe(
         "great-lakes-industry-identities-v2",
         "8dafd43f19f2530ddd4ae60cd025cbbdd05d66b990b68ce78ccc897dae52ac10",
@@ -144,7 +196,7 @@ _RECIPES = {
 # Algorithm versions are explicit release inputs, independent of source-file
 # availability in a frozen app. Bump this contract when compilation/preparation
 # semantics change. This digest identifies the contract, not binary code bytes.
-RECIPE_SERVICE_VERSION = "reviewed-stock-absent-city-v2-additive-assets-v1"
+RECIPE_SERVICE_VERSION = "reviewed-stock-absent-city-v3-ownership-exact-bank-v1"
 _HILL_COWHIDE_DONOR_ARCHIVE = "596c27fd554266b22424481670cd20c6c428a602f69570df3949873cd8c179df"
 
 
@@ -392,9 +444,14 @@ def _resolve(app, record, recipe: _IdentityRecipe):
     if not final_names <= set(registry) or len(final_names) > len(registry):
         raise RuleError("Recipe does not yield distinct registered identities for all definitions")
     # A complete asset hash gates every file. Additionally classify all XML
-    # occurrences outside the transformed document; this first recipe expects
-    # no remaining exact aliases or case-insensitive ownership references.
+    # occurrences outside the industry document. Only explicitly declared
+    # scenario ownership references may change; other occurrences still refuse.
     relevant = set(aliases) | set(aliases.values())
+    if bool(recipe.ownership_edits) != bool(recipe.scenario_after) or any(
+        edit.kind != "industry-goal" or aliases.get(edit.source) != edit.target
+        for edit in recipe.ownership_edits
+    ):
+        raise RuleError("Recipe ownership edits do not match the declared industry aliases")
     for root in source_context["roots"]:
         prefix = {"custom_assets": "CustomAssets", "user_maps": "UserMaps"}[root["role"]]
         for file in root["files"]:
@@ -402,11 +459,18 @@ def _resolve(app, record, recipe: _IdentityRecipe):
             if not path.casefold().endswith(".xml") or path == recipe.industry_path:
                 continue
             for node in _parse(_read(source / path, file["sha256"])):
+                declared_goal = path == recipe.scenario_path and any(
+                    node.path == edit.path and node.raw_value == edit.source
+                    for edit in recipe.ownership_edits
+                )
                 if (
-                    node.raw_value in relevant
+                    not declared_goal
+                    and (
+                        node.raw_value in relevant
+                        or node.path[-2:] == ("OwnListItem", "szObjectName")
+                        and node.raw_value.casefold() in {x.casefold() for x in relevant}
+                    )
                     or any(v in relevant for v in node.attributes.values())
-                    or node.path[-2:] == ("OwnListItem", "szObjectName")
-                    and node.raw_value.casefold() in {x.casefold() for x in relevant}
                 ):
                     raise RuleError(
                         "Recipe has an unreviewed identity occurrence in another XML file"
@@ -418,6 +482,38 @@ def _resolve(app, record, recipe: _IdentityRecipe):
         after_sha256=recipe.industry_after,
         edits=tuple(IdentityEdit("industry", old, target) for old, target in aliases.items()),
     )
+    patches = [patch]
+    if recipe.ownership_edits:
+        patches.append(
+            compile_identity_patch(
+                path=recipe.scenario_path,
+                data=scenario_data,
+                before_sha256=recipe.scenario_sha256,
+                after_sha256=recipe.scenario_after,
+                edits=recipe.ownership_edits,
+            )
+        )
+    if recipe.legacy_bank_path:
+        install_root, relative = recipe.legacy_bank_path.split("/", 1)
+        role = {"UserMaps": "user_maps", "CustomAssets": "custom_assets"}[install_root]
+        if unique(relative.rsplit("/", 1)[-1], role, bank_model.SOURCE_SHA256) != relative:
+            raise RuleError("Recipe bank model provider path differs")
+        original = _read(
+            source / recipe.legacy_bank_path, bank_model.SOURCE_SHA256, bank_model.SOURCE_SIZE
+        )
+        try:
+            converted = bank_model.convert_legacy_bank(original)
+        except ValueError as exc:
+            raise RuleError("Recipe bank conversion refused") from exc
+        patches.append(
+            TokenPatch(
+                recipe.legacy_bank_path,
+                bank_model.SOURCE_SHA256,
+                bank_model.OUTPUT_SHA256,
+                original,
+                converted,
+            )
+        )
     additions = []
     if recipe.additions:
         donor_records = [
@@ -461,10 +557,15 @@ def _resolve(app, record, recipe: _IdentityRecipe):
         recipe.recipe_id,
         2,
         "Reviewed fixed-registry and exact original-input comparison",
-        "Experimental distinct industry identities. Authored asset payload is preserved; internal aliases may remain visible. Gameplay must be tested separately.",
+        (
+            "Experimental exact bank serialization and coupled industry ownership identities. "
+            "Existing dependency concerns remain; rendering, collision and gameplay need separate validation."
+            if recipe.legacy_bank_path
+            else "Experimental distinct industry identities. Authored asset payload is preserved; internal aliases may remain visible. Gameplay must be tested separately."
+        ),
         recipe.archive_sha256,
         recipe.game_sha256,
-        (patch,),
+        tuple(patches),
         tuple(additions),
     )
     return (rule,), binding
