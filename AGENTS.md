@@ -86,6 +86,34 @@ file edits, tests and Git commands use shell tools. Hold an Orca-dependent opera
 when its identity or availability cannot be verified; do not create unmanaged
 replacement state. Outside Orca, use the host's normal supported tools.
 
+## Authorized project continuation
+
+When Craig explicitly asks for continuous work until a project is complete, keep
+that project objective active across slices, merges, CI runs, reviews and worker
+waves. Those are progress checkpoints, not project stopping points. Use the host's
+persistent goal control when available and requested; do not mark the whole goal
+complete while required project acceptance remains open.
+
+After each checkpoint, reconcile the live issues and current implementation, then
+execute the next useful authorized task. If one lane is blocked, continue independent
+work and attempt legitimate blocker resolution or a bounded stronger-reasoning review.
+Do not require another routine "continue" message. Do not create busywork, duplicate
+accepted audits or add tests solely to keep an agent occupied.
+
+Before stopping project work, check the complete authorized scope, not only the
+last assigned slice: either required project acceptance is complete, the user requested
+a pause, a host limit requires suspension, or concrete evidence shows every remaining
+authorized path is blocked. Record the next task or exact blocker in the existing
+issue/handoff. Follow the host's blocked-goal rules; a single blocked gameplay task
+must not stop ready source, evidence, integration or publication work.
+An individual host turn may end with a progress report while the persistent goal
+remains active; that boundary does not pause or complete the project.
+
+Continuation never overrides preservation, privacy, signing, runtime admission,
+closed circuits or retry limits. If signing needs Craig, retain tested/reviewed local
+changes and continue independent work. Keep the original failure and lineage; never
+bypass a safeguard, invent acceptance or reopen a closed method to stay active.
+
 ## Preservation and publication
 
 Keep original packages, game files and current/future saves intact. Work on prepared
