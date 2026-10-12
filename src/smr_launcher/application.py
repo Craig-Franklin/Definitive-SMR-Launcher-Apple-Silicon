@@ -19,6 +19,7 @@ import tempfile
 import uuid
 
 from .activation import (
+    ActivationError,
     FilesystemProfiles,
     MARKER,
     ORIGINAL,
@@ -177,14 +178,18 @@ class LauncherApplication:
         return app
 
     @contextmanager
-    def _locked(self, *, observed_io=None) -> Iterator[None]:
+    def _locked(self, *, observed_io=None, recover_removal=True) -> Iterator[None]:
         _assert_no_symlink_ancestor(self.library)
         self.library.mkdir(parents=True, exist_ok=True)
         call = (lambda name, fn, *args: fn(*args)) if observed_io is None else observed_io.call
         pending = self.library / "removal.json"
-        if observed_io is not None and (pending.exists() or pending.is_symlink()):
+        if (observed_io is not None or not recover_removal) and (
+            pending.exists() or pending.is_symlink()
+        ):
             raise ApplicationError(
                 "Pending removal requires its owner; observed runner refuses recovery"
+                if observed_io is not None
+                else "Pending removal requires its owner; read-only coordination refuses recovery"
             )
         fd = call(
             "application.lock_open",
@@ -195,7 +200,7 @@ class LauncherApplication:
         )
         try:
             call("application.lock_acquire", fcntl.flock, fd, fcntl.LOCK_EX)
-            if observed_io is None:
+            if observed_io is None and recover_removal:
                 removal.resume(self)
             elif pending.exists() or pending.is_symlink():
                 raise ApplicationError("Removal appeared after locking; all evidence retained")
@@ -655,6 +660,73 @@ class LauncherApplication:
             return self._create_compatibility_edition_locked(
                 record, rules, label=recipe_id, recipe_binding=binding
             )
+
+    def plan_recipe_batch(self, requests: list[dict]) -> dict:
+        """Return a bounded compilation snapshot, never an execution ticket.
+
+        Request order is preserved. A repeated profile/recipe pair is refused,
+        and one refusal never discards or promotes another job's result.
+        """
+        from .recipe_service import plan_recipe_job
+        from .rules import RuleError
+        from .resource_identity import ResourceFingerprintError
+
+        if not isinstance(requests, list) or not 1 <= len(requests) <= 32:
+            raise ApplicationError("Recipe plan requires 1 through 32 explicit requests")
+        for request in requests:
+            if (
+                not isinstance(request, dict)
+                or set(request) != {"profile_id", "recipe_id"}
+                or any(
+                    not isinstance(value, str)
+                    or not 1 <= len(value) <= 128
+                    or any(ord(char) < 32 or ord(char) == 127 for char in value)
+                    for value in request.values()
+                )
+            ):
+                raise ApplicationError("Recipe request needs only profile_id and recipe_id strings")
+        jobs, seen = [], {}
+        with self._locked(recover_removal=False):
+            records = self.catalogue()
+            for index, request in enumerate(requests):
+                job = dict(index=index, **request, status="refused")
+                pair = (request["profile_id"], request["recipe_id"])
+                if pair in seen:
+                    job.update(reason="Duplicate request", duplicate_of=seen[pair])
+                else:
+                    seen[pair] = index
+                    try:
+                        matches = [r for r in records if r.profile_id == request["profile_id"]]
+                        if len(matches) != 1 or not self._is_original_variant(matches[0]):
+                            raise ApplicationError(
+                                "Recipe planning requires a unique current original map"
+                            )
+                        source = removal._leaf(
+                            self.imports, matches[0].imported_directory, r"[0-9a-f]{32}"
+                        )
+                        if assets_manifest_hash(source) != assets_manifest_hash(
+                            self._prepared_root(matches[0])
+                        ):
+                            raise ApplicationError("Original import and prepared assets differ")
+                        job.update(plan_recipe_job(self, matches[0], request["recipe_id"]))
+                        job["status"] = "supported"
+                    except (
+                        ApplicationError,
+                        ActivationError,
+                        RuleError,
+                        ResourceFingerprintError,
+                        OSError,
+                        ValueError,
+                    ) as exc:
+                        job.update(reason=str(exc), error_type=type(exc).__name__)
+                jobs.append(job)
+        return dict(
+            schema=1,
+            snapshot_only=True,
+            requires_execution_revalidation=True,
+            all_supported=all(job["status"] == "supported" for job in jobs),
+            jobs=jobs,
+        )
 
     def compatibility_recipes(self, record: MapRecord) -> tuple:
         """Return menu candidates; creation performs the full input validation."""

@@ -528,22 +528,8 @@ def _resolve(app, record, recipe: _IdentityRecipe):
         )
     additions = []
     if recipe.additions:
-        donor_records = [
-            item
-            for item in app.catalogue()
-            if item.archive_sha256 == _HILL_COWHIDE_DONOR_ARCHIVE
-            and item.variant_id == item.profile_id.replace("map-", "", 1)
-        ]
-        if len(donor_records) != 1:
-            donor_records = [
-                item
-                for item in app.catalogue()
-                if item.archive_sha256 == _HILL_COWHIDE_DONOR_ARCHIVE
-                and item.name == "Side_to_Side_2_v1_00"
-            ]
-        if len(donor_records) != 1:
-            raise RuleError("Reviewed Cowhide donor import is unavailable")
-        donor = removal._leaf(app.imports, donor_records[0].imported_directory, r"[0-9a-f]{32}")
+        donor_record = _donor_record(app)
+        donor = removal._leaf(app.imports, donor_record.imported_directory, r"[0-9a-f]{32}")
         _assert_regular_tree(donor)
         for destination_path, donor_path, expected in recipe.additions:
             donor_file = donor / donor_path
@@ -581,3 +567,81 @@ def _resolve(app, record, recipe: _IdentityRecipe):
         tuple(additions),
     )
     return (rule,), binding
+
+
+def _donor_record(app):
+    """Reuse the existing conditional donor selection, including its fallback."""
+    donor_records = [
+        item
+        for item in app.catalogue()
+        if item.archive_sha256 == _HILL_COWHIDE_DONOR_ARCHIVE
+        and item.variant_id == item.profile_id.replace("map-", "", 1)
+    ]
+    if len(donor_records) != 1:
+        donor_records = [
+            item
+            for item in app.catalogue()
+            if item.archive_sha256 == _HILL_COWHIDE_DONOR_ARCHIVE
+            and item.name == "Side_to_Side_2_v1_00"
+        ]
+    if len(donor_records) != 1:
+        raise RuleError("Reviewed Cowhide donor import is unavailable")
+    return donor_records[0]
+
+
+def plan_recipe_job(app, record, recipe_id: str) -> dict:
+    """Project the existing resolver result without retaining payload bytes.
+
+    Caller holds the application lock. Donor archive identity is a catalogue
+    claim, as in the existing resolver; only donor member bytes are verified.
+    """
+    rules, binding = resolve_bundled_recipe(app, record, recipe_id)
+    recipe = _RECIPES[recipe_id]
+    changes = []
+    for rule in rules:
+        for patch in rule.patches:
+            changes.append(
+                dict(
+                    kind="patch",
+                    path=patch.path,
+                    before_sha256=patch.before_sha256,
+                    after_sha256=patch.after_sha256,
+                )
+            )
+        for addition in rule.additions:
+            donor_path = next(
+                source
+                for target, source, digest in recipe.additions
+                if target == addition.path and digest == addition.after_sha256
+            )
+            changes.append(
+                dict(
+                    kind="addition",
+                    path=addition.path,
+                    donor_path=donor_path,
+                    after_sha256=addition.after_sha256,
+                    size=len(addition.data),
+                    mtime_ns=addition.mtime_ns,
+                )
+            )
+    donor = _donor_record(app) if recipe.additions else None
+    return dict(
+        original_variant_id=record.variant_id,
+        archive_sha256=record.archive_sha256,
+        game_executable_sha256=record.game_executable_sha256,
+        imported_directory=record.imported_directory,
+        binding=binding.as_json(),
+        donor=(
+            dict(
+                archive_sha256=donor.archive_sha256,
+                variant_id=donor.variant_id,
+                profile_id=donor.profile_id,
+                imported_directory=donor.imported_directory,
+                archive_bytes_verified=False,
+                member_bytes_verified=True,
+            )
+            if donor
+            else None
+        ),
+        changes=sorted(changes, key=lambda change: (change["path"], change["kind"])),
+    )

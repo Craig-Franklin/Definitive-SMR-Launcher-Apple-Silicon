@@ -48,3 +48,31 @@ issues and applicable private authority govern execution.
 
 See the [native implementation boundary and verification](ui-workflow/IMPLEMENTATION.md)
 for the subprocess protocol, update-safe lifecycle and staged advanced-tool migration.
+
+
+## Offline recipe batch planning
+
+`LauncherApplication.plan_recipe_batch(requests)` accepts 1–32 explicit dictionaries
+containing only `profile_id` and `recipe_id`. The command bridge exposes the same API:
+
+```sh
+PYTHONPATH=src python -m smr_launcher.cli plan-recipes \
+  --request PROFILE_ID RECIPE_ID --request OTHER_PROFILE_ID OTHER_RECIPE_ID
+```
+
+The JSON envelope stays unchanged. Its data contains ordered `supported`/`refused`
+jobs and `all_supported`; a refused job is never a planned success. Later duplicate
+profile/recipe pairs are refused with the first index in `duplicate_of`. Invalid
+batch shapes fail before locking. The planner resolves current originals through
+the existing bundled resolver under one application lock. Pending removal refuses
+without recovery. It does not create editions, recover/switch profiles, activate,
+probe game processes, or write saves, registrations or evidence. Lock coordination
+may create the library directory and `.application.lock`.
+
+Supported reports contain exact original/archive/build, recipe/compiler/source/stock
+bindings, proposed relative paths, patch digests and donor member identities without
+XML or asset bytes. Donor archive identity remains the existing resolver's catalogue
+claim (`archive_bytes_verified: false`); member bytes are verified. This does not
+strengthen donor selection or conditional engine assumptions. Reports are snapshots,
+not execution tickets: later preparation must re-resolve every existing guard.
+Preparation support establishes no loading, feature, repair, gameplay or save acceptance.
