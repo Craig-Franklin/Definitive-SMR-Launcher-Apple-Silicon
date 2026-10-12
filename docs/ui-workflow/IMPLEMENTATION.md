@@ -1,5 +1,10 @@
 # Native Design B implementation
 
+Current acceptance results and precise evidence limits are recorded in
+[Native UI and workflow acceptance](ACCEPTANCE.md). Earlier sections below are
+historical implementation/audit records.
+
+
 Craig approved the SMR Native Design Review after choosing B. This implementation
 uses SwiftUI and AppKit for the main Mac window, retaining the Python services and
 protected workflows. [Project 5](https://github.com/users/Craig-Franklin/projects/5)

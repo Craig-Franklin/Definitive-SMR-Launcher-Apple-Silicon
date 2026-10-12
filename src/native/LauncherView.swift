@@ -10,7 +10,12 @@ struct LauncherView: View {
     @StateObject private var mapTools = NativeMapToolsState()
     @ViewState private var discardMap: String?
     @ViewState private var showingDiscard = false
-    @FocusState private var searchFocused: Bool
+    @FocusState private var focusedMapID: String?
+    @FocusState private var inspectorFocused: Bool
+    @ViewState private var searchFocusRequest: UUID?
+    @ViewState private var pendingInspectorFocus = false
+    @ViewState private var mountedInspectorID: String?
+    @ViewState private var gridViewport = NativeLibraryViewport()
     private let destinations = ["Map Library", "Collection", "Original Game", "Activity", "Preferences"]
 
     var body: some View {
@@ -38,7 +43,7 @@ struct LauncherView: View {
                         }.labelsHidden().frame(width: 180)
                         Spacer()
                         if model.destination == "Map Library" && model.narrowDetail {
-                            Button("Back to Library", systemImage: "chevron.left") { model.narrowDetail = false }
+                            Button("Back to Library", systemImage: "chevron.left", action: returnToLibrary)
                         }
                     }.padding(12)
                     Divider()
@@ -51,9 +56,11 @@ struct LauncherView: View {
             .toolbar {
                 ToolbarItemGroup {
                     if model.destination == "Map Library" {
-                        TextField(model.translated("Search maps"), text: $model.query).textFieldStyle(.roundedBorder)
-                            .frame(minWidth: 150, idealWidth: 220, maxWidth: 300).focused($searchFocused)
-                            .accessibilityLabel("Search maps")
+                        NativeLibrarySearch(query: $model.query, title: model.translated("Search maps"), focusRequest: searchFocusRequest, active: model.destination == "Map Library", focused: {
+                            focusedMapID = nil; inspectorFocused = false
+                        }, consumed: { id in
+                            if searchFocusRequest == id { searchFocusRequest = nil }
+                        }).frame(minWidth: 150, idealWidth: 220, maxWidth: 300)
                         Button("Import Map", systemImage: "square.and.arrow.down", action: importMap)
                             .disabled(!model.enrolled || model.working || !model.connected)
                     }
@@ -72,6 +79,8 @@ struct LauncherView: View {
             }
             .modifier(NativePlayReviewModifier(model: model, tools: mapTools))
             .onChange(of: model.destination) { destination in
+                gridViewport.cancelPending()
+                if destination != "Map Library" { searchFocusRequest = nil; pendingInspectorFocus = false }
                 if destination == "Preferences" { Task { await model.loadPreferences() } }
                 if destination == "Activity" { Task { await model.loadActivity() } }
                 if destination == "Collection" { Task { await model.loadCollection() } }
@@ -95,13 +104,13 @@ struct LauncherView: View {
                 Button("Later", role: .cancel) { model.exitPrompt = nil }
             } message: { Text("The game process exited. Its outcome stays unknown until you explicitly confirm what happened.") }
             .background {
-                Button("Focus Search") { model.destination = "Map Library"; searchFocused = true }.keyboardShortcut("f").hidden()
+                Button("Focus Search", action: focusSearch).keyboardShortcut("f").hidden()
                 Button("Import Map", action: importMap).keyboardShortcut("o").hidden()
             }
             .onExitCommand {
                 if model.section == "Edit Details", let map = model.selected, model.personal[map.id]?.dirty == true {
                     discardMap = map.id; showingDiscard = true
-                } else { model.section = "Overview"; model.narrowDetail = false }
+                } else { model.section = "Overview"; returnToLibrary() }
             }
         }
     }
@@ -157,25 +166,66 @@ struct LauncherView: View {
                     Button("Clear Search & Filters") { model.query = ""; model.filter = "All maps" }
                 }
             } else {
-                ScrollView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 155), spacing: 16)], alignment: .leading, spacing: 20) {
-                        ForEach(model.visible) { map in
-                            Button { model.select(map) } label: {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    artwork(map).frame(height: 108)
-                                    Text(map.name).font(.body.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
-                                    Text(map.status).font(.caption).foregroundStyle(map.warning ? .orange : .secondary)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(model.selection == map.id ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 8))
-                            }.buttonStyle(.plain)
-                                .accessibilityElement(children: .combine)
-                                .accessibilityLabel("\(map.name), \(map.status)")
-                                .accessibilityValue(model.selection == map.id ? "Selected" : "Not selected")
-                        }
-                    }.padding(16).background(ScrollPosition(memory: model.gridScroll))
-                }.hardScrollEdge()
-                    .onMoveCommand { direction in moveSelection(direction) }
+                GeometryReader { geometry in
+                    LibraryViewportScope { lifetime in
+                    ScrollViewReader { scroll in
+                        ScrollView {
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: NativeLibraryKeyboard.minimumWidth), spacing: NativeLibraryKeyboard.spacing, alignment: .top)], alignment: .leading, spacing: 20) {
+                                ForEach(model.visible) { map in
+                                    Button { openMap(map) } label: {
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            artwork(map).frame(height: 108)
+                                            Text(map.name).font(.body.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+                                            Text(map.status).font(.caption).foregroundStyle(map.warning ? .orange : .secondary)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                        }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                                            .background(model.selection == map.id ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 8))
+                                    }.buttonStyle(.plain)
+                                        .focusable()
+                                        .focused($focusedMapID, equals: map.id)
+                                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(focusedMapID == map.id ? Color.accentColor : .clear, lineWidth: 2))
+                                        .id(map.id)
+                                        .background(GeometryReader { card in
+                                            Color.clear.preference(key: LibraryCardFrames.self, value: [map.id: card.frame(in: .named("libraryViewport"))])
+                                        })
+                                        .accessibilityElement(children: .combine)
+                                        .accessibilityLabel("\(map.name), \(map.status)")
+                                        .accessibilityValue(model.selection == map.id ? "Selected" : "Not selected")
+                                }
+                            }.padding(NativeLibraryKeyboard.padding).background(ScrollPosition(memory: model.gridScroll))
+                        }.hardScrollEdge().coordinateSpace(name: "libraryViewport")
+                            .onPreferenceChange(LibraryCardFrames.self) { frames in
+                                let columns = NativeLibraryKeyboard.columns(in: geometry.size.width)
+                                if let id = gridViewport.update(frames: frames, columns: columns, height: geometry.size.height, identities: model.visible.map(\.id)),
+                                   let callback = gridViewport.callback(id, columns: columns, lifetime: lifetime) {
+                                    DispatchQueue.main.async {
+                                        guard gridViewport.perform(callback, lifetime: lifetime, identities: model.visible.map(\.id), destination: model.destination, action: {
+                                            scroll.scrollTo(id, anchor: .top)
+                                        }) else { gridViewport.discard(callback); return }
+                                        DispatchQueue.main.async {
+                                            if !gridViewport.complete(callback, lifetime: lifetime, identities: model.visible.map(\.id), destination: model.destination) {
+                                                gridViewport.discard(callback)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            .onMoveCommand { direction in moveSelection(direction, width: geometry.size.width) }
+                            .onChange(of: focusedMapID) { id in
+                                if let id {
+                                    model.selection = id
+                                    scroll.scrollTo(id)
+                                }
+                            }
+                            .background {
+                                if focusedMapID != nil && model.destination == "Map Library" {
+                                    Button("Open Selected Map Details", action: openFocusedMap).keyboardShortcut(.return, modifiers: []).hidden()
+                                    Button("Preview Selected Map Details", action: openFocusedMap).keyboardShortcut(.space, modifiers: []).hidden()
+                                }
+                            }
+                    }
+                    }
+                }
             }
         }
     }
@@ -227,7 +277,12 @@ struct LauncherView: View {
                 }.disabled(model.working)
                 Picker("Map section", selection: $model.section) {
                     ForEach(["Overview", "Play History", "Issues & Evidence", "Compatibility & Editions", "History Scope", "Legacy Mac Test", "Edit Details", "Record Outcome"], id: \.self) { Text($0) }
-                }.labelsHidden().pickerStyle(.menu)
+                }.labelsHidden().pickerStyle(.menu).focusable().focused($inspectorFocused)
+                    .onAppear {
+                        mountedInspectorID = map.id
+                        focusInspector(map.id)
+                    }
+                    .onDisappear { if mountedInspectorID == map.id { mountedInspectorID = nil } }
                 Divider()
                 switch model.section {
                 case "Edit Details": editor(map)
@@ -246,6 +301,8 @@ struct LauncherView: View {
     private func overview(_ map: MapItem) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             artwork(map).frame(height: 155)
+                .modifier(NativePersonalImageDrop(model: model, map: map))
+            Text("Drop one local image to edit. Save is still required.").font(.caption).foregroundStyle(.secondary)
             fact(model.translated("Author"), map.metadata.text("author", model.translated("Author not provided")))
             fact("Map type", map.metadata.text("map_type", "Not provided"))
             fact("Created", map.metadata.text("created", "Date not provided"))
@@ -322,6 +379,7 @@ struct LauncherView: View {
                 .accessibilityLabel("Personal notes")
             HStack(spacing: 16) {
                 artwork(map, draft: model.personal[map.id]?.imagePNG).frame(width: 88, height: 72)
+                    .modifier(NativePersonalImageDrop(model: model, map: map))
                 VStack(alignment: .leading, spacing: 6) {
                     Button("Choose Local Image…") { chooseImage(map) }
                     Button("Use Package Image") {
@@ -330,7 +388,7 @@ struct LauncherView: View {
                 }
             }
             if model.imageReads[map.id] != nil { ProgressView("Preparing selected image…").controlSize(.small) }
-            Text("A bounded copy is saved for this edition. Original package images remain intact.").font(.caption).foregroundStyle(.secondary)
+            Text("Drop one local image onto the preview, or choose a file. Save Details keeps a bounded copy for this edition; original images remain intact.").font(.caption).foregroundStyle(.secondary)
             HStack {
                 Button("Cancel") {
                     if model.personal[map.id]?.dirty == true { discardMap = map.id; showingDiscard = true }
@@ -345,92 +403,7 @@ struct LauncherView: View {
     }
 
     private func recorder(_ map: MapItem) -> some View {
-        let data = model.details[map.id] ?? [:]
-        let events = data.rows("history")
-        let opens = unique(events.filter { ["process_confirmed", "launch_attempted"].contains($0.text("kind")) }, "attempt_id")
-        let draft = model.outcomes[map.id] ?? OutcomeDraft()
-        let games = unique(events.filter { ["game_started", "game_resumed"].contains($0.text("kind")) && $0.text("scenario") == draft.scenario }, "game_id")
-        let failures = unique(events.filter { ["crash_load", "crash_play", "crash_unknown", "resource_stop"].contains($0.text("kind")) && $0.text("attempt_id") == draft.attempt && ($0.text("scenario").isEmpty || $0.text("scenario") == draft.scenario) }, "incident_id")
-        return VStack(alignment: .leading, spacing: 16) {
-            Text("Record this session").font(.headline)
-            Text("Map and edition are fixed. A process exit leaves gameplay unknown until you explicitly confirm an outcome.").foregroundStyle(.secondary)
-            if opens.isEmpty {
-                Text("No recorded launch session for this edition/build. A report needs an existing attempt or confirmed process.")
-                Button("Refresh History") { Task { await model.loadDetails(map.id, force: true) } }
-                Button("Record Legacy Mac Test…") { model.section = "Legacy Mac Test" }
-            } else {
-                Picker("Launch session", selection: outcomeBinding(map.id, \.attempt)) {
-                    Text("Choose recorded session").tag("")
-                    ForEach(opens.indices, id: \.self) { index in
-                        Text("\(opens[index].text("at")) · \(opens[index].text("attempt_id").prefix(12))").tag(opens[index].text("attempt_id"))
-                    }
-                }
-                Picker("Outcome", selection: outcomeBinding(map.id, \.outcome)) {
-                    Text("Choose outcome").tag("")
-                    ForEach(["Played", "Problem", "Saved", "Resumed", "Completed"], id: \.self) { Text($0) }
-                }
-                if !draft.outcome.isEmpty {
-                    Picker("Scenario", selection: outcomeBinding(map.id, \.scenario)) {
-                        Text("Unknown").tag("")
-                        ForEach(data["scenarios"] as? [String] ?? [], id: \.self) { Text($0) }
-                    }
-                    if draft.outcome != "Problem" {
-                        Picker("Game", selection: outcomeBinding(map.id, \.game)) {
-                            Text("Use this session’s recorded game, if bound").tag("")
-                            Text("Start a new game").tag("new")
-                            ForEach(games.indices, id: \.self) { index in
-                                Text("Recorded game \(games[index].text("game_id").prefix(12))").tag(games[index].text("game_id"))
-                            }
-                        }
-                    }
-                    if draft.outcome == "Problem" {
-                        Picker("What happened?", selection: outcomeBinding(map.id, \.problem)) {
-                            Text("Crash · phase unknown").tag("crash_unknown")
-                            Text("Crashed during load").tag("crash_load")
-                            Text("Crashed during play").tag("crash_play")
-                            Text("Resource stop").tag("resource_stop")
-                        }
-                        Picker("Incident", selection: outcomeBinding(map.id, \.incident)) {
-                            Text("New player-reported failure").tag("")
-                            ForEach(failures.indices, id: \.self) { index in
-                                Text("\(failures[index].text("at")) · \(failures[index].text("label", failures[index].text("kind")))").tag(failures[index].text("incident_id"))
-                            }
-                        }
-                        Picker("Failed checkpoint", selection: outcomeBinding(map.id, \.checkpoint)) {
-                            Text("Unknown").tag("")
-                            Text("Map loaded").tag("map_loaded")
-                            Text("Playable").tag("playable")
-                            Text("Save made").tag("save_made")
-                            Text("Exact save reopened").tag("save_reopened")
-                            Text("Continued play").tag("continued_play")
-                        }
-                    } else if ["Saved", "Resumed"].contains(draft.outcome) {
-                        Picker("Exact save SHA-256", selection: outcomeBinding(map.id, \.save)) {
-                            Text("Choose exact save").tag("")
-                            ForEach(Array(Set(events.map { $0.text("save_id") }.filter { !$0.isEmpty } + (draft.save.isEmpty ? [] : [draft.save]))).sorted(), id: \.self) { Text($0).tag($0) }
-                        }
-                        Button("Choose Exact Save…") { chooseSave(map) }
-                        Text("Read-only identity check. Only its digest is recorded; save bytes and path are not stored.").font(.caption).foregroundStyle(.secondary)
-                        if draft.outcome == "Resumed" {
-                            Toggle("I also continued playing after reopening this exact save", isOn: Binding(get: { model.outcomes[map.id]?.continued ?? false }, set: { value in var draft = model.outcomes[map.id] ?? OutcomeDraft(); draft.continued = value; model.outcomes[map.id] = draft }))
-                        }
-                    } else if draft.outcome == "Completed" {
-                        Picker("Completion reason", selection: outcomeBinding(map.id, \.reason)) {
-                            Text("Choose reason").tag("")
-                            Text("Met all scenario goals").tag("goals_met")
-                            Text("Retired").tag("retired")
-                        }
-                    }
-                    Text(confirmation(draft)).font(.callout)
-                }
-                HStack {
-                    Button("Keep Draft & Close") { model.section = "Overview" }
-                    Spacer()
-                    Button("Record Confirmation") { Task { await model.confirm(map) } }
-                        .buttonStyle(.borderedProminent).disabled(draft.outcome.isEmpty || model.working)
-                }
-            }
-        }.disabled(model.working)
+        NativeOutcomeView(model: model, map: map)
     }
 
     private func history(_ map: MapItem) -> some View {
@@ -563,12 +536,47 @@ struct LauncherView: View {
     private func advanced(_ action: String, profile: String? = nil) {
         Task { await model.workflow(action, profile: profile ?? model.selection) }
     }
-    private func moveSelection(_ direction: MoveCommandDirection) {
+    private func focusSearch() {
+        focusedMapID = nil; inspectorFocused = false
+        model.destination = "Map Library"
+        searchFocusRequest = UUID()
+    }
+    private func returnToLibrary() {
+        model.narrowDetail = false
+        searchFocusRequest = nil; inspectorFocused = false
+        DispatchQueue.main.async { focusedMapID = model.visible.first(where: { $0.id == model.selection })?.id ?? model.visible.first?.id }
+    }
+    private func openMap(_ map: MapItem) {
+        pendingInspectorFocus = true
+        focusedMapID = nil; searchFocusRequest = nil
+        model.destination = "Map Library"; model.select(map)
+        if mountedInspectorID == map.id { focusInspector(map.id) }
+    }
+    private func focusInspector(_ id: String) {
+        DispatchQueue.main.async {
+            if pendingInspectorFocus && mountedInspectorID == id && model.selection == id && model.destination == "Map Library" {
+                inspectorFocused = true; pendingInspectorFocus = false
+            }
+        }
+    }
+    private func openFocusedMap() {
+        if let id = focusedMapID, let map = model.visible.first(where: { $0.id == id }) { openMap(map) }
+    }
+    private func moveSelection(_ direction: MoveCommandDirection, width: CGFloat) {
+        guard focusedMapID != nil, model.destination == "Map Library" else { return }
         let rows = model.visible
-        guard !rows.isEmpty else { return }
-        let index = rows.firstIndex { $0.id == model.selection } ?? 0
-        let change = direction == .left || direction == .up ? -1 : 1
-        model.select(rows[min(max(index + change, 0), rows.count - 1)])
+        let move: LibraryMove
+        switch direction {
+        case .left: move = .left
+        case .right: move = .right
+        case .up: move = .up
+        case .down: move = .down
+        @unknown default: return
+        }
+        if let index = NativeLibraryKeyboard.nextIndex(count: rows.count, selected: rows.firstIndex { $0.id == (focusedMapID ?? model.selection) }, columns: NativeLibraryKeyboard.columns(in: width), move: move) {
+            model.selection = rows[index].id
+            focusedMapID = rows[index].id
+        }
     }
     private func importMap() {
         guard model.enrolled, !model.working else { return }
@@ -608,7 +616,23 @@ extension View {
     }
 }
 
-// Preserve ordinary native scroll positions across destination/width changes.
+private struct LibraryViewportScope<Content: View>: View {
+    @ViewState private var lifetime = NativeLibraryViewport.Lifetime()
+    let content: (NativeLibraryViewport.Lifetime) -> Content
+    var body: some View {
+        content(lifetime).onAppear { lifetime.mount() }.onDisappear { lifetime.unmount() }
+    }
+}
+
+private struct LibraryCardFrames: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
+// Preserve ordinary native scroll positions within one column layout. The grid
+// separately restores its visible map when adaptive columns change.
 // NSScrollView still owns input, scrolling and accessibility.
 struct ScrollPosition: NSViewRepresentable {
     let memory: ScrollMemory

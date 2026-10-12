@@ -13,6 +13,28 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @unittest.skipUnless(platform.system() == "Darwin", "SwiftUI frontend targets macOS")
 class NativeFrontendTests(unittest.TestCase):
+    def test_grid_keyboard_navigation(self):
+        with tempfile.TemporaryDirectory(prefix="smr-keyboard-check-") as directory:
+            executable = Path(directory) / "KeyboardChecks"
+            subprocess.run(
+                [
+                    "xcrun",
+                    "swiftc",
+                    "-parse-as-library",
+                    "-swift-version",
+                    "5",
+                    "src/native/NativeLibraryKeyboard.swift",
+                    "src/native/NativeLibraryViewport.swift",
+                    "tests/native/KeyboardChecks.swift",
+                    "-o",
+                    str(executable),
+                ],
+                cwd=ROOT,
+                check=True,
+                timeout=90,
+            )
+            subprocess.run([str(executable)], check=True, timeout=10)
+
     def test_one_owner_across_processes_and_unsafe_lock_refusal(self):
         with tempfile.TemporaryDirectory(prefix="smr-instance-check-") as directory:
             root = Path(directory)

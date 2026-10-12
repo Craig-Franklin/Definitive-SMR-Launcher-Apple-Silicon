@@ -79,7 +79,8 @@ struct PersonalDraft {
     var image: NSImage?
     var dirty = false
 }
-struct OutcomeDraft {
+struct OutcomeDraft: Equatable {
+    let identity = UUID()
     var outcome = ""
     var attempt = ""
     var scenario = ""
@@ -90,6 +91,11 @@ struct OutcomeDraft {
     var incident = ""
     var checkpoint = ""
     var continued = false
+}
+struct OutcomeSaveChoice {
+    let token = UUID()
+    let key: String
+    let draft: OutcomeDraft
 }
 struct BriefingTranslation {
     let archive: String
@@ -103,7 +109,9 @@ final class ScrollMemory { var point: NSPoint? }
 
 @MainActor final class LauncherModel: ObservableObject {
     @Published var maps: [MapItem] = [] { didSet { presentationRevision += 1 } }
-    @Published var selection: String?
+    @Published var selection: String? {
+        didSet { if oldValue != selection { outcomeSaveChoices.removeAll() } }
+    }
     @Published var destination = "Map Library"
     @Published var section = "Overview"
     @Published var query = ""
@@ -122,6 +130,10 @@ final class ScrollMemory { var point: NSPoint? }
     @Published var details: [String: [String: Any]] = [:]
     @Published var personal: [String: PersonalDraft] = [:]
     @Published var outcomes: [String: OutcomeDraft] = [:]
+    @Published var outcomeAttempts: [String: String] = [:]
+    @Published var outcomeUnknown = Set<String>()
+    private var recordedReports = Set<String>()
+    private var outcomeSaveChoices: [String: UUID] = [:]
     @Published var translations: [String: BriefingTranslation] = [:]
     @Published var mapToolDraftsPresent = false
     @Published var preferences: [String: Any] = [:]
@@ -150,6 +162,7 @@ final class ScrollMemory { var point: NSPoint? }
     private var visibleRows: [MapItem] = []
     private(set) var visibleBuilds = 0
     @Published private(set) var imageReads: [String: UUID] = [:]
+    private var imageChoiceRevisions: [String: Int] = [:]
     private var detailReads: [String: (token: UUID, revision: Int, archive: String, variant: String, build: String, task: Task<Void, Never>)] = [:]
     var selected: MapItem? { maps.first { $0.id == selection } }
     var working: Bool { busy || serviceBusy }
@@ -202,11 +215,13 @@ final class ScrollMemory { var point: NSPoint? }
                 else { section = view; narrowDetail = true }
             }
             if CommandLine.arguments.contains("--fixture-empty") { maps = []; selection = nil }
+            if CommandLine.arguments.contains("--fixture-loading") { maps = []; selection = nil; loaded = false; busy = true; status = "Synthetic initial loading; no work runs." }
+            if CommandLine.arguments.contains("--fixture-refreshing") { busy = true; status = "Synthetic refresh; last usable maps retained. No work runs." }
             if CommandLine.arguments.contains("--fixture-error") { error = "Synthetic error: last usable library retained. Inspect before retrying an unfinished operation." }
             if let map = selected {
                 await loadDetails(map.id)
                 if section == "Edit Details" { edit(map) }
-                if section == "Record Outcome" { record(map); outcomes[map.id]?.outcome = "Problem" }
+                if section == "Record Outcome" { record(map); updateOutcome(map) { $0.outcome = "Problem" } }
             }
             return
         }
@@ -286,7 +301,7 @@ final class ScrollMemory { var point: NSPoint? }
                 guard Set(replacement.map(\.id)).count == replacement.count else { throw NativeError.message("The library contains duplicate identities. Existing presentation retained.") }
                 let old = Dictionary(uniqueKeysWithValues: self.maps.map { ($0.id, $0.archive + $0.variant) })
                 for map in replacement where old[map.id] != nil && old[map.id] != map.archive + map.variant {
-                    self.personal[map.id] = nil; self.outcomes[map.id] = nil; self.translations[map.id] = nil
+                    self.personal[map.id] = nil; self.translations[map.id] = nil
                 }
                 self.libraryRevision += 1
                 self.maps = replacement
@@ -410,12 +425,22 @@ final class ScrollMemory { var point: NSPoint? }
         }
     }
 
+    func reserveImageChoice(_ map: MapItem) -> Int {
+        let revision = (imageChoiceRevisions[map.id] ?? 0) + 1
+        imageChoiceRevisions[map.id] = revision
+        return revision
+    }
+    func currentImageChoice(_ map: MapItem, _ revision: Int) -> Bool {
+        imageChoiceRevisions[map.id] == revision
+    }
     func usePackageImage(_ map: MapItem) {
+        _ = reserveImageChoice(map)
         imageReads[map.id] = nil
         guard var draft = personal[map.id] else { return }
         draft.imagePNG = ""; draft.image = nil; draft.dirty = true; personal[map.id] = draft
     }
     func prepareImage(_ url: URL, for map: MapItem) async {
+        _ = reserveImageChoice(map)
         guard let draftIdentity = personal[map.id]?.identity else { return }
         let token = UUID()
         imageReads[map.id] = token
@@ -438,15 +463,147 @@ final class ScrollMemory { var point: NSPoint? }
             draft.imagePNG = prepared.png; draft.image = prepared.image; draft.dirty = true; personal[map.id] = draft
         } catch { if imageReads[map.id] == token { self.error = error.localizedDescription } }
     }
-    func record(_ map: MapItem) {
-        if outcomes[map.id] == nil {
-            var draft = OutcomeDraft()
-            let rows = details[map.id]?.rows("history") ?? []
-            let opens = rows.filter { ["process_confirmed", "launch_attempted"].contains($0.text("kind")) }
-            if let last = opens.last { draft.attempt = last.text("attempt_id"); draft.scenario = last.text("scenario") }
-            outcomes[map.id] = draft
+    func reportBuild(_ map: MapItem) -> String {
+        map.build.isEmpty ? details[map.id]?.object("context").text("game_executable_sha256") ?? "" : map.build
+    }
+    func reportScope(_ map: MapItem) -> String {
+        [map.id, map.archive, map.variant, reportBuild(map)].joined(separator: ":")
+    }
+    func outcomeKey(_ map: MapItem) -> String { reportScope(map) + ":" + (outcomeAttempts[reportScope(map)] ?? "") }
+    func outcome(_ map: MapItem) -> OutcomeDraft { outcomes[outcomeKey(map)] ?? OutcomeDraft() }
+    func reportRows(_ map: MapItem) -> [[String: Any]] {
+        let data = details[map.id] ?? [:], context = data.object("context")
+        guard context.text("game_executable_sha256") == reportBuild(map),
+              context.text("archive_sha256", map.archive) == map.archive,
+              context.text("variant_id", map.variant) == map.variant else { return [] }
+        return data.rows("history")
+    }
+    func reportGames(_ map: MapItem, _ draft: OutcomeDraft) -> [String] {
+        Array(Set(reportRows(map).filter {
+            ["game_started", "game_resumed"].contains($0.text("kind")) &&
+            $0.text("attempt_id") == draft.attempt && $0.text("scenario") == draft.scenario
+        }.map { $0.text("game_id") }.filter { !$0.isEmpty })).sorted()
+    }
+    func reportAvailableGames(_ map: MapItem, _ draft: OutcomeDraft) -> [String] {
+        Array(Set(reportRows(map).filter {
+            ["game_started", "game_resumed"].contains($0.text("kind")) && $0.text("scenario") == draft.scenario
+        }.map { $0.text("game_id") }.filter { !$0.isEmpty })).sorted()
+    }
+    func updateOutcome(_ map: MapItem, _ change: (inout OutcomeDraft) -> Void) {
+        let key = outcomeKey(map)
+        guard !outcomeUnknown.contains(key) else { return }
+        var draft = outcome(map)
+        let previous = draft
+        change(&draft)
+        if previous != draft { outcomeSaveChoices[key] = nil }
+        outcomes[key] = draft
+    }
+    func beginOutcomeSaveChoice(_ map: MapItem) -> OutcomeSaveChoice {
+        let choice = OutcomeSaveChoice(key: outcomeKey(map), draft: outcome(map))
+        outcomeSaveChoices[choice.key] = choice.token
+        return choice
+    }
+    func acceptOutcomeSaveChoice(_ map: MapItem, _ choice: OutcomeSaveChoice, _ save: String) {
+        guard let selected, reportScope(selected) == reportScope(map),
+              outcomeKey(map) == choice.key, outcomeSaveChoices[choice.key] == choice.token,
+              outcome(map) == choice.draft, !outcomeUnknown.contains(choice.key),
+              ["Saved", "Resumed"].contains(choice.draft.outcome) else { return }
+        outcomeSaveChoices[choice.key] = nil
+        guard save.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil else {
+            error = "The selected save identity is invalid. The report draft is retained."; return
         }
+        updateOutcome(map) { $0.save = save }
+    }
+    func setOutcomeSave(_ map: MapItem, _ save: String) {
+        outcomeSaveChoices[outcomeKey(map)] = nil
+        updateOutcome(map) { $0.save = save }
+    }
+    func setOutcomeScenario(_ map: MapItem, _ scenario: String) {
+        updateOutcome(map) { draft in
+            if draft.scenario != scenario {
+                draft.scenario = scenario; draft.game = ""; draft.incident = ""; draft.save = ""; draft.checkpoint = ""
+            }
+        }
+        reuseReportContext(map, inferScenario: false)
+    }
+    func reuseReportContext(_ map: MapItem, inferScenario: Bool = true) {
+        let key = outcomeKey(map)
+        guard var draft = outcomes[key], !outcomeUnknown.contains(key) else { return }
+        let rows = reportRows(map).filter { $0.text("attempt_id") == draft.attempt }
+        let scenarios = Set(rows.map { $0.text("scenario") }.filter { !$0.isEmpty })
+        if inferScenario && draft.scenario.isEmpty && scenarios.count == 1 { draft.scenario = scenarios.first! }
+        let games = reportGames(map, draft)
+        if draft.game.isEmpty && games.count == 1 { draft.game = games[0] }
+        outcomes[key] = draft
+    }
+    func record(_ map: MapItem, attempt: String? = nil) {
+        let rows = reportRows(map)
+        let opens = rows.filter { ["process_confirmed", "launch_attempted"].contains($0.text("kind")) }
+        let scope = reportScope(map)
+        let selected = attempt ?? outcomeAttempts[scope] ?? opens.last?.text("attempt_id") ?? ""
+        if let previous = outcomeAttempts[scope], previous != selected {
+            outcomeSaveChoices[scope + ":" + previous] = nil
+            outcomeSaveChoices[scope + ":" + selected] = nil
+        }
+        outcomeAttempts[scope] = selected
+        let key = outcomeKey(map)
+        if outcomes[key] == nil {
+            var draft = OutcomeDraft(); draft.attempt = selected; outcomes[key] = draft
+        }
+        reuseReportContext(map)
         section = "Record Outcome"; narrowDetail = true
+    }
+    func chooseOutcome(_ map: MapItem, _ value: String) {
+        updateOutcome(map) {
+            if ["goals_met", "retired"].contains(value) { $0.outcome = "Completed"; $0.reason = value }
+            else { $0.outcome = value }
+            if value != "Resumed" { $0.continued = false }
+        }
+        if value == "Problem" {
+            let draft = outcome(map)
+            let failures = reportRows(map).filter {
+                ["crash_load", "crash_play", "crash_unknown", "resource_stop"].contains($0.text("kind")) &&
+                $0.text("attempt_id") == draft.attempt && ($0.text("scenario").isEmpty || $0.text("scenario") == draft.scenario)
+            }
+            let incidents = Set(failures.map { $0.text("incident_id") }.filter { !$0.isEmpty })
+            if draft.incident.isEmpty && incidents.count == 1, let failure = failures.last {
+                updateOutcome(map) { $0.incident = failure.text("incident_id"); $0.problem = failure.text("kind"); $0.checkpoint = failure.text("checkpoint") }
+            }
+        }
+    }
+    func reportKind(_ draft: OutcomeDraft) -> String {
+        switch draft.outcome {
+        case "Played": return "playable"
+        case "Problem": return draft.problem
+        case "Saved": return "save_made"
+        case "Resumed": return "save_reopened"
+        case "Completed": return draft.reason
+        default: return ""
+        }
+    }
+    private func reportFingerprint(_ key: String, _ draft: OutcomeDraft) -> String {
+        // A session checkpoint has semantic identity independent of click time.
+        [key, reportKind(draft), draft.scenario, draft.outcome == "Problem" ? "" : draft.game,
+         ["Saved", "Resumed"].contains(draft.outcome) ? draft.save : "",
+         draft.outcome == "Problem" ? draft.incident : "", draft.outcome == "Problem" ? draft.checkpoint : "",
+         String(draft.outcome == "Resumed" && draft.continued)].joined(separator: "|")
+    }
+    func reportAlreadyRecorded(_ map: MapItem, _ draft: OutcomeDraft) -> Bool {
+        // An explicitly new failure is a distinct incident, not a repeat of an
+        // identified observation. Retained incidents are compared below.
+        if draft.outcome == "Problem" && draft.incident.isEmpty { return false }
+        if recordedReports.contains(reportFingerprint(outcomeKey(map), draft)) { return true }
+        let kind = reportKind(draft)
+        guard !kind.isEmpty else { return false }
+        func matches(_ row: [String: Any], _ wanted: String) -> Bool {
+            row.text("kind") == wanted && row.text("source") == "player_confirmed" &&
+            row.text("attempt_id") == draft.attempt && row.text("scenario") == draft.scenario &&
+            (draft.game.isEmpty || row.text("game_id") == draft.game) &&
+            (!["Saved", "Resumed"].contains(draft.outcome) || row.text("save_id") == draft.save) &&
+            (draft.outcome != "Problem" || (!draft.incident.isEmpty && row.text("incident_id") == draft.incident && row.text("checkpoint") == draft.checkpoint))
+        }
+        let rows = reportRows(map)
+        return rows.contains { matches($0, kind) } && (draft.outcome != "Resumed" || !draft.continued || rows.contains { matches($0, "continued_play") })
     }
     func openExitPrompt(_ prompt: [String: Any]) async {
         await refresh()
@@ -457,37 +614,54 @@ final class ScrollMemory { var point: NSPoint? }
         guard details[map.id]?.object("context").text("game_executable_sha256") == prompt.text("game_executable_sha256") else {
             error = "This session belongs to a different executable build. Its outcome remains unknown."; return
         }
-        select(map); record(map)
-        outcomes[map.id]?.attempt = prompt.text("attempt_id")
-        outcomes[map.id]?.scenario = prompt.text("scenario")
+        guard reportRows(map).contains(where: { $0.text("attempt_id") == prompt.text("attempt_id") && ["process_confirmed", "launch_attempted"].contains($0.text("kind")) }) else {
+            error = "The exited session is no longer recorded in this exact scope. Inspect its history before reporting."; return
+        }
+        select(map); record(map, attempt: prompt.text("attempt_id"))
         destination = "Map Library"
     }
     func confirm(_ map: MapItem) async {
-        guard let draft = outcomes[map.id] else { return }
-        let kind: String
-        switch draft.outcome {
-        case "Played": kind = "playable"
-        case "Problem": kind = draft.problem
-        case "Saved": kind = "save_made"
-        case "Resumed": kind = "save_reopened"
-        case "Completed": kind = draft.reason
-        default: error = "Choose the actual outcome."; return
+        let key = outcomeKey(map), build = reportBuild(map)
+        guard let draft = outcomes[key], !outcomeUnknown.contains(key) else { return }
+        while working {
+            do { try await Task.sleep(nanoseconds: 20_000_000) } catch { return }
         }
+        // A preceding queued confirmation may have become UNKNOWN while this
+        // submission waited. Never carry pre-wait permission through that hold.
+        guard !outcomeUnknown.contains(key) else { return }
+        guard !Task.isCancelled, outcomeKey(map) == key, outcomes[key] == draft,
+              maps.contains(where: { $0.id == map.id && $0.archive == map.archive && $0.variant == map.variant && reportBuild($0) == build }),
+              details[map.id]?.object("context").text("game_executable_sha256") == build else {
+            error = "The report target or build changed. Its draft is retained; review the exact edition/session again."; return
+        }
+        let kind = reportKind(draft)
         guard !kind.isEmpty, !draft.attempt.isEmpty else { error = "Choose a recorded launch session and the required outcome details."; return }
+        guard !reportAlreadyRecorded(map, draft) else { status = "This confirmation is already recorded. Choose another outcome; earlier observations are retained."; return }
         if ["Saved", "Resumed"].contains(draft.outcome) && draft.save.range(of: "^[0-9a-f]{64}$", options: .regularExpression) == nil {
             error = "Choose the exact save before confirming this outcome. The draft is retained."; return
         }
-        var params: [String: Any] = ["profile_id": map.id, "archive_sha256": map.archive, "variant_id": map.variant, "game_executable_sha256": details[map.id]?.object("context").text("game_executable_sha256") ?? "", "attempt_id": draft.attempt, "kind": kind, "scenario": draft.scenario]
+        var params: [String: Any] = ["profile_id": map.id, "archive_sha256": map.archive, "variant_id": map.variant, "game_executable_sha256": build, "attempt_id": draft.attempt, "kind": kind, "scenario": draft.scenario]
         if draft.outcome == "Problem" { params["failure_id"] = draft.incident; params["checkpoint"] = draft.checkpoint }
         else { params["game_id"] = draft.game }
         if ["Saved", "Resumed"].contains(draft.outcome) { params["save_id"] = draft.save }
         if draft.outcome == "Resumed" { params["continued"] = draft.continued }
+        var received = false
         await request("history.record", params) { _ in
-            self.outcomes[map.id] = nil; self.section = "Play History"; self.status = "Player confirmation recorded. Earlier failures remain visible."
+            received = true; self.recordedReports.insert(self.reportFingerprint(key, draft))
+            // Preserve a newer edit made while the confirmation was in flight.
+            if self.outcomes[key] == draft {
+                var retained = self.outcomes[key]!
+                retained.outcome = ""; retained.reason = ""; retained.continued = false; retained.incident = ""; retained.checkpoint = ""
+                if retained.game == "new" { retained.game = "" }
+                self.outcomes[key] = retained
+            }
+            if let selected = self.selected, self.reportScope(selected) == self.reportScope(map), self.outcomeKey(map) == key {
+                self.status = "Player confirmation recorded. Session context retained; earlier failures remain visible."
+            }
         }
-        // The confirmation changed this map's history, not every map's assets.
-        // Keep the library and drafts in place; read the affected map once.
-        if error.isEmpty && !fixture { await loadDetails(map.id, force: true) }
+        if !received && (!connected || error.hasPrefix("History outcome needs inspection")) { outcomeUnknown.insert(key) }
+        // One targeted read, never a full gallery reset. Context survives read failure.
+        if received && !fixture { await loadDetails(map.id, force: true); reuseReportContext(map) }
     }
     func workflow(_ action: String, profile: String? = nil, extras: [String: Any] = [:]) async {
         var params = extras; params["action"] = action

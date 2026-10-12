@@ -40,6 +40,7 @@ from .play_history import (
     LABELS,
     SUCCESS,
     HistoryError,
+    HistoryWriteOutcomeUnknown,
     PlayHistoryStore,
     context,
     digest,
@@ -379,6 +380,16 @@ class NativeLibrary:
         )
 
     def history_record(self, app, params):
+        try:
+            return self._history_record(app, params)
+        except (OSError, HistoryWriteOutcomeUnknown) as exc:
+            # An I/O failure is not proof of either a write or no write. Keep the
+            # draft and require inspection before any fresh submission.
+            raise RuntimeError(
+                "History outcome needs inspection; do not repeat the confirmation: " + str(exc)
+            ) from exc
+
+    def _history_record(self, app, params):
         record = self.record(app, text(params, "profile_id"))
         self.require_scope(app, record, params, build=True)
         scenario, kind = text(params, "scenario"), text(params, "kind")

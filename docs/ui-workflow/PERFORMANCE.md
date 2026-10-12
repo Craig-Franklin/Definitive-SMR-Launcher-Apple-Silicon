@@ -1,5 +1,10 @@
 # Native UI performance audit
 
+Current acceptance results and precise evidence limits are recorded in
+[Native UI and workflow acceptance](ACCEPTANCE.md). Earlier sections below are
+historical implementation/audit records.
+
+
 Audited on 11 October 2026 against `52972b5723e8159fb2351fe98b5142fbdd21a27d` (0.19.4). This is a performance audit of the Mac SwiftUI/AppKit frontend and Python/Tk bridge. It does not score iOS, browser performance or gameplay. [Issue #218](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/218) remains the canonical performance work.
 
 ## Highest priority
