@@ -285,6 +285,42 @@ class ContextTests(unittest.TestCase):
             self.query(receipt)["model_candidate_id"], next(iter(self.ids(base).values()))
         )
 
+    def test_unresolved_middle_manager_blocks_fallback_but_not_a_prior_hit(self):
+        # SMR-K-002 keeps packed members unknown. The conditional external-order
+        # model can use an earlier clear hit, but cannot skip an unresolved manager.
+        self.put()
+        base = self.snapshot()
+        packed_roots = self.make_roots(self.base / "uncertain")
+        (packed_roots["custom_assets"] / "bundle.FPK").write_bytes(b"synthetic unknown members")
+        uncertain = rc.capture_resources(packed_roots)
+        last_roots = self.make_roots(self.base / "last")
+        absent = rc.capture_resources(last_roots)
+        (last_roots["installed_assets"] / "goods.xml").write_bytes(b"synthetic clear hit")
+        present = rc.capture_resources(last_roots)
+        last_id = self.ids(present, "last")["installed_assets:goods.xml"]
+
+        for label, last, state, chosen, blockers in (
+            ("clear-hit", present, "model-candidate", last_id, []),
+            ("absent", absent, "unresolved", None, ["packed-members-unknown"]),
+        ):
+            with self.subTest(last=label):
+                receipt = self.context(
+                    managers={"base": base, "uncertain": uncertain, "last": last},
+                    external_order={"managers": ["uncertain", "last"], "evidence_sha256": EVIDENCE},
+                )
+                query = self.query(receipt)
+                self.assertEqual(query["state"], state)
+                self.assertEqual(query["model_candidate_id"], chosen)
+                self.assertEqual(query["blocking_unknowns"], blockers)
+                self.assertEqual(query["managers"]["base"]["state"], "model-candidate")
+                self.assertEqual(query["managers"]["uncertain"]["state"], "unresolved")
+                self.assertIsNone(query["runtime_selected_provider"])
+                missing = self.query(receipt, "missing.nif")
+                self.assertEqual(missing["state"], "unresolved")
+                self.assertIsNone(missing["model_candidate_id"])
+                self.assertEqual(missing["blocking_unknowns"], ["packed-members-unknown"])
+                self.assertIsNone(missing["runtime_selected_provider"])
+
     def test_context_binding_byte_mtime_directory_path_provider_and_negative_changes(self):
         file = self.put()
         initial = self.context()
