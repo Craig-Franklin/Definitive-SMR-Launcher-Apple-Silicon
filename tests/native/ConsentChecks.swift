@@ -18,6 +18,12 @@ import Foundation
         var draft = MapToolDraft(); draft.recipe = "recipe-A"; draft.difficulty = true; draft.legacyScope = "Keep this unsaved observation"
         tools.drafts[key] = draft
         func packet(_ action: String = "create_recipe") -> NativeMapConsent { NativeMapConsent(target, action, draft) }
+        for action in ["remove", "create_recipe", "create_experimental"] {
+            let consent = packet(action)
+            require(consent.message.hasPrefix(map.name + "\n" + target.identity + "\n\n"), "Every confirmation names its immutable map/edition/build")
+            require(consent.message.contains("Recipe: recipe-A") == (action == "create_recipe"), "Only recipe consent names the frozen recipe")
+            require(consent.message.contains(action == "remove" ? "Saves stay available for exact-version re-import." : "Creation and static checks do not prove gameplay."), "Confirmation preserves its action-specific limits")
+        }
         func count(_ action: String) async throws -> Int {
             let rows = try await backend.call("fixture.counts")
             return rows["maptools." + action] as? Int ?? 0

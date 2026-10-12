@@ -43,6 +43,16 @@ struct NativeMapConsent {
         (action != "create_recipe" || recipe == draft.recipe) &&
         (action != "create_experimental" || difficulty == draft.difficulty)
     }
+    var message: String {
+        let recipeText = action == "create_recipe" ? "Recipe: \(recipe)\n\n" : ""
+        let explanation: String
+        if action == "remove" {
+            explanation = "Removes this edition and unshared launcher-owned archives. Saves stay available for exact-version re-import. Source files outside the launcher stay. Quit Railroads and switch to Original Game first."
+        } else {
+            explanation = "Creates or reuses a separate edition with its own saves. Original map and saves stay intact. Creation and static checks do not prove gameplay. Unsupported inputs will be refused."
+        }
+        return "\(target.name)\n\(target.identity)\n\n\(recipeText)\(explanation)"
+    }
 }
 
 struct NativePlayConsent {
@@ -317,10 +327,7 @@ struct NativeMapToolsView: View {
             Button("Cancel", role: .cancel) { confirmation = nil }
         } message: {
             if let consent = confirmation {
-                Text(consent.target.name + "\n" + consent.target.identity + "\n\n" +
-                     (consent.action == "create_recipe" ? "Recipe: " + consent.recipe + "\n\n" : "") +
-                     (consent.action == "remove" ? "Removes this edition and unshared launcher-owned archives. Saves stay available for exact-version re-import. Source files outside the launcher stay. Quit Railroads and switch to Original Game first."
-                      : "Creates or reuses a separate edition with its own saves. Original map and saves stay intact. Creation and static checks do not prove gameplay. Unsupported inputs will be refused."))
+                Text(consent.message)
             }
         }
     }
