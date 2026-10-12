@@ -140,3 +140,41 @@ verification cache or weaker operation guard was introduced. System accessibilit
 settings and VoiceOver speech require separate device-level evidence; exposed AX
 names and observed keyboard focus are the evidence here. Engine knowledge use is
 not applicable: UI glue reuses the existing evidence contracts without a new rule.
+
+## Published package confirmation
+
+The final application is [v0.24.0](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/releases/tag/v0.24.0),
+from GitHub-Verified, single-parent source
+`45324fafc5a946da3734ed8122be4987665b2062`. Clean replay preserved concurrent
+personal-fork recipe and verification-badge work. The combined tree passed
+1,117 local tests in 84.372 seconds, quality/formatting for 155 files and full
+arm64 macOS 13 compilation. [CI 38194351655](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/actions/runs/38194351655)
+passed 1,117 tests in 143.934 seconds, ten research-helper tests, quality and
+release gates.
+
+Downloaded ZIP SHA256:
+`a1dc6e8052109fafee1c32baecd2d674db33e74d00916be69e30fd4e881d108c`.
+The release checksum and GitHub asset digest matched. Strict deep codesign and
+Gatekeeper Notarized Developer ID assessment passed. GitHub attestation verification
+enforced both the exact source digest and this personal fork's release workflow.
+The installed app was not replaced.
+
+Root checked the unmodified signed package with synthetic-only launch flags:
+
+- 900-point dark: Tab/arrow grid traversal, visible focus, long-title wrapping,
+  Return to focused inspector and Escape to the same card; Command-F from
+  Preferences focused the real search receiver. Search, no-match/reset, reverse
+  sort and Known issue filter passed.
+- 1180-point light: persistent grid/inspector, personal editor, progressive
+  Played reporting and native General/Updates preferences passed. Standard About
+  showed Version 0.24.0; closing it and Command-F returned to responsive search.
+- 900-point light empty state distinguished an empty library from loading.
+- 1180-point dark error state retained all cards; Dismiss and search worked.
+- 900-point dark initial loading showed Opening your library and a busy indicator.
+- 1180-point light refresh retained all cards and allowed search while its busy
+  indicator remained active. These flags seed states; they do not perform reads.
+
+All owned package previews exited afterward. No normal launcher service, live
+update installation, game/profile/save operation or collector action ran. These
+package checks join the production-source and closed-provider acceptance above;
+they do not turn synthetic assertions into actual gameplay evidence.
