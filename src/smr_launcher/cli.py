@@ -65,17 +65,25 @@ def run(argv: list[str] | None = None) -> dict:
     play.add_argument("profile_id")
     choice = actions.add_parser("choose-library")
     choice.add_argument("steamapps")
-    plan = actions.add_parser("plan-recipes")
-    plan.add_argument(
-        "--request", action="append", nargs=2, required=True, metavar=("PROFILE_ID", "RECIPE_ID")
-    )
+    for action in ("plan-recipes", "prepare-recipes"):
+        batch = actions.add_parser(action)
+        batch.add_argument(
+            "--request",
+            action="append",
+            nargs=2,
+            required=True,
+            metavar=("PROFILE_ID", "RECIPE_ID"),
+        )
     args = parser.parse_args(argv)
     if args.action == "choose-library":
         app = LauncherApplication.choose_steam_library(Path(args.steamapps))
         return _status(app)
     app = LauncherApplication.discover()
-    if args.action == "plan-recipes":
-        return app.plan_recipe_batch(
+    if args.action in ("plan-recipes", "prepare-recipes"):
+        operation = (
+            app.plan_recipe_batch if args.action == "plan-recipes" else app.prepare_recipe_batch
+        )
+        return operation(
             [dict(profile_id=profile, recipe_id=recipe) for profile, recipe in args.request]
         )
     if args.action == "status":

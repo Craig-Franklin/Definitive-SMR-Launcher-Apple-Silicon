@@ -76,3 +76,32 @@ claim (`archive_bytes_verified: false`); member bytes are verified. This does no
 strengthen donor selection or conditional engine assumptions. Reports are snapshots,
 not execution tickets: later preparation must re-resolve every existing guard.
 Preparation support establishes no loading, feature, repair, gameplay or save acceptance.
+
+## Explicit offline recipe preparation
+
+`LauncherApplication.prepare_recipe_batch(requests)` and `prepare-recipes` use the
+same 1–32 explicit requests as the planner. Repeat `--request PROFILE_ID RECIPE_ID`
+for each job. Any unsupported or duplicate job prevents all execution; malformed
+request shapes raise before locking. Supported jobs then resolve their current
+original, installation and recipe context again under the application lock.
+Planning reports are snapshots and cannot be submitted as execution tickets.
+
+The batch disables removal recovery and asks the activation owner to refuse pending
+activation journals under its own lock, including dangling journal links. Existing
+single-edition APIs retain their default recovery behavior. Each successful job
+publishes its independent edition through the existing preparation machinery and
+validates its receipt, registered output context and prepared output before reporting
+`prepared`. Results include the actual edition record, receipt and binding, plus
+whether an intact edition was reused. Initial planning fields are labelled `preflight`;
+successful jobs contain the freshly bound receipt context. A final audit rechecks all
+successful publications under the application lock, including their unique current
+original and source identity. It marks stale outcomes `failed` with `audit_failed`
+while retaining the actual edition identity. A failed execution reports `failed` and stops;
+remaining jobs are `not_attempted`. Preflight refusals remain `refused`.
+
+`all_prepared` and `partial` describe batch completion. Earlier successful editions
+and saves remain present after a later failure. A failing single-job transaction may
+retain output for inspection; no batch rollback, retry, activation, launch or recovery
+is performed. Preparation proves storage outcomes only, never Verified status,
+engine compatibility or gameplay. The JSON command envelope reports transport/API
+errors separately from per-job outcomes; callers must inspect `all_prepared`.

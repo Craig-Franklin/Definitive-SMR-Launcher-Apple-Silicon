@@ -414,7 +414,12 @@ class FilesystemProfiles:
             self._atomic_json(self.state_file, dict(schema=SCHEMA, active=ORIGINAL))
 
     def register_variant(
-        self, variant_id: str, prepared_root: Path, *, saved_games: Optional[Path] = None
+        self,
+        variant_id: str,
+        prepared_root: Path,
+        *,
+        saved_games: Optional[Path] = None,
+        recover_pending: bool = True,
     ) -> str:
         """Make an independent writable generation from an immutable prepared tree."""
         if not _SHA256.fullmatch(variant_id):
@@ -423,7 +428,7 @@ class FilesystemProfiles:
         source = _canonical_directory_path(Path(prepared_root))
         with self._locked():
             self._require_stopped()
-            self._recover_locked()
+            self._recover_locked(recover_pending=recover_pending)
             _assert_no_symlink_ancestor(source)
             if not source.is_dir():
                 raise ActivationError("Prepared source is missing")
@@ -505,7 +510,9 @@ class FilesystemProfiles:
         self._call("activation.journal_unlink", self.journal.unlink)
         self._fsync_dir(self.store)
 
-    def _recover_locked(self) -> None:
+    def _recover_locked(self, *, recover_pending: bool = True) -> None:
+        if not recover_pending and (self.journal.exists() or self.journal.is_symlink()):
+            raise RecoveryError("Pending activation requires its owner; batch refuses recovery")
         if self.observed_io is not None and (self.journal.exists() or self.journal.is_symlink()):
 
             def refuse_history():
@@ -515,8 +522,10 @@ class FilesystemProfiles:
 
             self._call("activation.pending_recovery_denied", refuse_history)
         state = self._state()
-        if not self.journal.exists():
+        if not recover_pending or not self.journal.exists():
             self._marker(self.live, state["active"])
+            if not recover_pending and (self.journal.exists() or self.journal.is_symlink()):
+                raise RecoveryError("Pending activation requires its owner; batch refuses recovery")
             return
         journal = _read_json(self.journal)
         if journal.get("schema") != SCHEMA or state["active"] not in (
@@ -558,10 +567,10 @@ class FilesystemProfiles:
             return
         raise RecoveryError("Unexpected profile layout; all trees retained for inspection")
 
-    def recover(self) -> str:
+    def recover(self, *, recover_pending: bool = True) -> str:
         with self._locked():
             self._require_stopped()
-            self._recover_locked()
+            self._recover_locked(recover_pending=recover_pending)
             return self._state()["active"]
 
     def _switch_locked(self, target_id: str) -> str:

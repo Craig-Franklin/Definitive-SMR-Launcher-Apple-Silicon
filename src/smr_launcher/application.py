@@ -728,6 +728,88 @@ class LauncherApplication:
             jobs=jobs,
         )
 
+    def prepare_recipe_batch(self, requests: list[dict]) -> dict:
+        """Prepare explicit independent editions; never recover, activate or retry.
+
+        Planning is a whole-request preflight, not an execution ticket. Each job
+        resolves its current original and recipe again under the application lock.
+        Earlier publications remain intact when a later job fails.
+        """
+        from .recipe_service import resolve_bundled_recipe
+
+        plan = self.plan_recipe_batch(requests)
+        jobs = [
+            dict(
+                index=job["index"],
+                profile_id=job["profile_id"],
+                recipe_id=job["recipe_id"],
+                status="not_attempted",
+                preflight=job,
+            )
+            if job["status"] == "supported"
+            else dict(job)
+            for job in plan["jobs"]
+        ]
+        result = dict(schema=1, all_prepared=False, partial=False, jobs=jobs)
+        if not plan["all_supported"]:
+            return result
+        index = 0
+        try:
+            with self._locked(recover_removal=False):
+                try:
+                    for index, job in enumerate(jobs):
+                        self._stopped()
+                        self.profiles.recover(recover_pending=False)
+                        records = self.catalogue()
+                        matches = [r for r in records if r.profile_id == job["profile_id"]]
+                        if len(matches) != 1 or not self._is_original_variant(matches[0]):
+                            raise ApplicationError(
+                                "Recipe preparation requires a unique current original map"
+                            )
+                        original = matches[0]
+                        rules, binding = resolve_bundled_recipe(self, original, job["recipe_id"])
+                        edition = self._create_compatibility_edition_locked(
+                            original,
+                            rules,
+                            label=job["recipe_id"],
+                            recipe_binding=binding,
+                            recover_pending=False,
+                        )
+                        job.update(edition=edition.as_json(), reused=edition in records)
+                        receipt = self._validate_recipe_context(edition, prepared_output=True)
+                        job.update(
+                            status="prepared",
+                            edition=edition.as_json(),
+                            receipt=receipt,
+                            binding=receipt["recipe_binding"],
+                            reused=edition in records,
+                        )
+                except Exception as exc:
+                    jobs[index].update(
+                        status="failed", reason=str(exc), error_type=type(exc).__name__
+                    )
+                # Recheck every published success at the final shared snapshot.
+                for job in jobs:
+                    if job["status"] != "prepared":
+                        continue
+                    try:
+                        record = next(r for r in self.catalogue() if r.as_json() == job["edition"])
+                        job["receipt"] = self._validate_recipe_context(record, prepared_output=True)
+                    except Exception as exc:
+                        job.update(
+                            status="failed",
+                            audit_failed=True,
+                            reason=str(exc),
+                            error_type=type(exc).__name__,
+                        )
+        except Exception as exc:
+            # A failed job may have retained output under the existing single-job
+            # transaction. Never claim rollback or retry that publication.
+            jobs[index].update(status="failed", reason=str(exc), error_type=type(exc).__name__)
+        result["all_prepared"] = all(job["status"] == "prepared" for job in jobs)
+        result["partial"] = any("edition" in job for job in jobs) and not result["all_prepared"]
+        return result
+
     def compatibility_recipes(self, record: MapRecord) -> tuple:
         """Return menu candidates; creation performs the full input validation."""
         from .recipe_service import recipe_choices
@@ -737,7 +819,13 @@ class LauncherApplication:
         return recipe_choices(record, self.installation.executable_sha256)
 
     def _create_compatibility_edition_locked(
-        self, record: MapRecord, rules: tuple, *, label: str, recipe_binding=None
+        self,
+        record: MapRecord,
+        rules: tuple,
+        *,
+        label: str,
+        recipe_binding=None,
+        recover_pending: bool = True,
     ) -> MapRecord:
         """Shared preparation transaction; caller must hold the application lock.
 
@@ -761,7 +849,7 @@ class LauncherApplication:
         if recipe_binding is not None and not isinstance(recipe_binding, RecipePreparationBinding):
             raise ApplicationError("Compiled edition needs a valid recipe binding")
         self._stopped()
-        self.profiles.recover()
+        self.profiles.recover(recover_pending=recover_pending)
         records = list(self.catalogue())
         if (
             record not in records
@@ -823,6 +911,7 @@ class LauncherApplication:
             variant.variant_id,
             destination,
             saved_games=removal.retained_saves(self, variant.variant_id),
+            recover_pending=recover_pending,
         )
         if recipe_binding is not None:
             profile = (
@@ -900,7 +989,9 @@ class LauncherApplication:
             hash_cache=self._resource_hash_cache,
         )
 
-    def _validate_recipe_context(self, record: MapRecord) -> None:
+    def _validate_recipe_context(
+        self, record: MapRecord, *, prepared_output=False
+    ) -> Optional[dict]:
         """Reject missing/changed receipts or resource context before activation."""
         if not record.recipe_receipt_sha256:
             return
@@ -960,6 +1051,30 @@ class LauncherApplication:
                 or self._stock_file_context()["identity"] != binding["stock_files_sha256"]
             ):
                 raise ValueError("resource context differs")
+            if prepared_output:
+                originals = [
+                    item
+                    for item in self.catalogue()
+                    if item.variant_id == receipt.get("parent_variant")
+                ]
+                if (
+                    len(originals) != 1
+                    or not self._is_original_variant(originals[0])
+                    or originals[0].archive_sha256 != record.archive_sha256
+                    or originals[0].game_executable_sha256 != record.game_executable_sha256
+                    or originals[0].imported_directory != record.imported_directory
+                ):
+                    raise ValueError("current original binding differs")
+                source = removal._leaf(self.imports, record.imported_directory, r"[0-9a-f]{32}")
+                if map_file_context(source)["identity"] != binding["source_files_sha256"]:
+                    raise ValueError("current source context differs")
+                prepared = self._prepared_root(record)
+                if (
+                    assets_manifest_hash(prepared) != receipt["assets_sha256"]
+                    or map_file_context(prepared)["identity"] != binding["output_files_sha256"]
+                ):
+                    raise ValueError("prepared output differs")
+            return receipt
         except (OSError, ValueError, KeyError, TypeError, ResourceFingerprintError) as exc:
             raise ApplicationError(
                 "Compiled map resources or receipt changed; revalidate this edition before playing"
