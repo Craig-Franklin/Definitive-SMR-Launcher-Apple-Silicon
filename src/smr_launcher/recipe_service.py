@@ -196,7 +196,9 @@ _RECIPES = {
 # Algorithm versions are explicit release inputs, independent of source-file
 # availability in a frozen app. Bump this contract when compilation/preparation
 # semantics change. This digest identifies the contract, not binary code bytes.
-RECIPE_SERVICE_VERSION = "reviewed-stock-absent-city-v3-ownership-exact-bank-v1"
+RECIPE_SERVICE_VERSION = (
+    "reviewed-stock-absent-city-v3-ownership-exact-bank-v1-existing-target-mtime-v1"
+)
 _HILL_COWHIDE_DONOR_ARCHIVE = "596c27fd554266b22424481670cd20c6c428a602f69570df3949873cd8c179df"
 
 
@@ -531,14 +533,30 @@ def _resolve(app, record, recipe: _IdentityRecipe):
         donor_record = _donor_record(app)
         donor = removal._leaf(app.imports, donor_record.imported_directory, r"[0-9a-f]{32}")
         _assert_regular_tree(donor)
+        source_files = {
+            {"custom_assets": "CustomAssets", "user_maps": "UserMaps"}[root["role"]]
+            + "/"
+            + file["path"]: file
+            for root in source_context["roots"]
+            for file in root["files"]
+        }
         for destination_path, donor_path, expected in recipe.additions:
             donor_file = donor / donor_path
             if donor_file.is_symlink() or not donor_file.is_file():
                 raise RuleError("Reviewed Cowhide donor asset is missing: " + donor_path)
             data = _read(donor_file, expected, MAX_PATCHED_FILE_BYTES)
-            additions.append(
-                AssetAddition(destination_path, expected, data, donor_file.stat().st_mtime_ns)
-            )
+            mtime_ns = donor_file.stat().st_mtime_ns
+            existing = source_files.get(destination_path)
+            if existing is not None:
+                if existing["sha256"] != expected or existing["size"] != len(data):
+                    raise RuleError(
+                        "Recipe addition target has different content: " + destination_path
+                    )
+                # Bind the observed target metadata; apply_rules still rejects later drift.
+                mtime_ns = existing["mtime_ns"]
+            elif (source / destination_path).exists() or (source / destination_path).is_symlink():
+                raise RuleError("Recipe addition target is not a regular file: " + destination_path)
+            additions.append(AssetAddition(destination_path, expected, data, mtime_ns))
     if (
         map_file_context(source)["identity"] != source_context["identity"]
         or app._stock_file_context()["identity"] != stock_context["identity"]

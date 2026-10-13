@@ -12,7 +12,7 @@ from unittest.mock import patch
 from smr_launcher import recipe_service
 from smr_launcher.activation import ActivationError
 from smr_launcher.recipe_identity import file_context
-from smr_launcher.rules import RuleError
+from smr_launcher.rules import PRESERVE_RESOURCE_MTIMES, RuleError, apply_rules
 from smr_launcher.variants import assets_manifest_hash
 
 
@@ -458,6 +458,105 @@ class SyntheticRecipeServiceTests(unittest.TestCase):
         self.assertEqual(binding.recipe_id, recipe.recipe_id)
         self.assertEqual(self.fixture_file_facts(), before)
         self.assertFalse((self.root / "prepared").exists())
+
+    def existing_donor_target(self):
+        recipe, donor_record, donor, members = self.donor_fixture()
+        destination, _, _ = recipe.additions[0]
+        target = self.source / destination
+        target.write_bytes(members[0][1])
+        os.utime(target, ns=(1_600_000_000_987_654_321,) * 2)
+        recipe = replace(recipe, assets_sha256=assets_manifest_hash(self.source))
+        return recipe, donor_record, donor, members, target
+
+    def test_existing_donor_target_keeps_own_mtime_and_absent_target_uses_donor(self):
+        recipe, donor_record, donor, members, target = self.existing_donor_target()
+        before = self.fixture_file_facts()
+        with patch.object(
+            recipe_service, "_HILL_COWHIDE_DONOR_ARCHIVE", donor_record.archive_sha256
+        ):
+            rules, _ = self.resolve(recipe)
+        self.assertEqual(self.fixture_file_facts(), before)
+        apply_rules(
+            self.source,
+            self.ARCHIVE,
+            self.GAME,
+            rules,
+            metadata_policy=PRESERVE_RESOURCE_MTIMES,
+        )
+        self.assertEqual(target.read_bytes(), members[0][1])
+        self.assertEqual(target.stat().st_mtime_ns, 1_600_000_000_987_654_321)
+        missing = self.source / recipe.additions[1][0]
+        self.assertEqual(missing.read_bytes(), members[1][1])
+        self.assertEqual(missing.stat().st_mtime_ns, (donor / members[1][0]).stat().st_mtime_ns)
+
+    def test_existing_donor_target_wrong_bytes_or_unsafe_type_refuses(self):
+        recipe, donor_record, _, members, target = self.existing_donor_target()
+        for kind in ("wrong-bytes", "directory", "link", "fifo"):
+            with self.subTest(kind=kind):
+                target.unlink()
+                if kind == "wrong-bytes":
+                    target.write_bytes(b"x" * len(members[0][1]))
+                elif kind == "directory":
+                    target.mkdir()
+                elif kind == "link":
+                    target.symlink_to(self.source / self.INDUSTRY_PATH)
+                else:
+                    os.mkfifo(target)
+                # Wrong bytes are admitted by the inventory only, never the donor contract.
+                candidate = (
+                    replace(recipe, assets_sha256=assets_manifest_hash(self.source))
+                    if kind in ("wrong-bytes", "directory")
+                    else recipe
+                )
+                before = self.fixture_file_facts()
+                try:
+                    with (
+                        patch.object(
+                            recipe_service,
+                            "_HILL_COWHIDE_DONOR_ARCHIVE",
+                            donor_record.archive_sha256,
+                        ),
+                        self.assertRaises((RuleError, ActivationError)),
+                    ):
+                        self.resolve(candidate)
+                    self.assertEqual(self.fixture_file_facts(), before)
+                finally:
+                    if kind == "directory":
+                        target.rmdir()
+                    else:
+                        target.unlink()
+                    target.write_bytes(members[0][1])
+
+    def test_existing_donor_target_mtime_change_during_compilation_refuses(self):
+        recipe, donor_record, _, _, target = self.existing_donor_target()
+        read = recipe_service._read
+
+        def change_target_after_donor_read(path, *args, **kwargs):
+            data = read(path, *args, **kwargs)
+            if path.name == "two.kfm":
+                os.utime(target, ns=(1_600_000_001_987_654_321,) * 2)
+            return data
+
+        with (
+            patch.object(
+                recipe_service, "_HILL_COWHIDE_DONOR_ARCHIVE", donor_record.archive_sha256
+            ),
+            patch.object(recipe_service, "_read", side_effect=change_target_after_donor_read),
+            self.assertRaisesRegex(RuleError, "changed during compilation"),
+        ):
+            self.resolve(recipe)
+        self.assertEqual(target.read_bytes(), b"invented model\0\xff")
+        self.assertEqual(target.stat().st_mtime_ns, 1_600_000_001_987_654_321)
+
+    def test_existing_target_policy_invalidates_previous_compiler_contract(self):
+        current = recipe_service.compiler_contract_digest()
+        with patch.object(
+            recipe_service,
+            "RECIPE_SERVICE_VERSION",
+            "reviewed-stock-absent-city-v3-ownership-exact-bank-v1",
+        ):
+            previous = recipe_service.compiler_contract_digest()
+        self.assertNotEqual(current, previous)
 
     def test_missing_foreign_or_ambiguous_donor_refuses_without_mutation(self):
         recipe, record, _, _ = self.donor_fixture()

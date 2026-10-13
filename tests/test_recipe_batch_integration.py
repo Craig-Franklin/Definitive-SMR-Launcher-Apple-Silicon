@@ -3,6 +3,7 @@
 from dataclasses import asdict, replace
 from io import BytesIO
 import json
+import os
 import tarfile
 import unittest
 from unittest.mock import patch
@@ -209,6 +210,128 @@ class RecipeBatchIntegrationTests(unittest.TestCase):
             profiles_before,
         )
         self.assertEqual(self.preserved(), before)
+        self.assert_no_acceptance()
+
+    def test_existing_and_missing_donor_targets_prepare_preserve_and_reuse(self):
+        existing_path = "UserMaps/Synthetic/one.nif"
+        missing_path = "UserMaps/Synthetic/two.kfm"
+        payloads = (b"invented model\0\xff", b"invented animation\0\xfe")
+        target_mtime, donor_mtime = 1_600_000_000, 1_700_000_000
+        donor_members = {
+            "UserMaps/Donor/one.nif": payloads[0],
+            "UserMaps/Donor/two.kfm": payloads[1],
+        }
+        donor_members["UserMaps/Donor/RRT_Scenario_User_Donor.xml"] = b"<Scenario/>"
+        target_members = self.assets(self.app.imports / self.originals[0].imported_directory)
+        target_members[existing_path] = payloads[0]
+        imported = []
+        for name, members, mtime in (
+            ("donor", donor_members, donor_mtime),
+            ("target", target_members, target_mtime),
+        ):
+            archive = self.fixture.root / (name + ".tar")
+            with tarfile.open(archive, "w") as stream:
+                for path, data in sorted(members.items()):
+                    entry = tarfile.TarInfo(path)
+                    entry.size, entry.mtime = len(data), mtime
+                    stream.addfile(entry, BytesIO(data))
+            record = self.app.import_archive(archive)
+            imported.append(record)
+            self.originals.append(record)
+            self.archives.append(archive)
+            self.seed_saves(record.profile_id, len(self.originals))
+        donor, original = imported
+        # Extraction does not promise archive timestamps; establish independent source facts.
+        for record, members, mtime in (
+            (donor, donor_members, donor_mtime),
+            (original, {existing_path: payloads[0]}, target_mtime),
+        ):
+            for path in members:
+                os.utime(
+                    self.app.imports / record.imported_directory / path, ns=(mtime * 10**9,) * 2
+                )
+        recipe_id = "synthetic-existing-donor-target"
+        recipe = replace(
+            next(iter(self.recipes.values())),
+            recipe_id=recipe_id,
+            archive_sha256=original.archive_sha256,
+            assets_sha256=assets_manifest_hash(self.app.imports / original.imported_directory),
+            additions=tuple(
+                (destination, source, recipe_fixtures.sha(data))
+                for destination, (source, data) in zip(
+                    (existing_path, missing_path), donor_members.items()
+                )
+            ),
+        )
+        self.recipes[recipe_id] = recipe
+        requests = [dict(profile_id=original.profile_id, recipe_id=recipe_id)]
+        before = self.preserved()
+
+        def file_facts(roots):
+            return [
+                {
+                    path.relative_to(root).as_posix(): (path.read_bytes(), path.stat().st_mtime_ns)
+                    for path in root.rglob("*")
+                    if path.is_file()
+                }
+                for root in roots
+            ]
+
+        preserved_roots = [
+            self.app.imports,
+            self.app.originals,
+            self.synthetic.stock,
+            self.fixture.installation.profile_root,
+        ]
+        preserved_roots.extend(
+            self.app.prepared / record.prepared_directory for record in self.originals
+        )
+        preserved_roots.extend(
+            self.app.profiles._profile_path(record.profile_id) for record in self.originals
+        )
+        facts_before = file_facts(preserved_roots)
+        with patch.object(recipe_service, "_HILL_COWHIDE_DONOR_ARCHIVE", donor.archive_sha256):
+            plan = self.app.plan_recipe_batch(requests)
+            self.assertTrue(plan["all_supported"], plan)
+            result = self.app.prepare_recipe_batch(requests)
+            self.assertTrue(result["all_prepared"], result)
+            job = result["jobs"][0]
+            self.assertFalse(job["reused"])
+            edition = MapRecord.from_json(job["edition"])
+            for root in (
+                self.app.prepared / edition.prepared_directory,
+                self.app.profiles._profile_path(edition.profile_id),
+            ):
+                self.assertEqual(
+                    (root / self.synthetic.INDUSTRY_PATH).read_bytes(), EXPECTED_INDUSTRY
+                )
+                for path, data, mtime in (
+                    (existing_path, payloads[0], target_mtime),
+                    (missing_path, payloads[1], donor_mtime),
+                ):
+                    self.assertEqual((root / path).read_bytes(), data)
+                    self.assertEqual((root / path).stat().st_mtime_ns, mtime * 10**9)
+            self.assertEqual(
+                {key: job["binding"][key] for key in plan["jobs"][0]["binding"]},
+                plan["jobs"][0]["binding"],
+            )
+            self.assertEqual(
+                [
+                    (change["path"], change["mtime_ns"])
+                    for change in plan["jobs"][0]["changes"]
+                    if change["kind"] == "addition"
+                ],
+                [(existing_path, target_mtime * 10**9), (missing_path, donor_mtime * 10**9)],
+            )
+            self.seed_saves(edition.profile_id, 20)
+            library_before = file_facts([self.app.library])
+            repeated = self.app.prepare_recipe_batch(requests)
+            self.assertTrue(repeated["all_prepared"], repeated)
+            self.assertTrue(repeated["jobs"][0]["reused"])
+            self.assertEqual(repeated["jobs"][0]["edition"], edition.as_json())
+            self.assertEqual(file_facts([self.app.library]), library_before)
+        self.assertEqual(self.preserved(), before)
+        self.assertEqual(file_facts(preserved_roots), facts_before)
         self.assert_no_acceptance()
 
     def test_later_unknown_recipe_preflight_publishes_no_editions(self):
