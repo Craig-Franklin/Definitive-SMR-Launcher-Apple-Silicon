@@ -1,9 +1,14 @@
 """Synthetic loader distinctions and conservative resolution regression fixtures."""
 
 import importlib.util
+from contextlib import redirect_stdout
+import hashlib
+import io
+import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 import xml.etree.ElementTree as ET
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/research/audit_map_library.py"
@@ -14,6 +19,74 @@ SPEC.loader.exec_module(audit)
 
 def records(text):
     return list(ET.fromstring("<root>" + text + "</root>"))
+
+
+class AuditImageBindingTests(unittest.TestCase):
+    def test_symlink_image_refuses_before_either_registry_extraction(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            image, linked = root / "invented-image", root / "linked-image"
+            image.write_bytes(b"invented bytes")
+            linked.symlink_to(image)
+            with (
+                patch.object(
+                    audit, "discover_installed_library", return_value=(linked, root, root)
+                ),
+                patch.object(audit, "extract_registry") as extract,
+                patch.object(audit.sys, "argv", ["audit", "--installed-library"]),
+                self.assertRaises(audit.AuditError),
+            ):
+                audit.main()
+            extract.assert_not_called()
+
+    def report(self, first, later):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "invented-image"
+            binary.write_bytes(first)
+            stock = root / "stock"
+            stock.mkdir()
+            (root / "catalogue.json").write_text('{"maps": []}')
+            reads = []
+            read_bytes = Path.read_bytes
+
+            def observed_read(path):
+                if path == binary:
+                    reads.append(first if not reads else later)
+                    return reads[-1]
+                return read_bytes(path)
+
+            output = io.StringIO()
+            # Registry semantics and installed discovery are outside this
+            # metadata test. Neither the game nor a real binary is consulted.
+            with (
+                patch.object(
+                    audit, "discover_installed_library", return_value=(binary, root, stock)
+                ),
+                patch.object(audit, "extract_registry", return_value=("Invented",)) as extract,
+                patch.object(audit, "read_executable", side_effect=observed_read),
+                patch.object(Path, "read_bytes", observed_read),
+                patch.object(audit.sys, "argv", ["audit", "--installed-library"]),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(audit.main(), 0)
+            self.assertEqual([call.args[0] for call in extract.call_args_list], [first, first])
+            return json.loads(output.getvalue()), reads
+
+    def test_report_hash_uses_registry_input_without_a_later_image_read(self):
+        first, later = b"invented original image", b"invented later image"
+        report, reads = self.report(first, later)
+        expected = hashlib.sha256(first).hexdigest()
+        self.assertEqual(report["knowledge_use"]["game_sha256"], expected)
+        self.assertEqual(report["game_sha256"], expected)
+        self.assertEqual(reads, [first])
+
+    def test_stable_image_keeps_report_and_consultation_binding(self):
+        image = b"invented stable image"
+        report, _ = self.report(image, image)
+        expected = hashlib.sha256(image).hexdigest()
+        self.assertEqual(report["game_sha256"], expected)
+        self.assertEqual(report["knowledge_use"]["game_sha256"], expected)
 
 
 class MapLibraryAuditTests(unittest.TestCase):

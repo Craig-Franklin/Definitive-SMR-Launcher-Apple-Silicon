@@ -2,10 +2,14 @@
 
 import hashlib
 import importlib.util
+from contextlib import redirect_stderr, redirect_stdout
+import io
+import json
 import os
 from pathlib import Path
 import struct
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -25,6 +29,195 @@ def synthetic_binary():
     data[192:201] = b"FactoryA\0"
     data[208:217] = b"FactoryB\0"
     return bytes(data)
+
+
+class RegistryMainInputTests(unittest.TestCase):
+    def test_unknown_build_still_refuses_after_safe_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            binary = root / "invented-image"
+            binary.write_bytes(synthetic_binary())
+            output, errors = io.StringIO(), io.StringIO()
+            with (
+                patch.object(
+                    audit.sys,
+                    "argv",
+                    ["audit", "--game-binary", str(binary), "--library", str(root)],
+                ),
+                redirect_stdout(output),
+                redirect_stderr(errors),
+            ):
+                self.assertEqual(audit.main(), 2)
+            self.assertEqual(output.getvalue(), "")
+            self.assertIn("Unsupported executable SHA-256", errors.getvalue())
+
+    def test_regular_executable_is_read_once_and_keeps_report_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            binary = root / "invented-image"
+            data = synthetic_binary()
+            binary.write_bytes(data)
+            (root / "catalogue.json").write_text('{"maps": []}')
+            output = io.StringIO()
+            with (
+                patch.object(audit, "read_executable", wraps=audit.read_executable) as read,
+                patch.object(audit, "extract_registry", return_value=("Invented",)) as extract,
+                patch.object(
+                    audit.sys,
+                    "argv",
+                    ["audit", "--game-binary", str(binary), "--library", str(root)],
+                ),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(audit.main(), 0)
+            read.assert_called_once_with(binary)
+            extract.assert_called_once_with(data)
+            report = json.loads(output.getvalue())
+            self.assertEqual(report["game_sha256"], hashlib.sha256(data).hexdigest())
+            self.assertEqual(report["knowledge_use"]["game_sha256"], report["game_sha256"])
+
+    def test_symlink_executable_refuses_before_registry_extraction(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            original, linked = root / "invented-image", root / "linked-image"
+            original.write_bytes(synthetic_binary())
+            linked.symlink_to(original)
+            (root / "catalogue.json").write_text('{"maps": []}')
+            output, errors = io.StringIO(), io.StringIO()
+            with (
+                patch.object(audit, "extract_registry", return_value=("Invented",)) as extract,
+                patch.object(
+                    audit.sys,
+                    "argv",
+                    ["audit", "--game-binary", str(linked), "--library", str(root)],
+                ),
+                redirect_stdout(output),
+                redirect_stderr(errors),
+            ):
+                result = audit.main()
+            self.assertEqual(result, 2)
+            extract.assert_not_called()
+            self.assertEqual(output.getvalue(), "")
+            self.assertIn("Industry audit failed", errors.getvalue())
+
+
+class ExecutableReadTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        self.path = self.root / "invented-image"
+        self.data = b"01234567"
+        self.path.write_bytes(self.data)
+
+    def test_stable_partial_reads_preserve_bytes_and_file_facts(self):
+        before = self.path.stat()
+        read = audit.os.read
+        observed, consumed = [], 0
+
+        def partial(descriptor, count):
+            nonlocal consumed
+            self.assertLessEqual(count, len(self.data) + 1 - consumed)
+            chunk = read(descriptor, min(count, 2))
+            consumed += len(chunk)
+            observed.append(count)
+            return chunk
+
+        with patch.object(audit.os, "read", side_effect=partial):
+            self.assertEqual(audit.read_executable(self.path), self.data)
+        self.assertGreater(len(observed), 1)
+        after = self.path.stat()
+        for name in ("st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns"):
+            self.assertEqual(getattr(before, name), getattr(after, name))
+
+    def test_explicit_limits_and_oversized_metadata_refuse_before_read(self):
+        self.assertEqual(audit.MAX_EXECUTABLE_BYTES, 256 * 1024 * 1024)
+        self.assertEqual(audit.MAX_XML_BYTES, 16 * 1024 * 1024)
+        with patch.object(audit, "MAX_EXECUTABLE_BYTES", len(self.data)):
+            self.assertEqual(audit.read_executable(self.path), self.data)
+        with (
+            patch.object(audit, "MAX_EXECUTABLE_BYTES", len(self.data) - 1),
+            patch.object(audit.os, "read") as read,
+            self.assertRaises(audit.AuditError),
+        ):
+            audit.read_executable(self.path)
+        read.assert_not_called()
+
+    def test_growth_and_short_read_refuse_with_admitted_size_budget(self):
+        requested = []
+
+        def grown(descriptor, count):
+            requested.append(count)
+            return b"g" * count
+
+        with patch.object(audit.os, "read", side_effect=grown), self.assertRaises(audit.AuditError):
+            audit.read_executable(self.path)
+        self.assertEqual(requested, [len(self.data) + 1])
+        read = audit.os.read
+        calls = 0
+
+        def short(descriptor, count):
+            nonlocal calls
+            calls += 1
+            return read(descriptor, min(count, 2)) if calls == 1 else b""
+
+        with patch.object(audit.os, "read", side_effect=short), self.assertRaises(audit.AuditError):
+            audit.read_executable(self.path)
+
+    def test_changed_descriptor_or_path_identity_refuses(self):
+        before = self.path.stat()
+        fields = {
+            name: getattr(before, name)
+            for name in ("st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns")
+        }
+        for name in ("st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns"):
+            changed = SimpleNamespace(**dict(fields, **{name: fields[name] + 1}))
+            with self.subTest(field=name, source="descriptor"):
+                with (
+                    patch.object(audit.os, "fstat", side_effect=(before, changed)),
+                    self.assertRaises(audit.AuditError),
+                ):
+                    audit.read_executable(self.path)
+            with self.subTest(field=name, source="path"):
+                with (
+                    patch.object(audit.os, "stat", return_value=changed),
+                    self.assertRaises(audit.AuditError),
+                ):
+                    audit.read_executable(self.path)
+
+    def test_unsafe_empty_and_missing_inputs_refuse_without_blocking(self):
+        linked, fifo, empty = self.root / "linked", self.root / "fifo", self.root / "empty"
+        linked.symlink_to(self.path)
+        os.mkfifo(fifo)
+        empty.write_bytes(b"")
+        for path in (linked, fifo, empty, self.root, self.root / "missing"):
+            with self.subTest(path=path.name), self.assertRaises(audit.AuditError):
+                audit.read_executable(path)
+        self.assertEqual(self.path.read_bytes(), self.data)
+
+    def test_read_failure_closes_owned_descriptor_and_unavailable_flags_refuse(self):
+        close = audit.os.close
+        with (
+            patch.object(audit.os, "read", side_effect=OSError("invented read failure")),
+            patch.object(audit.os, "close", wraps=close) as closed,
+            self.assertRaises(audit.AuditError),
+        ):
+            audit.read_executable(self.path)
+        closed.assert_called_once()
+        with self.assertRaises(OSError):
+            os.fstat(closed.call_args.args[0])
+        for missing in ("O_NOFOLLOW", "O_NONBLOCK"):
+            flags = {
+                name: getattr(os, name)
+                for name in ("O_RDONLY", "O_NOFOLLOW", "O_NONBLOCK")
+                if name != missing
+            }
+            with (
+                self.subTest(missing=missing),
+                patch.object(audit, "os", SimpleNamespace(**flags)),
+                self.assertRaises(audit.AuditError),
+            ):
+                audit.read_executable(self.path)
 
 
 class RegistryAuditTests(unittest.TestCase):

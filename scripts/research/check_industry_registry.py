@@ -34,6 +34,7 @@ from smr_launcher.industry_registry import (  # noqa: E402
 )
 
 MAX_XML_BYTES = 16 * 1024 * 1024
+MAX_EXECUTABLE_BYTES = 256 * 1024 * 1024
 MAX_TREE_ENTRIES = 100_000
 
 
@@ -43,21 +44,22 @@ def extract_registry(data: bytes, expected_hash: str = GAME_SHA256,
     return _extract_registry(data, expected_hash, address, count)
 
 
-def read_xml(path: Path) -> tuple[ET.Element, str]:
+def _read_regular(path: Path, limit: int, label: str) -> bytes:
+    """Read one bounded regular file; refuse changed descriptor/path identity."""
     flags = os.O_RDONLY
     if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_NONBLOCK"):
-        raise AuditError("Safe no-follow, nonblocking XML reads are unavailable")
+        raise AuditError(f"Safe no-follow, nonblocking {label} reads are unavailable")
     flags |= os.O_NOFOLLOW | os.O_NONBLOCK
     try:
         descriptor = os.open(path, flags)
     except OSError as error:
-        raise AuditError("XML could not be opened as a regular file") from error
+        raise AuditError(f"{label} could not be opened as a regular file") from error
     try:
         before = os.fstat(descriptor)
-        if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_XML_BYTES:
-            raise AuditError("XML must be a regular file of at most 16 MiB")
+        if not stat.S_ISREG(before.st_mode) or not 0 <= before.st_size <= limit:
+            raise AuditError(f"{label} must be a regular file of at most {limit} bytes")
         chunks = []
-        remaining = MAX_XML_BYTES + 1
+        remaining = before.st_size + 1
         while remaining:
             chunk = os.read(descriptor, min(1024 * 1024, remaining))
             if not chunk:
@@ -68,15 +70,27 @@ def read_xml(path: Path) -> tuple[ET.Element, str]:
         after = os.fstat(descriptor)
         current_path = os.stat(path, follow_symlinks=False)
     except OSError as error:
-        raise AuditError("XML changed or could not be read safely") from error
+        raise AuditError(f"{label} changed or could not be read safely") from error
     finally:
         os.close(descriptor)
     identity = lambda item: (item.st_dev, item.st_ino, item.st_mode, item.st_size,
                              item.st_mtime_ns, item.st_ctime_ns)
     if (not stat.S_ISREG(current_path.st_mode) or len(data) != before.st_size
-            or len(data) > MAX_XML_BYTES
+            or len(data) > limit
             or identity(before) != identity(after) or identity(after) != identity(current_path)):
-        raise AuditError("XML changed, had a short read, or is not a regular file")
+        raise AuditError(f"{label} changed, had a short read, or is not a regular file")
+    return data
+
+
+def read_executable(path: Path) -> bytes:
+    data = _read_regular(path, MAX_EXECUTABLE_BYTES, "Executable")
+    if not data:
+        raise AuditError("Executable must be nonempty")
+    return data
+
+
+def read_xml(path: Path) -> tuple[ET.Element, str]:
+    data = _read_regular(path, MAX_XML_BYTES, "XML")
     declarations = data.replace(b"\0", b"").upper()
     if b"<!DOCTYPE" in declarations or b"<!ENTITY" in declarations:
         raise AuditError("DTD/entity declarations are outside this audit's supported XML subset")
@@ -235,9 +249,7 @@ def main() -> int:
     try:
         if args.installed_library:
             args.game_binary, args.library, args.stock_xml = discover_installed_library()
-        if args.game_binary.stat().st_size > 256 * 1024 * 1024:
-            raise AuditError("Executable exceeds the supported audit size")
-        data = args.game_binary.read_bytes()
+        data = read_executable(args.game_binary)
         registry = extract_registry(data)
         results = []
         if args.map_root:

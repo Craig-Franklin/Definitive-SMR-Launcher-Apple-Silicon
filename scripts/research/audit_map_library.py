@@ -20,7 +20,7 @@ import xml.etree.ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from check_industry_registry import (AuditError, discover_installed_library,
-                                     extract_registry, read_xml, xml_files)
+                                     extract_registry, read_executable, read_xml, xml_files)
 from knowledge import annotate_findings, catalog, consultation
 
 ANALYZER_VERSION = "1.2.0-research"
@@ -351,7 +351,7 @@ def main():
     args = parser.parse_args()
     start = time.monotonic()
     binary, library, stock = discover_installed_library()
-    binary_data = binary.read_bytes()
+    binary_data = read_executable(binary)
     registry = extract_registry(binary_data)
     bridge_registry = extract_registry(binary_data, address=0x1018CFE00, count=8)
     scanner = Scanner(stock, registry, bridge_registry)
@@ -379,7 +379,7 @@ def main():
               "registry_reader_sha256": hashlib.sha256(
                   (Path(__file__).resolve().parents[2] / "src/smr_launcher/industry_registry.py").read_bytes()).hexdigest(),
               "created_at": datetime.now(timezone.utc).isoformat(),
-              "game_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+              "game_sha256": hashlib.sha256(binary_data).hexdigest(),
               "elapsed_seconds": round(time.monotonic() - start, 3),
               "summary": {"unique_imports": len(maps), "catalogue_variants": len(catalogue["maps"]),
                           "scenarios": sum(len(r["scenarios"]) for r in maps),
