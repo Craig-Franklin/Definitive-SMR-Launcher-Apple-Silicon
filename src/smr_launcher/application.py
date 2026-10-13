@@ -491,6 +491,10 @@ class LauncherApplication:
         return root, stock, binding
 
     def _write_import_checks(self, record: MapRecord) -> dict:
+        if record.game_executable_sha256 != self.installation.executable_sha256:
+            raise ApplicationError(
+                "Import checks require a map prepared for the current game build"
+            )
         root, stock, binding = self._import_check_inputs(record)
         report = inspect_map(root, stock)
         report.update(
