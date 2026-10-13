@@ -10,7 +10,7 @@ from .model_checks import inspect_models
 MAX_XML_BYTES = 8 * 1024 * 1024
 MAX_TOTAL_XML = 64 * 1024 * 1024
 MAX_XML_FILES = 1000
-IMPORT_CHECKS_VERSION = "loose-xml-and-model-headers-v2"
+IMPORT_CHECKS_VERSION = "loose-xml-and-model-headers-v3"
 
 
 def inspect_map(root: Path, stock_names: set[str] | None = None) -> dict:
@@ -22,29 +22,41 @@ def inspect_map(root: Path, stock_names: set[str] | None = None) -> dict:
     warnings = []
     checked = 0
     total = 0
+    examined = 0
+    incomplete_reasons = []
     for path in files:
         if path.suffix.casefold() != ".xml":
             continue
         relative = path.relative_to(root).as_posix()
         size = path.stat().st_size
         if checked >= MAX_XML_FILES or total + size > MAX_TOTAL_XML:
+            if checked >= MAX_XML_FILES:
+                incomplete_reasons.append("xml_file_limit")
+            if total + size > MAX_TOTAL_XML:
+                incomplete_reasons.append("xml_total_bytes_limit")
             warnings.append("XML scan limit reached; remaining files were not checked.")
             break
         if size > MAX_XML_BYTES:
+            incomplete_reasons.append("xml_size_limit")
             warnings.append(relative + ": XML exceeds the scan size limit.")
             continue
         checked += 1
         total += size
-        data = path.read_bytes()
+        with path.open("rb") as stream:
+            data = stream.read(size + 1)
+        if len(data) != size:
+            raise OSError("XML file size changed during inspection: " + relative)
         if (
             b"<!DOCTYPE" in data.replace(b"\0", b"").upper()
             or b"<!ENTITY" in data.replace(b"\0", b"").upper()
         ):
+            incomplete_reasons.append("xml_declaration_refused")
             warnings.append(relative + ": XML declarations require manual inspection.")
             continue
         try:
             document = ET.fromstring(data)
         except (ET.ParseError, ValueError) as exc:
+            incomplete_reasons.append("xml_parse_failed")
             warnings.append(relative + ": XML could not be parsed (" + str(exc)[:120] + ").")
             continue
         for node in document.iter():
@@ -64,8 +76,10 @@ def inspect_map(root: Path, stock_names: set[str] | None = None) -> dict:
                     )
                     warnings.append(relative + ": " + value + " — " + detail + ".")
         if len(warnings) >= 200:
+            incomplete_reasons.append("xml_finding_limit")
             warnings = warnings[:200] + ["Further findings omitted; inspect the package manually."]
             break
+        examined += 1
     models = inspect_models(root)
     for finding in models["findings"][:200]:
         detail = (
@@ -83,6 +97,13 @@ def inspect_map(root: Path, stock_names: set[str] | None = None) -> dict:
     return dict(
         schema=1,
         xml_files_checked=checked,
+        xml_scan=dict(
+            complete=not incomplete_reasons,
+            files_discovered=sum(p.suffix.casefold() == ".xml" for p in files),
+            files_examined=examined,
+            incomplete_reasons=list(dict.fromkeys(incomplete_reasons)),
+            scope="Complete means all discovered loose XML examined successfully within the existing scan limits only; native dependency resolution, compatibility and gameplay remain unknown.",
+        ),
         model_headers=models,
         warnings=list(dict.fromkeys(warnings)),
         limitations="Static checks do not run the game, inspect packed FPK contents, or prove loading, train/bridge behavior, performance or save/reload reliability.",

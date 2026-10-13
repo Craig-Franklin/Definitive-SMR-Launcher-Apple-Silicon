@@ -87,12 +87,33 @@ def _checks_text(report):
     if report is None:
         return "No current static report. Choose Run Import Checks. Gameplay remains unverified until a Mac play test is recorded."
     findings = report["warnings"]
+    xml_scan = report.get("xml_scan", {})
+    models = report.get("model_headers", {})
+    xml_status = {True: "complete", False: "incomplete"}.get(xml_scan.get("complete"), "unknown")
+    model_status = {True: "complete", False: "incomplete"}.get(models.get("complete"), "unknown")
+    coverage = (
+        f"Loose XML scan coverage: {xml_status}.\n"
+        "Complete means all discovered loose XML examined successfully within scan limits.\n"
+    )
+    if xml_scan:
+        coverage += f"XML files successfully examined: {xml_scan['files_examined']} / {xml_scan['files_discovered']}\n"
+        if xml_scan.get("incomplete_reasons"):
+            coverage += "XML scan gaps: " + ", ".join(xml_scan["incomplete_reasons"]) + "\n"
+    coverage += f"Model header coverage: {model_status} (loose headers only).\n"
+    coverage += (
+        "Native dependency resolution: unknown; packed assets and resource precedence are unverified.\n"
+        "Game compatibility and gameplay remain unverified.\n"
+    )
+    if report.get("input_scope"):
+        coverage += "Input scope: " + report["input_scope"] + "\n"
     return (
-        f"Checked: {report['checked_at']}\nXML files inspected: {report['xml_files_checked']}\n\n"
+        f"Checked: {report['checked_at']}\nXML files attempted (includes refused or unparsed files): {report['xml_files_checked']}\n"
+        + coverage
+        + "\n"
         + (
             "Potential problems to inspect:\n\n" + "\n\n".join(findings)
             if findings
-            else "No problems found by these static checks."
+            else "No findings reported by the implemented static checks; see coverage above."
         )
         + "\n\n"
         + report["limitations"]
