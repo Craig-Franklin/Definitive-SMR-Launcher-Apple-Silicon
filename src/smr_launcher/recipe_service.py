@@ -15,6 +15,7 @@ from pathlib import Path
 import stat
 
 from . import bank_model
+from .bank_applicability import assess_bank_applicability, compile_bank_patch
 from .activation import _assert_no_symlink_ancestor, _assert_regular_tree
 from .compatibility_recipes import COMPILER_VERSION, IdentityEdit, _parse, compile_identity_patch
 from .industry_registry import extract_supported_industry_registry
@@ -25,7 +26,6 @@ from .rules import (
     PRESERVE_RESOURCE_MTIMES,
     CompatibilityRule,
     RuleError,
-    TokenPatch,
 )
 from . import removal
 from .variants import assets_manifest_hash
@@ -363,6 +363,65 @@ def resolve_bundled_recipe(app, record, recipe_id: str):
     return _resolve(app, record, _RECIPES[recipe_id])
 
 
+def inspect_bank_candidate(app, record, *, scenario_path: str, industry_path: str, model_path: str):
+    """Read a source-only family assessment under the caller's application lock.
+
+    This never offers or resolves a new recipe. It verifies the declared archive
+    and current executable, measures complete map/stock contexts and rechecks
+    them after bounded reads. Provider selection and full-map eligibility remain
+    unknown even when the source predicate matches.
+    """
+    if (
+        scenario_path not in record.scenarios
+        or record.game_executable_sha256 != app.installation.executable_sha256
+    ):
+        raise RuleError("Bank candidate scenario or recorded build differs")
+    archive = removal._leaf(app.originals, record.archive_sha256 + ".7z", r"[0-9a-f]{64}\.7z")
+    _read(archive, record.archive_sha256, MAX_ARCHIVE_BYTES, retain=False)
+    _read(
+        app.installation.executable,
+        app.installation.executable_sha256,
+        512 * 1024 * 1024,
+        retain=False,
+    )
+    source = removal._leaf(app.imports, record.imported_directory, r"[0-9a-f]{32}")
+    source_context, stock_context = map_file_context(source), app._stock_file_context()
+    files = {
+        {"user_maps": "UserMaps", "custom_assets": "CustomAssets"}[root["role"]]
+        + "/"
+        + file["path"]: file
+        for root in source_context["roots"]
+        for file in root["files"]
+    }
+    data = []
+    for path, limit in (
+        (scenario_path, 1024 * 1024),
+        (industry_path, 1024 * 1024),
+        (model_path, bank_model.SOURCE_SIZE),
+    ):
+        if path not in files:
+            raise RuleError("Bank candidate input is absent from source context")
+        data.append(_read(source / path, files[path]["sha256"], limit))
+    assessment = assess_bank_applicability(
+        archive_sha256=record.archive_sha256,
+        game_sha256=app.installation.executable_sha256,
+        source_context=source_context,
+        stock_context=stock_context,
+        scenario_path=scenario_path,
+        scenario_data=data[0],
+        industry_path=industry_path,
+        industry_data=data[1],
+        model_path=model_path,
+        model_data=data[2],
+    )
+    if (
+        map_file_context(source)["identity"] != source_context["identity"]
+        or app._stock_file_context()["identity"] != stock_context["identity"]
+    ):
+        raise RuleError("Bank candidate resource context changed during inspection")
+    return assessment
+
+
 def _resolve(app, record, recipe: _IdentityRecipe):
     if (
         record.archive_sha256 != recipe.archive_sha256
@@ -515,19 +574,7 @@ def _resolve(app, record, recipe: _IdentityRecipe):
         original = _read(
             source / recipe.legacy_bank_path, bank_model.SOURCE_SHA256, bank_model.SOURCE_SIZE
         )
-        try:
-            converted = bank_model.convert_legacy_bank(original)
-        except ValueError as exc:
-            raise RuleError("Recipe bank conversion refused") from exc
-        patches.append(
-            TokenPatch(
-                recipe.legacy_bank_path,
-                bank_model.SOURCE_SHA256,
-                bank_model.OUTPUT_SHA256,
-                original,
-                converted,
-            )
-        )
+        patches.append(compile_bank_patch(path=recipe.legacy_bank_path, data=original))
     additions = []
     if recipe.additions:
         donor_record = _donor_record(app)

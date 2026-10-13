@@ -383,17 +383,33 @@ game identities match. No unreviewed name substitution runs during ordinary Play
 
 ### Compiled recipe service (experimental API)
 
-The dormant bank converter can use the existing full-file `TokenPatch` path;
+The exact bank converter uses the existing full-file `TokenPatch` path;
 it does not require a separate writer or preparation mechanism. Invented bank
 fixtures exercise that path against independently encoded complete target bytes,
 including color/property-order variants, unrelated-file and original preservation,
 resource mtimes, preparation context and idempotence. Foreign archive/build
 declarations, changed preimages, wrong output hashes and linked targets refuse.
-These are mechanical source checks. No bundled bank recipe or activation is
-enabled; the converter's production input/output digest seals remain intact.
+These are mechanical source checks. They do not enable another bundled recipe
+or activation; the converter's production input/output digest seals remain intact.
 They do not establish a selected resource provider, collision/render equivalence,
 full-map feature preservation or gameplay/save acceptance. Track those in
 [#188](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/188).
+
+`recipe_service.inspect_bank_candidate` provides a read-only assessment for the
+`exact-legacy-bank-v1` family under the application's existing lock. It verifies
+the declared archive and executable, binds complete map and stock file contexts,
+and checks an exact scenario, industry reference and sealed bank input. Changed
+bytes/builds and unsupported references refuse or exclude the candidate;
+ambiguous loose providers, packed providers and case differences retain unknowns.
+The assessment never offers a new recipe or grants preparation/runtime authority.
+Even a source candidate retains unresolved native provider selection, complete
+scenario/dependency semantics and rendering, collision, gameplay and save/reopen
+coverage. The existing exact recipe reuses `bank_applicability.compile_bank_patch`
+after its own admission checks; pure conversion remains cached by content and
+contract, while applicability binds each supplied context. Existing editions and
+their saves are preserved. Full-map qualification and per-scenario runtime
+verification remain separate work in [#13](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/13)
+and [#189](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/189).
 
 `compatibility_recipes.compile_identity_patch` constructs an exact full-file
 patch in memory from the user's XML and reviewed typed operations. It edits
