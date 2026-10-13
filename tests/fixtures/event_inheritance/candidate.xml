@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<RRTEvents><!-- untouched <Effects>decoy</Effects> -->
+<Event><szTitle>EventAlpha</szTitle><szHeadline>HeadlineAlpha</szHeadline><Note>Alpha unchanged</Note></Event>
+<Event><szTitle>EventBeta</szTitle><Note>Beta unchanged</Note></Event>
+<Event><szTitle>EventGamma</szTitle></Event>
+<Event><szTitle>UnselectedDelta</szTitle><Effects><EventEffect><szType>Stock</szType><fModifierMin>7.25</fModifierMin><fModifierMax>8.50</fModifierMax></EventEffect></Effects></Event>
+</RRTEvents>

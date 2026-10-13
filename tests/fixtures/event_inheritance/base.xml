@@ -1,0 +1,7 @@
+<RRTEvents><Event><szTitle>EventGamma</szTitle><Effects>
+<EventEffect><szType>Stock</szType><fModifierMin>5.25</fModifierMin><fModifierMax>6.50</fModifierMax></EventEffect>
+</Effects></Event><Event><szTitle>EventAlpha</szTitle><Effects>
+<EventEffect><szType>Stock</szType><fModifierMin>1.25</fModifierMin><fModifierMax>2.50</fModifierMax></EventEffect>
+</Effects></Event><Event><szTitle>EventBeta</szTitle><Effects>
+<EventEffect><szType>Stock</szType><fModifierMin>3.25</fModifierMin><fModifierMax>4.50</fModifierMax></EventEffect>
+</Effects></Event></RRTEvents>

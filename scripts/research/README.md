@@ -10,6 +10,26 @@ Both auditors accept `--corpus-root /absolute/private/corpus` and attach catalog
 rule and evidence status. Without it they report private knowledge as unavailable.
 Their raw JSON still stays private; broader inherited models retain partial status.
 
+## Exact event candidate comparison
+
+`check_event_inheritance_candidate.py` checks three frozen XML copies with
+independently supplied complete SHA-256 values. Pass `--original`, `--base` and
+`--candidate` paths, their corresponding `--original-sha256`, `--base-sha256` and
+`--candidate-sha256` values, and one `--event-title` per selected event. Use private
+copies, not live resources or saves; redirect both streams to private files.
+
+The supported subset has unique direct `RRTEvents/Event` titles and one literal
+Stock effect with the ordered `szType`, `fModifierMin` and `fModifierMax` fields.
+Selected source/base values must match exactly; whitespace-only container
+formatting may differ. The complete candidate must equal the original minus only
+the selected Effects elements, preserving every other byte. Ambiguous or unsupported
+forms refuse. The checker never writes or generates a candidate, selects native
+providers or enables a recipe. A match proves bytes only; native inheritance,
+feature preservation, crash repair, gameplay and save behavior remain unknown.
+
+Run its invented literal-fixture checks with
+`.venv/bin/python -m unittest discover -s tests -p test_event_inheritance_candidate.py -v`.
+
 ## Broader per-scenario audit
 
 `audit_map_library.py` extends the narrow identity screen with reconstructed
