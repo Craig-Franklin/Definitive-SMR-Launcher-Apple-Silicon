@@ -62,7 +62,7 @@ class CrashEvidenceTests(unittest.TestCase):
             (
                 "offset",
                 lambda p: p["diagnostics"]["threads"]["items"][1]["frames"]["items"][0].update(
-                    offset=257
+                    offset=257, address=4353
                 ),
             ),
         ]

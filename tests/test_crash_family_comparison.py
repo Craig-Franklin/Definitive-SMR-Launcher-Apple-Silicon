@@ -59,9 +59,12 @@ class CrashFamilyComparisonTests(unittest.TestCase):
     def test_changed_build_and_stack_separate_candidates(self):
         first, build, stack = incident(), incident("2", "c"), incident("3", "d")
         build["game_executable_sha256"] = "e" * 64
-        stack["diagnostics"]["threads"]["items"][1]["frames"]["items"][0]["offset"] = 300
+        stack["diagnostics"]["threads"]["items"][1]["frames"]["items"][0].update(
+            offset=300, address=4396
+        )
         result = crash_evidence.compare_crash_evidence([first, build, stack])
         self.assertEqual(len(result["families"]), 3)
+        self.assertEqual(result["unclassified"], [])
         self.assertFalse(any(f["cross_archive_match"] for f in result["families"]))
 
     def test_legacy_and_incomplete_evidence_stay_unclassified(self):

@@ -59,6 +59,18 @@ def summarize_crash_evidence(payload):
     supported = []
     for frame in frames["items"]:
         image = images.get(frame["image_index"])
+        # Absolute addresses stay out of the hash; contradictory mappings cannot support it.
+        address_conflict = False
+        if image is not None and image["base"] is not None and frame["offset"] is not None:
+            expected_address = image["base"] + frame["offset"]
+            address_conflict = expected_address >= 1 << 64 or (
+                frame["address"] is not None and frame["address"] != expected_address
+            )
+        if address_conflict:
+            if image["role"] == "game":
+                limits.append("game_frame_address_conflict")
+            elif "non_game_frame_address_conflict" not in gaps:
+                gaps.append("non_game_frame_address_conflict")
         valid = (
             image is not None
             and image["uuid"] not in (None, "00000000-0000-0000-0000-000000000000")
@@ -66,6 +78,7 @@ def summarize_crash_evidence(payload):
             and frame["offset"] is not None
             and image["size"] is not None
             and frame["offset"] < image["size"]
+            and not address_conflict
         )
         if frame["index"] == 0 and not valid:
             limits.append("fault_pc_unresolved")
