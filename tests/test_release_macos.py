@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import traceback
 import unittest
 from unittest.mock import patch
 
@@ -34,6 +35,68 @@ def assets(version="0.3.6"):
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_api_success_preserves_json_and_exact_read_command(self):
+        result = subprocess.CompletedProcess([], 0, '{"value": [1, true]}', "")
+        with patch.object(release.subprocess, "run", return_value=result) as run:
+            self.assertEqual(release.api(""), {"value": [1, True]})
+        run.assert_called_once_with(
+            ["gh", "api", "repos/" + release.REPO], capture_output=True, text=True
+        )
+
+    def test_api_only_optional_unambiguous_http_404_is_absence(self):
+        result = subprocess.CompletedProcess([], 1, "synthetic body", "gh: Not Found (HTTP 404)")
+        with patch.object(release.subprocess, "run", return_value=result) as run:
+            self.assertIsNone(release.api("git/ref/tags/v0.1.0", optional=True))
+            with self.assertRaisesRegex(RuntimeError, r"cli_exit=1, http_status=404"):
+                release.api("git/ref/tags/v0.1.0")
+        self.assertEqual(run.call_count, 2)
+
+    def test_api_http_and_unknown_failures_report_only_bounded_numeric_facts(self):
+        secret = "synthetic-credential-DO-NOT-PRINT"
+        stdout = '{"private": "' + secret + '"}'
+        for code, marker, status in (
+            (1, "HTTP 403", "403"),
+            (1, "HTTP 429", "429"),
+            (1, "HTTP 502", "502"),
+            (4, "transport cause unknown", "unknown"),
+            (-9, "", "unknown"),
+        ):
+            with self.subTest(code=code, marker=marker):
+                stderr = marker + "\nAuthorization: Bearer " + secret + " café\n"
+                result = subprocess.CompletedProcess([], code, stdout, stderr)
+                with patch.object(release.subprocess, "run", return_value=result) as run:
+                    with self.assertRaises(RuntimeError) as caught:
+                        release.api("tags", optional=True)
+                self.assertEqual(
+                    str(caught.exception),
+                    f"GitHub read failed: tags (cli_exit={code}, http_status={status}, "
+                    f"stdout_bytes={len(stdout.encode('utf-8'))}, "
+                    f"stderr_bytes={len(stderr.encode('utf-8'))})",
+                )
+                self.assertNotIn(secret, "".join(traceback.format_exception(caught.exception)))
+                run.assert_called_once()
+
+    def test_api_nonexact_or_conflicting_status_never_becomes_optional_absence(self):
+        for stderr in ("HTTP 4040", "HTTP 404 HTTP 500", "HTTP 404suffix", "no status"):
+            with self.subTest(stderr=stderr):
+                result = subprocess.CompletedProcess([], 1, "", stderr)
+                with patch.object(release.subprocess, "run", return_value=result):
+                    with self.assertRaisesRegex(RuntimeError, "http_status=unknown"):
+                        release.api("tags", optional=True)
+
+    def test_api_invalid_success_json_is_sanitized_and_never_optional_absence(self):
+        secret = "synthetic-private-response-DO-NOT-PRINT"
+        for stdout in ("", '{"private":"' + secret, secret):
+            with self.subTest(stdout=stdout):
+                result = subprocess.CompletedProcess([], 0, stdout, "HTTP 404 " + secret)
+                with patch.object(release.subprocess, "run", return_value=result) as run:
+                    with self.assertRaisesRegex(RuntimeError, "Invalid GitHub JSON") as caught:
+                        release.api("tags", optional=True)
+                self.assertIn("cli_exit=0", str(caught.exception))
+                self.assertNotIn(secret, "".join(traceback.format_exception(caught.exception)))
+                self.assertTrue(caught.exception.__suppress_context__)
+                run.assert_called_once()
+
     def test_dmg_release_requires_both_archives_and_matching_checksums(self):
         value = assets()
         dmg = release.asset_name("0.3.6").removesuffix(".zip") + ".dmg"

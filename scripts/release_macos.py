@@ -39,11 +39,22 @@ def api(path: str, *, optional: bool = False):
     result = subprocess.run(
         ["gh", "api", f"repos/{REPO}/{path}".rstrip("/")], capture_output=True, text=True
     )
+    # Expose only numeric CLI facts; stderr and response bodies may contain secrets.
+    statuses = set(re.findall(r"\bHTTP ([1-5][0-9]{2})\b", result.stderr))
+    status = statuses.pop() if len(statuses) == 1 else "unknown"
+    details = (
+        f" (cli_exit={result.returncode}, http_status={status}, "
+        f"stdout_bytes={len(result.stdout.encode('utf-8'))}, "
+        f"stderr_bytes={len(result.stderr.encode('utf-8'))})"
+    )
     if result.returncode:
-        if optional and "HTTP 404" in result.stderr:
+        if optional and status == "404":
             return None
-        raise RuntimeError("GitHub read failed: " + path)
-    return json.loads(result.stdout)
+        raise RuntimeError("GitHub read failed: " + path + details)
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        raise RuntimeError("Invalid GitHub JSON: " + path + details) from None
 
 
 def guard() -> str:
