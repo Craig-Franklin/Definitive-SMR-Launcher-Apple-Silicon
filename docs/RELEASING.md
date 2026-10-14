@@ -35,6 +35,24 @@ Liquid Glass APIs are guarded for macOS 26 and later. This
 development build is not notarized. Use the published release for automatic
 updates.
 
+## Publish the latest main commit manually
+
+Open **Actions → Mac app → Run workflow**, select **main**, then run it.
+The equivalent command is:
+
+```sh
+gh workflow run macos-app.yml --repo Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon --ref main
+```
+
+This runs the checks, signed/notarized build and publication for the triggering
+main commit even when its unreleased changes are documentation or tooling only.
+Conventional app changes still determine the highest version bump; otherwise a
+manual release increments the patch version. An already published source is
+verified and skipped without replacing its artifacts. Other branches cannot
+release. If main advances before preparation or publication, the manual run
+refuses the stale source; run the workflow again for the new main commit.
+Existing version reservations, serialization, signing and publication checks apply.
+
 ## Automatic releases
 
 The Mac workflow selects checks from the actual changes. Code changes run the

@@ -17,6 +17,7 @@ from change_policy import (
     path_impact,
     verification_plan,
 )
+from check_quality import baseline_errors
 import release_macos as release
 from release_policy import ReleasePoint, plan_release
 
@@ -179,6 +180,37 @@ class GitImpactTests(unittest.TestCase):
         broken = self.commit("chore: malformed metadata", {"pyproject.toml": "[broken"})
         with self.assertRaises(ValueError):
             changed_impact(self.base, broken, self.git)
+
+    def test_dispatch_checks_triggering_commit_without_push_payload(self):
+        head = self.commit("docs: latest", {"README.md": "Latest\n"})
+        self.assertEqual(
+            event_range({}, "workflow_dispatch", head, self.git),
+            (self.base, head),
+        )
+        with self.assertRaises(ValueError):
+            event_range({}, "workflow_dispatch", "f" * 40, self.git)
+        plan = verification_plan(Impact(), True)
+        self.assertTrue(plan["quality"])
+        self.assertTrue(plan["tests"])
+        self.assertTrue(plan["release"])
+        self.assertFalse(plan["build"])
+
+    def test_dispatch_rejects_new_format_exemptions_like_push(self):
+        before = self.commit("chore: baseline", {".ruff-format-baseline": "# Empty\n"})
+        head = self.commit(
+            "chore: forbidden exemption",
+            {
+                "scripts/new.py": "value = 1\n",
+                ".ruff-format-baseline": "scripts/new.py\n",
+            },
+        )
+        base, _ = event_range({}, "workflow_dispatch", head, self.git)
+        self.assertEqual(base, before)
+        self.assertEqual(
+            baseline_errors(base, {"scripts/new.py"}, self.root),
+            ["New formatting exemptions are forbidden: scripts/new.py"],
+        )
+        self.assertEqual(baseline_errors(base, set(), self.root), [])
 
     def test_event_base_and_checkout_are_verified(self):
         head = self.commit("docs: change", {"README.md": "Two\n"})

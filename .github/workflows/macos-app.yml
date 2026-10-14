@@ -1,6 +1,7 @@
 name: Mac app
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
@@ -11,7 +12,9 @@ permissions:
 
 jobs:
   plan:
-    if: github.repository == 'Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon'
+    if: >-
+      github.repository == 'Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon'
+      && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')
     runs-on: ubuntu-24.04
     outputs:
       quality: ${{ steps.checks.outputs.quality }}
@@ -25,7 +28,7 @@ jobs:
           fetch-depth: 0
       - name: Plan release without stamping or building
         id: release
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
           SMR_RESERVED_VERSIONS: 0.3.7,0.3.8
@@ -102,7 +105,8 @@ jobs:
       ${{ !cancelled() && needs.plan.result == 'success' && needs.checks.result == 'success'
           && needs.plan.outputs.release == 'true'
           && github.repository == 'Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon'
-          && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+          && github.ref == 'refs/heads/main' }}
     needs: [plan, checks]
     runs-on: macos-26
     concurrency:

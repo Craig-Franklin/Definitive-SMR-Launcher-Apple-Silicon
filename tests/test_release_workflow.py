@@ -16,7 +16,11 @@ class ReleaseWorkflowTests(unittest.TestCase):
         if condition.startswith(">"):
             condition = " ".join(condition.splitlines()[1:]).strip()
         condition = condition.removeprefix("${{").removesuffix("}}").strip()
-        expression = condition.replace("&&", " and ").replace("!cancelled()", "not cancelled()")
+        expression = (
+            condition.replace("&&", " and ")
+            .replace("||", " or ")
+            .replace("!cancelled()", "not cancelled()")
+        )
         defaults = dict(
             cancelled=False,
             plan="success",
@@ -37,6 +41,11 @@ class ReleaseWorkflowTests(unittest.TestCase):
             ("ref", ["refs/heads/topic", "refs/tags/v0.14.0"]),
         ):
             cases.extend((f"{key}={value}", {key: value}, False) for value in values)
+        cases += [
+            ("manual " + name, dict(changes, event="workflow_dispatch"), expected)
+            for name, changes, expected in cases
+            if "event" not in changes
+        ]
         for name, changes, expected in cases:
             with self.subTest(name=name):
                 values = dict(defaults, **changes)

@@ -150,7 +150,10 @@ def event_range(event, event_name, head, read=git):
         raise ValueError("Invalid triggering commit")
     if read("rev-parse", "HEAD").strip() != head:
         raise ValueError("Checkout differs from the triggering commit")
-    if event_name == "push":
+    if event_name == "workflow_dispatch":
+        # Compare against actual history so quality cannot self-approve new exemptions.
+        base = read("rev-parse", "--verify", f"{head}^1").strip()
+    elif event_name == "push":
         base = event["before"]
     elif event_name == "pull_request":
         base = event["pull_request"]["base"]["sha"]

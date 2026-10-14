@@ -83,6 +83,7 @@ def plan_release(
     is_ancestor: Callable[[str, str], bool],
     *,
     initial_version: str = "0.0.0",
+    manual: bool = False,
 ) -> ReleasePlan:
     """Select the highest bump since the newest published ancestral release.
 
@@ -116,6 +117,9 @@ def plan_release(
     base_sha = baseline.sha if baseline else ""
     commits = tuple(commits_since(base_sha, head))
     bump = max((commit.bump for commit in commits), key=lambda value: _ORDER[value], default="")
+    manual_patch = manual and not bump
+    if manual_patch:
+        bump = "patch"
     if not bump:
         return ReleasePlan(
             False,
@@ -143,7 +147,7 @@ def plan_release(
     return ReleasePlan(
         True,
         candidate,
-        "Conventional Commit " + bump + " release",
+        "Manual patch release" if manual_patch else "Conventional Commit " + bump + " release",
         base_version,
         base_sha,
         bump,

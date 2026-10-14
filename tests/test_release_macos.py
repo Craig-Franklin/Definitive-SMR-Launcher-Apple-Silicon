@@ -183,6 +183,92 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(calls, [("base", "head")])
         self.assertEqual(plan.commits, commits)
 
+    def test_manual_release_patch_and_existing_version_rules(self):
+        baseline = [ReleasePoint("0.3.8", "base")]
+        for subject, version in [("docs: update guide", "0.3.10"), ("feat: add view", "0.4.0")]:
+            plan = plan_release(
+                "head",
+                baseline,
+                {"0.3.9": None},
+                lambda *_: (Commit("a" * 40, subject),),
+                lambda *_: True,
+                manual=True,
+            )
+            self.assertTrue(plan.required)
+            self.assertEqual(plan.version, version)
+        existing = plan_release(
+            "head",
+            [ReleasePoint("0.3.8", "head")],
+            {},
+            lambda *_: self.fail("published source must not read history"),
+            lambda *_: True,
+            manual=True,
+        )
+        self.assertFalse(existing.required)
+        self.assertTrue(existing.published)
+        pending = plan_release(
+            "head",
+            baseline,
+            {"0.3.9": "head"},
+            lambda *_: (),
+            lambda *_: True,
+            manual=True,
+        )
+        self.assertEqual(pending.version, "0.3.9")
+
+    def test_manual_guard_requires_main_latest_and_verified_source(self):
+        sha = "a" * 40
+        repo = {
+            "id": release.REPO_ID,
+            "full_name": release.REPO,
+            "html_url": "https://github.com/" + release.REPO,
+            "owner": {"login": "Craig-Franklin", "type": "User"},
+            "parent": {"id": 950948787},
+        }
+        for event, ref, latest, verified, allowed in [
+            ("workflow_dispatch", "refs/heads/main", sha, True, True),
+            ("workflow_dispatch", "refs/heads/other", sha, True, False),
+            ("workflow_dispatch", "refs/tags/v1", sha, True, False),
+            ("pull_request", "refs/heads/main", sha, True, False),
+            ("workflow_dispatch", "refs/heads/main", "b" * 40, True, False),
+            ("workflow_dispatch", "refs/heads/main", sha, False, False),
+            ("push", "refs/heads/main", "b" * 40, True, True),
+        ]:
+
+            def read(*args):
+                if args == ("git", "remote"):
+                    return "origin"
+                if args[:3] == ("git", "remote", "get-url"):
+                    return "https://github.com/" + release.REPO + ".git"
+                return latest if args[-1] == "origin/main" else sha
+
+            with (
+                self.subTest(event=event, ref=ref, latest=latest, verified=verified),
+                patch.dict(
+                    os.environ,
+                    GITHUB_REPOSITORY=release.REPO,
+                    GITHUB_EVENT_NAME=event,
+                    GITHUB_REF=ref,
+                    GITHUB_SHA=sha,
+                ),
+                patch.object(release, "output", side_effect=read),
+                patch.object(release.subprocess, "run"),
+                patch.object(
+                    release,
+                    "api",
+                    side_effect=lambda path: (
+                        repo
+                        if not path
+                        else {"sha": sha, "commit": {"verification": {"verified": verified}}}
+                    ),
+                ),
+            ):
+                if allowed:
+                    self.assertEqual(release.guard(), sha)
+                else:
+                    with self.assertRaises(RuntimeError):
+                        release.guard()
+
     def test_docs_tests_chores_and_empty_push_skip_without_stamping(self):
         for messages in ((), ("docs: update guide", "test: add fixture", "chore: bump tool")):
             plan = plan_release(

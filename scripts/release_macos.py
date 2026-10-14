@@ -61,10 +61,10 @@ def guard() -> str:
     """Recheck identity, source and remotes before each GitHub mutation."""
     if (
         os.environ.get("GITHUB_REPOSITORY") != REPO
-        or os.environ.get("GITHUB_EVENT_NAME") != "push"
+        or os.environ.get("GITHUB_EVENT_NAME") not in {"push", "workflow_dispatch"}
         or os.environ.get("GITHUB_REF") != "refs/heads/main"
     ):
-        raise RuntimeError("Releases require a main push in the personal fork")
+        raise RuntimeError("Releases require a main push or manual dispatch in the personal fork")
     if output("git", "remote") != "origin":
         raise RuntimeError("Unexpected CI checkout remotes")
     for flags in ((), ("--push",)):
@@ -84,6 +84,11 @@ def guard() -> str:
         raise RuntimeError("Checkout differs from the triggering commit")
     subprocess.run(["git", "fetch", "origin", "main"], check=True)
     subprocess.run(["git", "merge-base", "--is-ancestor", sha, "origin/main"], check=True)
+    if (
+        os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+        and output("git", "rev-parse", "origin/main") != sha
+    ):
+        raise RuntimeError("Manual release source is no longer the latest main commit; run again")
     commit = api("commits/" + sha)
     if commit["sha"] != sha or commit["commit"]["verification"]["verified"] is not True:
         raise RuntimeError("Source commit is not GitHub Verified")
@@ -283,7 +288,13 @@ def prepare(*, write_files: bool = True) -> None:
     published, reservations = release_history()
     base = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
     plan = plan_release(
-        sha, published, reservations, commits_since, is_ancestor, initial_version=base
+        sha,
+        published,
+        reservations,
+        commits_since,
+        is_ancestor,
+        initial_version=base,
+        manual=os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch",
     )
     version = plan.version
     tag = "v" + version if version else ""
