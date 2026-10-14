@@ -146,6 +146,61 @@ For unfinished work, leave revision/state, completed work/evidence, remaining wo
 blocker, next action and critical constraints. Preserve history; update the current
 summary. Private operational context routes through `.handoff/START_HERE.md` if present.
 
+## Continuous implementation
+
+For authorized ongoing work, use the repository
+[continuous implementation skill](.agents/skills/smr-continuous-implementation/SKILL.md).
+Keep the project objective active through ordinary integration, review and publication
+checkpoints. Use the existing issue/Orca queue; do not create another active backlog.
+A new session or skill invocation never resets a closed method or resumes a pause.
+
+Select a useful observable outcome and the check that will establish it. Before a
+retry, connect a concrete hypothesis to changed evidence or a distinguishing test.
+Record failure, proposed cause, attempted remedy, result and next decision together
+in the existing Task or compact handoff. Consult that record after a handoff and
+before repeating an approach; do not reread unchanged history for every command.
+Renaming a task or changing agents does not make an unchanged attempt new.
+
+Stop an approach when it returns to the same failure without new information. Choose
+a diagnostic that separates plausible causes, reuse an accepted finding, or work on
+an independent ready task. A new hypothesis must change the experiment, not just its
+description. If no useful authorized path remains, report the exact blocker under
+the host's Goal rules. Do not weaken checks, bypass authority, fabricate acceptance,
+or recursively commission reviews to keep the session active. Legitimate repair and
+investigation continue while they produce discriminating evidence.
+
+Reuse checks/reviews for unchanged relevant code, inputs and environment. Recheck
+changed risks and required integration; avoid duplicate verification for ceremony.
+Continue independent work while a genuine signing prompt or local blocker waits.
+Preserve permitted owned cleanup when new work stops.
+
+### Evaluate progress
+
+At session start, preserve a baseline of current acceptance, candidate revision,
+known blockers and ready work in the existing handoff. At natural outcomes or changed
+blockers, append a compact record there or in the existing Task:
+
+- Outcome and exact evidence/revision; distinguish source, packaged and runtime proof.
+- New fact or eliminated hypothesis; say when no acceptance advanced.
+- Failed approach repeated, with what changed and why another attempt was justified.
+- Human intervention and reason; required signing differs from avoidable clarification.
+- Elapsed interval and material waits when available, plus the next useful action.
+
+Count accepted outcomes and unjustified repeated approaches across comparable tasks,
+not tool calls, commits or documents as proxies for progress. Include failed and held
+tasks in the denominator. Review the first useful delivery and first complete
+end-to-end pilot against the baseline, then summarize at meaningful milestones.
+Improvement means supported acceptance advances or a blocker is demonstrably resolved,
+without unchanged retry cycles or unnecessary user intervention. Do not infer a causal
+speedup from dissimilar tasks or a single successful run.
+
+These records support later human or requested independent inspection. They do not
+require a polling agent, timer or metrics service. Persist results before an authorized
+completion/blocker notification; notification delivery is distinct from receipt, and
+host failure may prevent it. A skill guides judgment; it cannot mechanically prove
+useful progress or guarantee zero loops. Existing technical guards and host limits
+remain effective unless explicitly changed through the appropriate implementation.
+
 ## Orca, models and enforcement limits
 
 Run `scripts/check_session.py` at startup. Explicit Orca session signals trigger CLI
