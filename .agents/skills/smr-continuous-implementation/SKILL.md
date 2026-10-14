@@ -14,6 +14,13 @@ Choose the next observable outcome and its discriminating check. Deliver a usefu
 slice through integration and acceptance; a review, commit or handoff is an
 intermediate result when required work remains.
 
+Before recommending or handing off a runtime pilot, inspect the concrete path to
+its complete outcome. An interface, passing synthetic tests or available hooks do
+not establish an implemented operator. Identify missing save/reopen/cleanup steps
+before asking the user to prepare. Human assistance is an option only when its
+actual interaction and preservation path are supported; it cannot turn historical
+screenshots into current input authority.
+
 Before retrying a failure, identify the failed expectation, proposed cause, changed
 input or hypothesis, and observation that would distinguish the cause. A different
 explanation alone is insufficient: the next action must test it. Repeating an
@@ -27,6 +34,19 @@ Do not reopen settled reviews without a concrete changed risk.
 When an approach repeats, stop that approach, retain its evidence, and select a
 discriminating diagnostic or independent ready work. Use independent help only for
 a specific unresolved question or required review; no recursive review chain.
+Also recognize a broader loop: repeated helper changes, fixtures and reviews can
+all differ while the same end-to-end outcome remains unreachable. After a failed
+attempt, identify what acceptance advanced or uncertainty was resolved and whether
+the next task reaches the missing outcome. If only supporting machinery expands,
+stop that approach and reassess the shortest complete path. A narrow diagnostic or
+pilot does not authorize unrelated work or an implementation chain.
+
+A diagnostic whose intended positive control fails is inconclusive. Do not use
+its empty result as evidence that the target scene or behavior is absent. Preserve
+the failed control and seek independent evidence before tuning the query. Record
+human observations as such, including whether they concern a retained artifact or
+a current live state; neither automatically validates the failed detector.
+
 Continue independent work while signing or another lane waits. Ask the user only
 for a material decision, missing authority/authentication, or genuine blockage.
 

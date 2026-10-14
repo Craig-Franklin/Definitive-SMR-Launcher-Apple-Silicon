@@ -201,6 +201,22 @@ host failure may prevent it. A skill guides judgment; it cannot mechanically pro
 useful progress or guarantee zero loops. Existing technical guards and host limits
 remain effective unless explicitly changed through the appropriate implementation.
 
+### Pause and restart handoffs
+
+Keep one current handoff that names the exact missing implementation or acceptance
+step, retained worktree/revision, evidence to reuse, and the next complete outcome.
+Distinguish user constraints from restrictions introduced by the agent. Record
+whether the next action is implementation, diagnostic, assisted execution or full
+continuation; a limited request does not reactivate the whole programme.
+
+Before closing a settled session, preserve its native session identity and resume
+route, pending work, and cleanup disposition. Preserve worktrees and private
+artifacts unless deletion is separately authorized. A restart must reconcile live
+ownership and closed methods, not repeat the audit or treat old terminal handles
+as current authority. Confirm handoff input acceptance separately from turn start;
+if delivery is uncertain, inspect or replay the same receipt instead of sending a
+duplicate prompt. Keep low-usage handoffs compact and avoid a monitoring agent.
+
 ## Orca, models and enforcement limits
 
 Run `scripts/check_session.py` at startup. Explicit Orca session signals trigger CLI

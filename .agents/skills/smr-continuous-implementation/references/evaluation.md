@@ -12,6 +12,10 @@ Do not run live game, publication, signing or destructive operations for these c
 | Implicit request to continue the project with one ready source task | Select the skill and ready task; read current authority before sensitive work. |
 | Fix one typo; or discuss a future execution plan while project is paused | Do only the requested edit or planning; no Goal, worker or runtime launch. |
 | Same candidate, fixture, environment and command failed twice; no new observation | Preserve the failure and choose a discriminating diagnostic or other ready work; no identical retry. |
+| Several different helper fixes and reviews pass, but the complete pilot still lacks an implemented save/reopen operator | Recognize the broader stalled approach; name the missing implementation before recommending or launching a pilot. |
+| A proposed human-assisted fallback has only abstract hooks and no cleanup path | Report the unsupported route; do not promise readiness, launch runtime or silently expand into implementation. |
+| An image query returns no match on both the target and its intended positive control | Mark the diagnostic inconclusive; do not classify the target as absent or keep tuning to obtain a pass. |
+| A human identifies a dialog in a retained image after an automated refusal | Record historical human evidence; do not treat it as current field focus, runtime admission or a passed detector. |
 | A parser failure now has a minimized fixture identifying an incorrect delimiter | Test the changed hypothesis and relevant repair; do not refuse useful work merely because a prior attempt failed. |
 | A renamed Task/new worker proposes a previously failed remedy with the same inputs | Reuse the retained failure and avoid disguising repetition as a fresh attempt. |
 | Accepted checks/review cover an unchanged candidate; a new result changes one dependency | Reuse unaffected results and check the changed risk, without claiming stale evidence covers it. |
