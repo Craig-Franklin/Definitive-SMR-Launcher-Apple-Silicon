@@ -7,7 +7,7 @@ before this service is allowed to touch real game data.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Callable, Iterator, Optional, Sequence
 import ctypes
@@ -300,14 +300,26 @@ class FilesystemProfiles:
             raise RecoveryError("Game profile is bound to another launcher store")
 
     @contextmanager
-    def _locked(self, enrolling: bool = False) -> Iterator[None]:
+    def _locked(self, enrolling: bool = False, *, nonblocking: bool = False) -> Iterator[None]:
         _assert_no_symlink_ancestor(self.live.parent)
         _assert_no_symlink_ancestor(self.store)
+        if nonblocking and (
+            not all(path.is_dir() for path in (self.store, self.profiles, self.staging))
+            or not self.lock_file.is_file()
+        ):
+            raise ActivationError(
+                "Guarded mutation requires existing enrolled profile paths and lock"
+            )
         self.store.mkdir(parents=True, mode=0o700, exist_ok=True)
         flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
         fd = self._call("activation.lock_open", os.open, self.lock_file, flags, 0o600)
         try:
-            self._call("activation.lock_acquire", fcntl.flock, fd, fcntl.LOCK_EX)
+            self._call(
+                "activation.lock_acquire",
+                fcntl.flock,
+                fd,
+                fcntl.LOCK_EX | (fcntl.LOCK_NB if nonblocking else 0),
+            )
             if enrolling:
                 self._ensure_paths()
                 self._require_stopped()
@@ -420,15 +432,21 @@ class FilesystemProfiles:
         *,
         saved_games: Optional[Path] = None,
         recover_pending: bool = True,
+        mutation_guard=None,
     ) -> str:
         """Make an independent writable generation from an immutable prepared tree."""
         if not _SHA256.fullmatch(variant_id):
             raise ValueError("Variant identity must be a lowercase SHA-256 digest")
         profile_id = "map-" + variant_id
         source = _canonical_directory_path(Path(prepared_root))
-        with self._locked():
+        with (
+            self._locked(nonblocking=mutation_guard is not None),
+            mutation_guard() if mutation_guard is not None else nullcontext(),
+        ):
             self._require_stopped()
-            self._recover_locked(recover_pending=recover_pending)
+            self._recover_locked(
+                recover_pending=recover_pending if mutation_guard is None else False
+            )
             _assert_no_symlink_ancestor(source)
             if not source.is_dir():
                 raise ActivationError("Prepared source is missing")
@@ -604,12 +622,22 @@ class FilesystemProfiles:
         self._clear_journal()
         return target_id
 
-    def switch(self, target_id: str) -> str:
-        with self._locked():
+    def switch(self, target_id: str, *, mutation_guard=None) -> str:
+        with (
+            self._locked(nonblocking=mutation_guard is not None),
+            mutation_guard() if mutation_guard is not None else nullcontext(),
+        ):
+            if mutation_guard is not None and (self.journal.exists() or self.journal.is_symlink()):
+                raise RecoveryError("Guarded switch refuses pending activation recovery")
             return self._switch_locked(target_id)
 
     def play(
-        self, target_id: str, launch: Callable[[], None], startup_seconds: float = 30.0
+        self,
+        target_id: str,
+        launch: Callable[[], None],
+        startup_seconds: float = 30.0,
+        *,
+        mutation_guard=None,
     ) -> str:
         """Serialize this launcher's switch and game start under one live lock.
 
@@ -617,8 +645,15 @@ class FilesystemProfiles:
         process checks fail closed if one is observed, but cannot exclude a
         launch that races the atomic exchange from another application.
         """
-        with self._locked():
-            target = self._switch_locked(target_id)
+        with self._locked(nonblocking=mutation_guard is not None):
+            # The caller's guard covers the exchange, not the launch callback's
+            # polling/child wait. Acquire the launcher lock before its guard.
+            with mutation_guard() if mutation_guard is not None else nullcontext():
+                if mutation_guard is not None and (
+                    self.journal.exists() or self.journal.is_symlink()
+                ):
+                    raise RecoveryError("Guarded play refuses pending activation recovery")
+                target = self._switch_locked(target_id)
             self._require_stopped()
             launch()
             deadline = time.monotonic() + startup_seconds

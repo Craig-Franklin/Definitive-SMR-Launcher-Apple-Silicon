@@ -366,7 +366,8 @@ class FiniteSaveCycleTests(SaveFixture):
                     "synthetic_save_contract_" + str(index), path
                 )
                 module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
+                with patch.dict(sys.modules, {spec.name: module}):
+                    spec.loader.exec_module(module)
             else:
                 module = __import__(default)
             cls.modules.append(module)

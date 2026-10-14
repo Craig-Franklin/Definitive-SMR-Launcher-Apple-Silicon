@@ -354,6 +354,10 @@ class ActiveJobControl:
                 raise UserCancelled(
                     "User requested game handback; active job permanently cancelled"
                 )
+            require(
+                decode(read_plain(self.path)).get("paused") is False,
+                "Project pause forbids new runtime mutations",
+            )
             yield
 
     @contextmanager

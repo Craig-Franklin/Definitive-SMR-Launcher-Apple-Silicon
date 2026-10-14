@@ -88,6 +88,7 @@ class Fixture(unittest.TestCase):
         )
         self.state_path = Path(self.job["availability_path"])
         self.state = dict(
+            paused=False,
             protected_unrelated={"sentinel": [1, 2, 3]},
             effective_continuation=dict(
                 root,
@@ -399,6 +400,50 @@ class NativeControlTests(Fixture):
         with self.assertRaises(control.UserCancelled), self.control.mutation_guard():
             self.fail("Cancelled job entered mutation fence")
 
+    def test_project_pause_or_unknown_pause_refuses_new_mutation(self):
+        for value in (True, None, 0, "false", "missing"):
+            with self.subTest(paused=value):
+                state = copy.deepcopy(self.state)
+                if value == "missing":
+                    state.pop("paused")
+                else:
+                    state["paused"] = value
+                self.save(state)
+                before = self.state_path.read_bytes()
+                with self.assertRaisesRegex(
+                    control.ControlRefused, "Project pause forbids new runtime mutations"
+                ):
+                    with self.control.mutation_guard():
+                        self.fail("Paused or unknown project entered mutation fence")
+                self.assertEqual(self.state_path.read_bytes(), before)
+
+    def test_unpaused_job_preserves_stopped_historical_productivity_control(self):
+        self.state["work_budget"] = {"status": "stopped", "id": "historical-do-not-reset"}
+        self.save(self.state)
+        before = self.state_path.read_bytes()
+        with self.control.mutation_guard():
+            pass
+        self.assertEqual(self.state_path.read_bytes(), before)
+
+    def test_paused_project_still_allows_exact_owned_cleanup_and_finalization(self):
+        self.state["paused"] = True
+        self.save(self.state)
+        with self.control.cleanup_guard():
+            with self.assertRaises(control.ControlRefused), control.state_lock(self.state_path):
+                self.fail("Owner writer entered paused cleanup")
+        with self.control.finalization_guard():
+            pass
+        self.assertTrue(self.read()["paused"])
+
+    def test_paused_project_still_persists_native_handback_before_refusal(self):
+        self.state["paused"] = True
+        self.save(self.state)
+        self.append(user("I'm playing"))
+        with self.assertRaises(control.UserCancelled), self.control.mutation_guard():
+            self.fail("Paused cancelled job entered mutation fence")
+        self.assertTrue(self.read()["active_job_control"]["cancelled"])
+        self.assertEqual(self.read()["game_availability"]["status"], "PLAYING")
+
 
 class ControllerIntegrationTests(Fixture):
     @classmethod
@@ -409,12 +454,44 @@ class ControllerIntegrationTests(Fixture):
         path = Path(candidate)
         spec = importlib.util.spec_from_file_location("active_control_candidate", path)
         cls.target = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(cls.target)
+        with (
+            patch.object(sys, "path", [str(path.parent), *sys.path]),
+            patch.dict(sys.modules, {spec.name: cls.target}),
+        ):
+            spec.loader.exec_module(cls.target)
+
+    def setUp(self):
+        super().setUp()
+        # Independent synthetic pins exercise the real contract and file checks.
+        for name in ("helper", "proof", "release-match"):
+            (self.directory / name).write_bytes(("synthetic " + name + "\n").encode())
+        self.preinput_contract = {
+            "schema": 1,
+            "scope": "synthetic-closed-click-before-input-v1",
+            "native_helper_path": str(self.directory / "helper"),
+            "native_helper_sha256": "900dfd375b15d2f9254cd800fb12598ecaa756d40420f2ce32c2e9d6298c09c8",
+            "native_source_blob": "1" * 40,
+            "native_source_sha256": "2" * 64,
+            "proof_path": str(self.directory / "proof"),
+            "proof_sha256": "7f344bb1a5f55f5bd9a9b556a8983f14db20fc4c219c2038e533a3c11a16b6e2",
+            "release_match_path": str(self.directory / "release-match"),
+            "release_match_sha256": "75b44125b0c240332d54fd8ee77890130507b7e660037a0e29cd0da7d56cf969",
+            "binary_reproducible_build_proven": False,
+        }
+        self.assertEqual(
+            {key: type(value) for key, value in self.target.PREINPUT_CONTRACT.items()},
+            {key: type(value) for key, value in self.preinput_contract.items()},
+        )
+        self.enterContext(patch.object(self.target, "PREINPUT_CONTRACT", self.preinput_contract))
 
     def adapter(self):
         a = self.target.UKCalibration.__new__(self.target.UKCalibration)
         a.control = self.control
-        a.job = dict(self.job, orca=sys.executable)
+        a.job = dict(
+            self.job,
+            orca=sys.executable,
+            preinput_refusal_contract=copy.deepcopy(self.preinput_contract),
+        )
         a.directory = self.directory
         a.anchor = time.monotonic()
         a.observer = None
@@ -459,7 +536,8 @@ class ControllerIntegrationTests(Fixture):
             )
 
         with patch.object(self.target, "bounded_child", side_effect=synthetic):
-            return a.provider("Blocked", ["get-app-state"], mutable=mutable)
+            action = ["click", "--element-index", "1"] if mutable else ["get-app-state"]
+            return a.provider("Blocked", action, mutable=mutable)
 
     def test_blocked_read_cancels_reaps_and_completes_honest_cleanup_in_order(self):
         a = self.adapter()
@@ -760,7 +838,10 @@ class ProfileMutationTests(Fixture):
     def setUpClass(cls):
         candidate = os.environ.get("SMR_ACTIVE_JOB_CANDIDATE")
         if not candidate:
-            raise unittest.SkipTest("Private profile guard checks require SMR_ACTIVE_JOB_CANDIDATE")
+            from smr_launcher import activation
+
+            cls.profiles_source = activation
+            return
         root = Path(candidate).parent
         spec = importlib.util.spec_from_file_location(
             "guarded_profile_source", root / "frozen-code/src/smr_launcher/activation.py"
