@@ -358,17 +358,17 @@ class FiniteSaveCycleTests(SaveFixture):
     @classmethod
     def setUpClass(cls):
         paths = [os.environ.get("SMR_SAVE_CYCLE_ADAPTER"), os.environ.get("SMR_SAVE_LIFECYCLE")]
-        if not all(paths):
-            raise unittest.SkipTest(
-                "Private finite contract needs SMR_SAVE_CYCLE_ADAPTER and SMR_SAVE_LIFECYCLE"
-            )
+        defaults = ["save_cycle", "finite_operation"]
         cls.modules = []
-        for index, path in enumerate(paths):
-            spec = importlib.util.spec_from_file_location(
-                "synthetic_save_contract_" + str(index), path
-            )
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
+        for index, (path, default) in enumerate(zip(paths, defaults)):
+            if path:
+                spec = importlib.util.spec_from_file_location(
+                    "synthetic_save_contract_" + str(index), path
+                )
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+            else:
+                module = __import__(default)
             cls.modules.append(module)
 
     def run_cycle(
@@ -377,6 +377,7 @@ class FiniteSaveCycleTests(SaveFixture):
         save_mode="exact",
         receipt_failure=None,
         change_before_reopen=False,
+        relaunch_stop_result=True,
         receipt_effect=None,
         guard_effect=None,
         hook_effect=None,
@@ -453,7 +454,9 @@ class FiniteSaveCycleTests(SaveFixture):
             write=write,
             save_once=delivery_hook("save", save_once),
             wait_stability=wait_stability,
-            stop_for_relaunch=lambda: events.append("exact_stop_for_relaunch"),
+            stop_for_relaunch=lambda: (
+                events.append("exact_stop_for_relaunch") or relaunch_stop_result
+            ),
             owned_reopen_location=lambda bound: (self.scope, None),
             relaunch_once=delivery_hook("relaunch", relaunch),
             reopen_once=delivery_hook("reopen", lambda receipt: events.append("exact_reopen_once")),
@@ -499,14 +502,16 @@ class FiniteSaveCycleTests(SaveFixture):
         self.assertNotIn("relaunch_once", events)
         self.assertNotIn("exact_reopen_once", events)
         self.assertIn("unconditional_final_stop", events)
-        self.assertFalse(result["terminal_finished"])
+        self.assertTrue(result["terminal_finished"], result["errors"])
+        self.assertTrue(result["errors"][0].startswith("operation: "))
         self.assertEqual((self.directory / "unknown-extra").read_bytes(), b"preserve")
 
     def test_before_receipt_failure_permits_no_save_input_and_still_cleans_up(self):
         result, events, _ = self.run_cycle(receipt_failure="save-before.json")
         self.assertNotIn("save_once", events)
         self.assertIn("unconditional_final_stop", events)
-        self.assertFalse(result["terminal_finished"])
+        self.assertTrue(result["terminal_finished"], result["errors"])
+        self.assertTrue(result["errors"][0].startswith("operation: "))
         self.assertFalse(self.target.exists())
 
     def test_same_byte_replacement_after_relaunch_refuses_reopen_and_cleans_up(self):
@@ -514,12 +519,14 @@ class FiniteSaveCycleTests(SaveFixture):
         self.assertIn("relaunch_once", events)
         self.assertNotIn("exact_reopen_once", events)
         self.assertIn("unconditional_final_stop", events)
-        self.assertFalse(result["terminal_finished"])
+        self.assertTrue(result["terminal_finished"], result["errors"])
+        self.assertTrue(result["errors"][0].startswith("operation: "))
 
     def assert_refused_before_delivery(self, result, events, forbidden):
         self.assertNotIn(forbidden, events)
         self.assertEqual(result["outcome"]["status"], "automation_failed")
-        self.assertFalse(result["terminal_finished"])
+        self.assertTrue(result["terminal_finished"], result["errors"])
+        self.assertTrue(result["errors"][0].startswith("operation: "))
         self.assertLess(events.index("raw_outcome"), events.index("unconditional_final_stop"))
         self.assertLess(
             events.index("unconditional_final_stop"), events.index("preservation_restore")
@@ -596,3 +603,14 @@ class FiniteSaveCycleTests(SaveFixture):
             receipt_effect=("save-before-reopen-identity.json", "unavailable")
         )
         self.assert_refused_before_delivery(result, events, "exact_reopen_once")
+
+    def test_unproven_stop_blocks_relaunch_and_reopen_but_final_cleanup_still_runs(self):
+        for value in (False, None, 1, "true"):
+            with self.subTest(stop_result=value):
+                if self.target.exists():
+                    self.target.unlink()
+                self.clock[0] = 100
+                result, events, _ = self.run_cycle(relaunch_stop_result=value)
+                self.assert_refused_before_delivery(result, events, "relaunch_once")
+                self.assertNotIn("exact_reopen_once", events)
+                self.assertIn("Exact stop before relaunch refused", result["errors"][0])
