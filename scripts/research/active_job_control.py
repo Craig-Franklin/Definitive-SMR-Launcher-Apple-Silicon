@@ -146,8 +146,13 @@ def timestamp(value):
         raise ControlRefused("Malformed availability timestamp") from exc
 
 
-def command(row):
-    """Accept a whole native direct user message, never substring matches."""
+def direct_user_command(row, choices):
+    """Match a caller's closed command vocabulary in a real direct user record.
+
+    Return only the chosen label, native timestamp and message ID. Quoted text,
+    attachments, tool replies and partial/embedded commands are not authority.
+    This does not interpret observations or authenticate game state.
+    """
     if type(row) is not dict or row.get("type") != "response_item":
         return None
     item = row.get("payload")
@@ -174,16 +179,26 @@ def command(row):
     # Deliberately bounded command surface. No prose, quoting, Markdown, multiple
     # commands, examples, attachments, or semantic/negation inference.
     text = content[0]["text"].strip().replace("’", "'").casefold()
-    playing = {"i'm playing", "i want to play"}
-    available = {"i'm done playing", "you can use the game"}
     if text.endswith((".", "!")):
         text = text[:-1]
-    status = "PLAYING" if text in playing else "AVAILABLE" if text in available else None
-    if status is None:
+    if text not in choices:
         return None
     when = timestamp(row.get("timestamp"))
     require(abs(when.timestamp() - meta["create_time"]) < 1, "Native message clock mismatch")
-    return status, when, item["id"]
+    return choices[text], when, item["id"]
+
+
+def command(row):
+    """Keep availability's existing whole-message command surface unchanged."""
+    return direct_user_command(
+        row,
+        {
+            "i'm playing": "PLAYING",
+            "i want to play": "PLAYING",
+            "i'm done playing": "AVAILABLE",
+            "you can use the game": "AVAILABLE",
+        },
+    )
 
 
 def binding_for(job):

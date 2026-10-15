@@ -494,6 +494,7 @@ class ControllerIntegrationTests(Fixture):
         )
         a.directory = self.directory
         a.anchor = time.monotonic()
+        a.launch_deadline = a.anchor + 120
         a.observer = None
         a.sample = Mock()
         a.verify_code = Mock()
