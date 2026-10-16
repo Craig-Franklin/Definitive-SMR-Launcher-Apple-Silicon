@@ -36,6 +36,29 @@ for line in sys.stdin:
         )
         print(json.dumps(value), flush=True)
         continue
+    if method == "artwork":
+        if configuration.get("slow_artwork"):
+            time.sleep(0.15)
+        params = request["params"]
+        print(
+            json.dumps(
+                {
+                    "id": request["id"],
+                    "ok": True,
+                    "data": {
+                        **params,
+                        "variant_id": "wrong"
+                        if configuration.get("wrong_artwork")
+                        else params["variant_id"],
+                        "art": configuration.get("art", ""),
+                        "image_png": "",
+                        "artwork_state": "ready" if configuration.get("art") else "missing",
+                    },
+                }
+            ),
+            flush=True,
+        )
+        continue
     if method == "annotations.save":
         if configuration.get("slow_annotations"):
             time.sleep(0.15)
@@ -127,6 +150,7 @@ for line in sys.stdin:
                 "variant_id": "b" * 64,
                 "game_executable_sha256": "c" * 64,
                 "metadata": {"description": "x" * (16 * 1024)},
+                "artwork_state": "pending" if configuration.get("artwork_snapshot") else "ready",
             }
             for index in range(1000)
         ]

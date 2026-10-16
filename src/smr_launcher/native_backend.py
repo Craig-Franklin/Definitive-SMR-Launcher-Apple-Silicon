@@ -20,7 +20,7 @@ import webbrowser
 from .native_tools import NativeTools
 from .updates import start_install_helper
 from .annotations import AnnotationStore
-from .gallery import MAX_SNAPSHOT_ART_BYTES, gallery_snapshot
+from .gallery import MAX_SNAPSHOT_ART_BYTES, _read_art, gallery_snapshot
 from .collection import fetch_catalogue, read_cached_catalogue, write_cached_catalogue
 from .gui import LauncherWindow, LaunchCancelledBeforeDispatch, _checks_text
 from .application import LauncherApplication
@@ -187,7 +187,7 @@ class NativeLibrary:
             raise ValueError("This map is no longer in the library; refresh before continuing")
         return record
 
-    def snapshot(self, app, refresh=False, *, history_error=""):
+    def snapshot(self, app, refresh=False, *, history_error="", deferred=False):
         identity = (str(app.library), app.installation.executable_sha256)
         if (
             self.cached_app is not app
@@ -196,9 +196,10 @@ class NativeLibrary:
             or self.cached_maps is None
             or self.cached_identity != identity
             or self.cached_history_error != history_error
+            or getattr(self, "deferred", False) != deferred
         ):
             # Commit a new presentation only after all reads/projection succeed.
-            items = gallery_snapshot(app, Event(), history_error=history_error)
+            items = gallery_snapshot(app, Event(), history_error=history_error, deferred=deferred)
             store, maps = AnnotationStore(app.library), []
             remaining_art = MAX_SNAPSHOT_ART_BYTES
             for item in items:
@@ -207,12 +208,17 @@ class NativeLibrary:
                 except (OSError, ValueError, UnicodeError) as exc:
                     annotation = dict(title="", notes="", image_png="")
                     annotation_error = "Personal display details need inspection: " + str(exc)
+                if deferred:
+                    annotation = {**annotation, "image_png": ""}
                 row, used = self._project(app, item, annotation, remaining_art, annotation_error)
+                if deferred:
+                    row["artwork_state"] = "pending"
                 remaining_art -= used
                 maps.append(row)
             self.cached_items, self.cached_maps = items, maps
             self.cached_app, self.cached_identity = app, identity
             self.cached_history_error = history_error
+            self.deferred = deferred
             self.history_dirty.clear()
         if self.history_dirty:
             rows = PlayHistoryStore(app.library).records()
@@ -261,6 +267,32 @@ class NativeLibrary:
             history_error=item.history_error,
             annotation=annotation,
         ), used
+
+    def artwork(self, app, params):
+        record = self.record(app, text(params, "profile_id"))
+        self.require_scope(app, record, params, build=True)
+        annotation = AnnotationStore(app.library).load(record)
+        path = app.map_icon(record)
+        art = _read_art(path)
+        # A missing prepared icon may still have source artwork. Never turn a
+        # preparation/read failure into a claim that the package has no artwork.
+        directory = record.imported_directory
+        source = None
+        if directory and Path(directory).name == directory and directory not in (".", ".."):
+            source = app.imports / directory / "mapIcon.jpg"
+        state = "ready" if art or annotation["image_png"] else "missing"
+        message = ""
+        if not art and (path is not None or (source is not None and source.exists())):
+            state = "error"
+            message = "Package artwork could not be read or was not prepared. Original artwork is unchanged."
+        return dict(
+            profile_id=record.profile_id,
+            **context(record, app.installation.executable_sha256),
+            art=base64.b64encode(art).decode("ascii"),
+            image_png=annotation["image_png"],
+            artwork_state=state,
+            artwork_message=message,
+        )
 
     def details(self, app, params):
         record = self.record(app, text(params, "profile_id"))
@@ -648,7 +680,7 @@ class NativeBackendWindow(LauncherWindow):
             available=self.app is not None,
             enrolled=self.app is not None and self.app.profiles.state_file.exists(),
             initializing=self.initializing,
-            busy=self.busy,
+            busy=self.busy and not getattr(self, "_native_reading", False),
             status=(
                 "An operation needs inspection; no automatic retry occurred."
                 if any(
@@ -865,8 +897,11 @@ class NativeBackendWindow(LauncherWindow):
                             app,
                             params.get("refresh", False),
                             history_error=getattr(self.crash_monitor, "history_error", ""),
+                            deferred=True,
                         )
                     )
+                elif method == "artwork":
+                    operation = lambda: self.native_library.artwork(app, params)
                 elif method == "details":
                     operation = lambda: self.native_library.details(app, params)
                 elif method == "briefing.translate":
@@ -888,11 +923,20 @@ class NativeBackendWindow(LauncherWindow):
                 else:
                     raise ValueError("Unknown native method: " + method)
             self._native_inflight = request["id"]
+            self._native_reading = method in {
+                "snapshot",
+                "details",
+                "artwork",
+                "prefs",
+                "activity",
+                "collection",
+            }
             self.busy = True
             self._controls()
 
             def completed(ok, value):
                 self.busy = False
+                self._native_reading = False
                 self._controls()
                 if ok and method == "prefs":
                     self.voices, self._native_voice_notice = value

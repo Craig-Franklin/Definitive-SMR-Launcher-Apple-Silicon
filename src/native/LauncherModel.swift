@@ -17,6 +17,9 @@ struct MapItem: Identifiable {
     var title: String
     var notes: String
     var imagePNG: String
+    var artworkState: String
+    var artworkMessage: String
+    var artworkBytes = 0
     var packageImage: NSImage?
     var image: NSImage?
     var searchText: String
@@ -26,6 +29,7 @@ struct MapItem: Identifiable {
         if verification == "Known issue" && !history.hasPrefix("Known issue") { return "Known issue · " + history }
         if !historyError.isEmpty { return "History needs inspection · " + history }
         if verification == "Needs inspection" || !notice.isEmpty { return "Needs inspection · " + history }
+        if verification == "Checks pending" { return history + " · Checks pending" }
         return history
     }
     var warning: Bool { verification == "Known issue" || ["amber", "red"].contains(summary.text("light")) || !historyError.isEmpty || !notice.isEmpty }
@@ -41,7 +45,9 @@ struct MapItem: Identifiable {
         notice = data.text("notice"); summary = data.object("summary"); historyError = data.text("history_error")
         let annotation = data.object("annotation")
         title = annotation.text("title"); notes = annotation.text("notes"); imagePNG = annotation.text("image_png")
+        artworkState = data.text("artwork_state", "ready"); artworkMessage = data.text("artwork_message")
         let packageArt = data.text("art")
+        artworkBytes = packageArt.utf8.count + imagePNG.utf8.count
         packageImage = packageArt.utf8.count <= 1_400_000 ? Data(base64Encoded: packageArt).flatMap(NSImage.init(data:)) : nil
         image = imagePNG.isEmpty ? packageImage : Self.decodeImage(imagePNG)
         searchText = [title.isEmpty ? packageName : title, packageName, metadata.text("author"), metadata.text("description")].joined(separator: " ")
@@ -158,13 +164,17 @@ final class ScrollMemory { var point: NSPoint? }
     private var started = false
     private var pendingRefresh = false
     private var presentationRevision = 0
-    private var libraryRevision = 0
+    @Published private(set) var libraryRevision = 0
     private var refreshTask: Task<Void, Never>?
     private var visibleKey: (revision: Int, query: String, filter: String, sort: String)?
     private var visibleRows: [MapItem] = []
     private(set) var visibleBuilds = 0
     @Published private(set) var imageReads: [String: UUID] = [:]
     private var imageChoiceRevisions: [String: Int] = [:]
+    private var artworkReads: [String: UUID] = [:]
+    private var artworkOrder: [String] = []
+    private var artworkVersions: [String: UUID] = [:]
+    private var artworkActive = 0
     private var detailReads: [String: (token: UUID, revision: Int, archive: String, variant: String, build: String, task: Task<Void, Never>)] = [:]
     var selected: MapItem? { maps.first { $0.id == selection } }
     var working: Bool { busy || serviceBusy }
@@ -175,7 +185,7 @@ final class ScrollMemory { var point: NSPoint? }
         visibleBuilds += 1
         let found = maps.filter { map in
             return (query.isEmpty || map.searchText.localizedCaseInsensitiveContains(query)) &&
-                (filter == "All maps" || (filter == "Known issue" ? map.verification == "Known issue" || ["amber", "red"].contains(map.summary.text("light")) : filter == "Verified" || filter == "Not verified" ? map.verification == filter : map.metadata.text("map_type").replacingOccurrences(of: " ", with: "").localizedCaseInsensitiveContains(filter.replacingOccurrences(of: " ", with: ""))))
+                (filter == "All maps" || (filter == "Known issue" ? map.verification == "Known issue" || ["amber", "red"].contains(map.summary.text("light")) : filter == "Verified" || filter == "Not verified" ? map.verification == filter || map.verification == "Checks pending" : map.metadata.text("map_type").replacingOccurrences(of: " ", with: "").localizedCaseInsensitiveContains(filter.replacingOccurrences(of: " ", with: ""))))
         }
         visibleRows = found.sorted { a, b in
             if sort == "Name Z–A" { return a.name.localizedStandardCompare(b.name) == .orderedDescending }
@@ -273,7 +283,7 @@ final class ScrollMemory { var point: NSPoint? }
     }
 
     func request(_ method: String, _ params: [String: Any] = [:], success: (([String: Any]) async -> Void)? = nil) async {
-        let readOnly = ["details", "prefs", "activity", "collection"].contains(method)
+        let readOnly = ["details", "artwork", "prefs", "activity", "collection"].contains(method)
         while busy {
             do { try await Task.sleep(nanoseconds: 20_000_000) } catch { return }
         }
@@ -317,6 +327,7 @@ final class ScrollMemory { var point: NSPoint? }
                     self.personal[map.id] = nil; self.translations[map.id] = nil
                 }
                 self.libraryRevision += 1
+                self.artworkOrder.removeAll()
                 self.maps = replacement
                 if !replacement.contains(where: { $0.id == self.selection }) { self.selection = replacement.first?.id }
                 self.available = value.flag("available"); self.enrolled = value.flag("enrolled")
@@ -326,6 +337,10 @@ final class ScrollMemory { var point: NSPoint? }
         }
         loaded = true
         if replaced, let id = selection, connected && !fixture { await loadDetails(id) }
+    }
+
+    var pendingVerificationFilter: Bool {
+        ["Verified", "Not verified"].contains(filter) && maps.contains { $0.verification == "Checks pending" }
     }
 
     func select(_ map: MapItem) {
@@ -403,6 +418,65 @@ final class ScrollMemory { var point: NSPoint? }
         detailReads[id] = (token, revision, map.archive, map.variant, map.build, task)
         await task.value
     }
+    func loadArtwork(_ id: String) async {
+        guard !fixture else { return }
+        while artworkActive >= 2 || busy || artworkReads[id] != nil {
+            do { try await Task.sleep(nanoseconds: 20_000_000) } catch { return }
+        }
+        guard !Task.isCancelled, let map = maps.first(where: { $0.id == id }),
+              map.artworkState == "pending", artworkReads[id] == nil else { return }
+        let token = UUID(), revision = libraryRevision, version = artworkVersions[id]
+        artworkReads[id] = token; artworkActive += 1
+        defer { artworkActive -= 1; if artworkReads[id] == token { artworkReads[id] = nil } }
+        do {
+            let value = try await backend.call("artwork", ["profile_id": id, "archive_sha256": map.archive,
+                "variant_id": map.variant, "game_executable_sha256": map.build])
+            guard value.text("profile_id") == id, value.text("archive_sha256") == map.archive,
+                  value.text("variant_id") == map.variant, value.text("game_executable_sha256") == map.build else {
+                throw NativeError.message("The artwork response no longer matches this map edition or executable build.")
+            }
+            let package = value.text("art"), personalImage = value.text("image_png")
+            let prepared = await Task.detached(priority: .utility) {
+                (PreparedArtwork(package), PreparedArtwork(personalImage))
+            }.value
+            guard libraryRevision == revision, artworkReads[id] == token, artworkVersions[id] == version,
+                  let index = maps.firstIndex(where: { $0.id == id && $0.archive == map.archive && $0.variant == map.variant && $0.build == map.build }) else { return }
+            maps[index].packageImage = prepared.0.image; maps[index].imagePNG = personalImage
+            maps[index].image = personalImage.isEmpty ? prepared.0.image : prepared.1.image
+            maps[index].artworkBytes = package.utf8.count + personalImage.utf8.count
+            maps[index].artworkState = value.text("artwork_state", "error")
+            maps[index].artworkMessage = value.text("artwork_message")
+            if (!package.isEmpty && prepared.0.image == nil) || (!personalImage.isEmpty && prepared.1.image == nil) {
+                maps[index].artworkState = "error"; maps[index].artworkMessage = "Map artwork could not be decoded. Original artwork is unchanged."
+            }
+            retainArtwork(id)
+        } catch {
+            guard libraryRevision == revision, artworkVersions[id] == version,
+                  let index = maps.firstIndex(where: { $0.id == id && $0.archive == map.archive && $0.variant == map.variant }) else { return }
+            maps[index].artworkState = "error"; maps[index].artworkMessage = error.localizedDescription
+        }
+    }
+
+    private func retainArtwork(_ id: String) {
+        artworkOrder.removeAll { $0 == id }; artworkOrder.append(id)
+        // Keep at most 32 MiB of encoded artwork (and 64 decoded map pairs).
+        // Evicted cards fetch again when SwiftUI displays them; drafts are separate.
+        while artworkOrder.count > 64 || maps.reduce(0, { $0 + $1.artworkBytes }) > 32 * 1024 * 1024 {
+            guard let oldest = artworkOrder.first(where: { $0 != id && $0 != selection }) else { break }
+            artworkOrder.removeAll { $0 == oldest }
+            if let index = maps.firstIndex(where: { $0.id == oldest }) {
+                maps[index].packageImage = nil; maps[index].image = nil; maps[index].imagePNG = ""
+                maps[index].artworkBytes = 0; maps[index].artworkState = "pending"
+            }
+        }
+    }
+
+    func retryArtwork(_ id: String) async {
+        guard let index = maps.firstIndex(where: { $0.id == id }), maps[index].artworkState == "error" else { return }
+        maps[index].artworkState = "pending"; maps[index].artworkMessage = ""
+        await loadArtwork(id)
+    }
+
     func memory(_ key: String) -> ScrollMemory {
         if let memory = detailScroll[key] { return memory }
         let memory = ScrollMemory(); detailScroll[key] = memory; return memory
@@ -415,6 +489,7 @@ final class ScrollMemory { var point: NSPoint? }
         guard let draft = personal[map.id], imageReads[map.id] == nil else { return }
         var params: [String: Any] = ["profile_id": map.id, "archive_sha256": map.archive, "variant_id": map.variant, "title": draft.title, "notes": draft.notes]
         if let image = draft.imagePNG { params["image_png"] = image }
+        artworkVersions[map.id] = UUID()
         await request("annotations.save", params) { value in
             guard value.flag("saved"), value.text("profile_id") == map.id, value.text("archive_sha256") == map.archive,
                   value.text("variant_id") == map.variant,
@@ -430,12 +505,17 @@ final class ScrollMemory { var point: NSPoint? }
             guard self.maps.indices.contains(index), self.maps[index].id == map.id,
                   self.maps[index].archive == map.archive, self.maps[index].variant == map.variant else { return }
             self.maps[index].applyAnnotation(annotation, preparedImage: artwork.0.image, packageImage: artwork.1.image, notice: value["notice"] as? String)
+            self.maps[index].artworkBytes = annotation.text("image_png").utf8.count + packageArt.utf8.count
+            self.maps[index].artworkState = "pending"
             if let current = self.personal[map.id], current.identity == draft.identity, current.title == draft.title,
                current.notes == draft.notes, current.imagePNG == draft.imagePNG,
                self.imageReads[map.id] == nil { self.personal[map.id] = nil }
             if self.selection == map.id && self.personal[map.id] == nil { self.section = "Overview" }
             self.status = "Personal details saved. Original package preserved."
         }
+        // A save invalidates older image replies even when persistence fails.
+        // Resume an unfinished image read after the mutation gate is released.
+        Task { await self.loadArtwork(map.id) }
     }
 
     func reserveImageChoice(_ map: MapItem) -> Int {

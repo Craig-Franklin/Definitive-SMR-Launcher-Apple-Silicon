@@ -112,6 +112,71 @@ extension ModelChecks {
         print("Stable library checks passed; cached queries, one coalesced delayed read, strict reply identities, targeted annotation save, retained scroll/drafts and failed refresh")
 
         try await checkImages()
+        try await checkDeferredArtwork(backend)
+    }
+
+    @MainActor static func checkDeferredArtwork(_ backend: Backend) async throws {
+        let model = LauncherModel(fixture: false, backend: backend)
+        model.connected = true; model.enrolled = true
+        model.maps = try (0..<70).map { index in
+            try MapItem(["id": "art-\(index)", "name": "Artwork \(index)", "archive_sha256": "a",
+                "variant_id": "b", "game_executable_sha256": "c", "artwork_state": "pending"])
+        }
+        let representation = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 1, pixelsHigh: 1,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 4, bitsPerPixel: 32)!
+        let encoded = representation.representation(using: .png, properties: [:])!.base64EncodedString()
+        _ = try await backend.call("fixture.configure", ["slow_artwork": true, "art": encoded])
+        let before = try await backend.call("fixture.counts")
+        async let first: Void = model.loadArtwork("art-0")
+        async let duplicate: Void = model.loadArtwork("art-0")
+        try await Task.sleep(nanoseconds: 50_000_000)
+        precondition(!model.working, "An artwork read must not disable Play or own the mutation gate")
+        model.select(model.maps[1])
+        _ = await (first, duplicate)
+        let after = try await backend.call("fixture.counts")
+        precondition((after["artwork"] as? Int ?? 0) == (before["artwork"] as? Int ?? 0) + 1)
+        precondition(model.maps[0].image != nil && model.selection == "art-1", "Late artwork may fill its own card, never change selection")
+        let stale = Task { await model.loadArtwork("art-1") }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        model.maps[1] = try MapItem(["id": "art-1", "archive_sha256": "new", "variant_id": "new", "artwork_state": "pending"])
+        await stale.value
+        precondition(model.maps[1].image == nil && model.maps[1].artworkState == "pending")
+        _ = try await backend.call("fixture.configure", ["wrong_artwork": true, "art": encoded])
+        await model.loadArtwork("art-2")
+        precondition(model.maps[2].image == nil && model.maps[2].artworkState == "error")
+        _ = try await backend.call("fixture.configure", ["art": "invalid"])
+        await model.loadArtwork("art-3")
+        precondition(model.maps[3].image == nil && model.maps[3].artworkMessage.contains("decoded"))
+        _ = try await backend.call("fixture.configure", ["art": encoded])
+        await model.retryArtwork("art-3")
+        precondition(model.maps[3].image != nil && model.maps[3].artworkState == "ready")
+        model.selection = "art-0"
+        for index in 4..<70 { await model.loadArtwork("art-\(index)") }
+        precondition(model.maps.filter { $0.image != nil }.count <= 64 && model.maps[0].image != nil)
+        precondition(model.maps[3].artworkState == "pending", "Old offscreen images must be evicted, not marked absent")
+        await model.loadArtwork("art-3")
+        precondition(model.maps[3].image != nil && model.maps.filter { $0.image != nil }.count <= 64)
+        _ = try await backend.call("fixture.configure", ["art": encoded, "slow_artwork": true, "artwork_snapshot": true])
+        await model.refresh()
+        let generation = model.libraryRevision
+        let refreshID = model.maps[0].id
+        let delayed = Task { await model.loadArtwork(refreshID) }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        await model.refresh()
+        precondition(model.libraryRevision > generation && model.maps[0].image == nil)
+        // SwiftUI task identity includes this generation, even for unchanged editions.
+        let current = Task { await model.loadArtwork(refreshID) }
+        await delayed.value; await current.value
+        precondition(model.maps[0].image != nil, "A fresh generation must fetch after rejecting an older in-flight reply")
+        model.maps[0].verification = "Checks pending"
+        model.maps[1].verification = "Verified"
+        model.maps[2].verification = "Not verified"
+        for filter in ["Verified", "Not verified"] {
+            model.filter = filter
+            precondition(model.pendingVerificationFilter && model.visible.contains { $0.id == refreshID }, "Unchecked rows cannot silently become nonmatches")
+        }
+        print("Deferred artwork passed; coalescing, Play available, identity/decode/retry, eviction/refetch, unchanged-edition refresh generation and pending filters")
     }
 
     @MainActor static func checkImages() async throws {

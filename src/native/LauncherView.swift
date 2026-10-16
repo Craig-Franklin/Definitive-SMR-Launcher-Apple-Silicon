@@ -86,7 +86,11 @@ struct LauncherView: View {
                 if destination == "Collection" { Task { await model.loadCollection() } }
             }
             .task(id: model.selection) {
-                if let id = model.selection { await model.loadDetails(id) }
+                if let id = model.selection {
+                    async let artwork: Void = model.loadArtwork(id)
+                    await model.loadDetails(id)
+                    await artwork
+                }
             }
             .confirmationDialog("Keep these personal changes?", isPresented: $showingDiscard, titleVisibility: .visible) {
                 Button("Keep Draft & Close") { model.section = "Overview" }
@@ -148,6 +152,10 @@ struct LauncherView: View {
                     ForEach(["Name A–Z", "Name Z–A", "Created newest", "Updated newest", "Author"], id: \.self) { Text($0) }
                 }.labelsHidden()
             }.padding(12)
+            if model.pendingVerificationFilter {
+                Text("Unchecked maps remain visible. Select a map to check whether it matches this filter.")
+                    .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.bottom, 8)
+            }
             Divider()
             if !model.loaded {
                 empty("Opening your library", symbol: "map", text: "Reading local information. This is not an empty library.")
@@ -258,6 +266,10 @@ struct LauncherView: View {
                         Button("Play", systemImage: "play.fill") { Task { await mapTools.beginPlay(model, map) } }
                             .primaryPlayStyle().accessibilityLabel("Play selected map").disabled(model.working || !model.enrolled || !model.connected)
                     }
+                }
+                if map.artworkState == "error" {
+                    Label(map.artworkMessage, systemImage: "exclamationmark.triangle").font(.caption)
+                    Button("Retry Image") { Task { await model.retryArtwork(map.id) } }
                 }
                 if map.warning {
                     Label {
@@ -491,8 +503,18 @@ struct LauncherView: View {
         return ZStack {
             RoundedRectangle(cornerRadius: 5).fill(.quaternary)
             if let picture { Image(nsImage: picture).resizable().scaledToFit().padding(3) }
-            else { Image(systemName: "photo").font(.title2).foregroundStyle(.secondary) }
-        }.accessibilityLabel(picture == nil ? "No map image" : "Map image")
+            else {
+                VStack(spacing: 6) {
+                    if map.artworkState == "pending" { ProgressView("Loading image…").controlSize(.small) }
+                    else {
+                        Image(systemName: "photo").font(.title2).foregroundStyle(.secondary)
+                        Text(map.artworkState == "error" ? "Image unavailable" : "No source artwork").font(.caption)
+                    }
+                }.padding(4)
+            }
+        }.accessibilityLabel(picture == nil ? (map.artworkState == "pending" ? "Loading map image" : map.artworkState == "error" ? "Map image unavailable" : "No source artwork") : "Map image")
+            .help(map.artworkMessage)
+            .task(id: "\(model.libraryRevision):\(map.id):\(map.archive):\(map.variant):\(map.build)") { await model.loadArtwork(map.id) }
     }
     private func empty<Actions: View>(_ title: String, symbol: String, text: String, @ViewBuilder actions: () -> Actions) -> some View {
         VStack(spacing: 16) {

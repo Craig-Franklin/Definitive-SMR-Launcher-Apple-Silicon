@@ -169,6 +169,69 @@ class AnnotationTests(TestCase):
 
 
 class NativeLibraryTests(TestCase):
+    def test_deferred_snapshot_skips_unrelated_checks_and_artwork_but_preserves_warnings(self):
+        with TemporaryDirectory(dir=Path(gettempdir()).resolve()) as folder:
+            application, model = app(folder), NativeLibrary()
+            application.verification_for.side_effect = AssertionError(
+                "Unrelated verification blocked readiness"
+            )
+            application.map_icon.side_effect = AssertionError("Unrelated artwork blocked readiness")
+            with patch(
+                "smr_launcher.gallery.MapIssueStore.records",
+                return_value=[
+                    {
+                        "archive_sha256": "a" * 64,
+                        "variant_id": "b" * 64,
+                        "game_executable_sha256": "c" * 64,
+                    }
+                ],
+            ):
+                rows = model.snapshot(application, deferred=True)
+            self.assertEqual(rows[0]["verification"], "Known issue")
+            self.assertEqual(rows[0]["artwork_state"], "pending")
+            self.assertEqual(rows[0]["art"], "")
+            application.verification_for.assert_not_called()
+            application.map_icon.assert_not_called()
+            with patch(
+                "smr_launcher.gallery.MapIssueStore.records",
+                side_effect=ValueError("bad issue ledger"),
+            ):
+                rows = model.snapshot(application, refresh=True, deferred=True)
+            self.assertEqual(rows[0]["verification"], "Needs inspection")
+            self.assertIn("bad issue ledger", rows[0]["notice"])
+
+    def test_artwork_is_scoped_and_independent_of_snapshot_budget(self):
+        with TemporaryDirectory(dir=Path(gettempdir()).resolve()) as folder:
+            application, model = app(folder), NativeLibrary()
+            application.imports = Path(folder) / "imports"
+            path = Path(folder) / "icon.png"
+            path.write_bytes(base64.b64decode(png()))
+            application.map_icon.return_value = path
+            params = dict(
+                profile_id="synthetic",
+                archive_sha256="a" * 64,
+                variant_id="b" * 64,
+                game_executable_sha256="c" * 64,
+            )
+            with patch("smr_launcher.native_backend.MAX_SNAPSHOT_ART_BYTES", 0):
+                model.snapshot(application, deferred=True)
+                result = model.artwork(application, params)
+            self.assertEqual(result["art"], png())
+            self.assertEqual(result["artwork_state"], "ready")
+            application.verification_for.assert_not_called()
+            for key in ("archive_sha256", "variant_id", "game_executable_sha256"):
+                with self.assertRaises(ValueError):
+                    model.artwork(application, {**params, key: "d" * 64})
+            path.write_bytes(b"invalid PNG")
+            self.assertEqual(model.artwork(application, params)["artwork_state"], "error")
+            application.map_icon.return_value = None
+            self.assertEqual(model.artwork(application, params)["artwork_state"], "missing")
+            source = application.imports / "package"
+            source.mkdir(parents=True)
+            (source / "mapIcon.jpg").write_bytes(b"bad source")
+            application.catalogue.return_value = (replace(record(), imported_directory="package"),)
+            self.assertEqual(model.artwork(application, params)["artwork_state"], "error")
+
     def test_translation_uses_current_package_text_and_keeps_presentation_cache(self):
         model, application = NativeLibrary(), app("/synthetic-not-read")
         cached = model.cached_items = object()
@@ -823,6 +886,26 @@ class NativeProtocolTests(TestCase):
         w._native_requests.put({**request, "params": dict(action="setup")})
         w._native_tick()
         self.assertFalse(w._emit_native.call_args.args[0]["ok"])
+
+    def test_presentation_reads_keep_ordered_service_gate_without_disabling_play(self):
+        w = window()
+        w.app = SimpleNamespace(profiles=SimpleNamespace(state_file=Path("/missing-synthetic")))
+        w.status = Mock()
+        w.status.get.return_value = "Synthetic"
+        w.busy = True
+        for reading in (False, True):
+            w._native_reading = reading
+            self.assertEqual(NativeBackendWindow._native_status(w)["busy"], not reading)
+            w._native_dispatch = Mock()
+            w._native_requests.put(
+                dict(id=str(reading), method="maptools.play_preflight", params={})
+            )
+            w._native_tick()
+            w._native_dispatch.assert_not_called()
+        w.initializing = True
+        w.busy = False
+        w._native_tick()
+        w._native_dispatch.assert_not_called()
 
     def test_snapshot_heavy_reads_are_deferred_to_worker_and_reply_has_status(self):
         from threading import Thread, get_ident
