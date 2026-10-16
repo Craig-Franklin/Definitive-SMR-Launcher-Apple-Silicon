@@ -400,6 +400,127 @@ class CatalogueRestoreTests(unittest.TestCase):
     def test_save_config_admits_strict_named_files_with_proven_autosave(self):
         self.assertIs(menu.verify_config(self.save_config()), self.owner.config)
 
+    def entry_contract(self, purpose):
+        """Exercise the complete entry consumer with temporary package evidence."""
+        job = self.save_config(empty=True)
+        common = self.owner.directory / "common"
+        (common / "stop-helper").mkdir(parents=True)
+        for name in ("agent_calibration.py", "stop-helper/agent_host.py", "source-manifest.json"):
+            (common / name).write_bytes(
+                b'{"files": []}' if name.endswith(".json") else b"synthetic"
+            )
+        authority = self.owner.directory / "authority.txt"
+        authority.write_bytes(b"synthetic finite authority")
+        actor = dict(session="synthetic", terminal="synthetic", cwd=str(Path.cwd()))
+        root = dict(run="run_9c111880b18c")
+        job.update(
+            purpose=purpose,
+            common_root=str(common),
+            authority_path=str(authority),
+            authority_sha256=driver.sha(authority.read_bytes()),
+            actor_binding=dict(driver_actor=actor),
+            root=root,
+            queue_module=str(common / "queue.py"),
+            native_source=str(common / "native.swift"),
+            source_manifest_sha256=driver.sha((common / "source-manifest.json").read_bytes()),
+        )
+        for key in ("queue_module", "native_source"):
+            Path(job[key]).write_bytes(b"synthetic")
+        paths = set((ROOT / "src").rglob("*.py"))
+        paths.update((ROOT / "scripts/research").rglob("*.py"))
+        paths.update(p for p in common.rglob("*") if p.is_file())
+        job["closure"] = [
+            dict(path=str(p), bytes=p.stat().st_size, sha256=driver.sha(p.read_bytes()))
+            for p in sorted(paths)
+        ]
+        decision, review_decision = driver.admission_decisions(purpose)
+        review = self.owner.directory / "entry-review.json"
+        review.write_bytes(
+            menu.canonical(
+                dict(
+                    decision=review_decision,
+                    job_sha256="a" * 64,
+                    closure=job["closure"],
+                    findings=[],
+                )
+            )
+        )
+        now = time.time()
+        admission = dict(
+            decision=decision,
+            job_sha256="a" * 64,
+            runtime_owner=actor["terminal"],
+            root=root,
+            issued_epoch=now - 1,
+            expires_epoch=now + 60,
+            review=dict(path=str(review), sha256=driver.sha(review.read_bytes())),
+        )
+        self.enterContext(
+            patch.dict(
+                driver.os.environ,
+                {
+                    "CODEX_THREAD_ID": actor["session"],
+                    "ORCA_TERMINAL_HANDLE": actor["terminal"],
+                },
+            )
+        )
+        self.enterContext(
+            patch.object(
+                driver,
+                "LAUNCHER_CALIBRATION_SHA256",
+                driver.sha((common / "agent_calibration.py").read_bytes()),
+            )
+        )
+        return job, admission
+
+    def test_real_load_entry_needs_no_save_intent_and_keeps_closure_guard(self):
+        job, admission = self.entry_contract(driver.CACHED_LOAD_PURPOSE)
+        self.assertNotIn("agent_save", job)
+        driver.verify_entry(job, admission, "a" * 64)
+        job["closure"][0]["sha256"] = "0" * 64
+        with self.assertRaisesRegex(ControlRefused, "source closure drift"):
+            driver.verify_entry(job, admission, "a" * 64)
+
+    def test_real_save_entry_requires_exact_intent(self):
+        job, admission = self.entry_contract(driver.CACHED_SAVE_PURPOSE)
+        for intent in (
+            None,
+            {},
+            {"token": 19, "filename": "invalid"},
+            {"token": "SyntheticToken12345", "filename": "wrong"},
+        ):
+            with self.subTest(intent=intent):
+                if intent is None:
+                    job.pop("agent_save", None)
+                else:
+                    job["agent_save"] = intent
+                with self.assertRaisesRegex(ControlRefused, "Exact new agent save contract"):
+                    driver.verify_entry(job, admission, "a" * 64)
+        job["agent_save"] = dict(
+            token="SyntheticToken12345", filename="SyntheticToken12345.SMRailroadsSavedGame"
+        )
+        driver.verify_entry(job, admission, "a" * 64)
+
+    def test_real_load_entry_refuses_save_grant_or_review(self):
+        job, admission = self.entry_contract(driver.CACHED_LOAD_PURPOSE)
+        decision = admission["decision"]
+        admission["decision"] = driver.admission_decisions(driver.CACHED_SAVE_PURPOSE)[0]
+        with self.assertRaisesRegex(ControlRefused, "Exact root grant"):
+            driver.verify_entry(job, admission, "a" * 64)
+        admission["decision"] = decision
+        path = Path(admission["review"]["path"])
+        review = menu.decode(path.read_bytes())
+        review["decision"] = driver.admission_decisions(driver.CACHED_SAVE_PURPOSE)[1]
+        path.write_bytes(menu.canonical(review))
+        admission["review"]["sha256"] = driver.sha(path.read_bytes())
+        with self.assertRaisesRegex(ControlRefused, "Exact agent composition review"):
+            driver.verify_entry(job, admission, "a" * 64)
+
+    def test_original_save_entry_still_requires_save_intent(self):
+        job, admission = self.entry_contract(driver.PURPOSE)
+        with self.assertRaisesRegex(ControlRefused, "Exact new agent save contract"):
+            driver.verify_entry(job, admission, "a" * 64)
+
     def test_empty_save_target_admits_without_origin_or_extra_backup_and_retains_new_files(self):
         job = self.save_config(empty=True)
         with patch.object(menu, "autosave_origin", side_effect=AssertionError("No prior autosave")):

@@ -1315,13 +1315,16 @@ def verify_entry(job, admission, job_sha):
         "Fresh bounded agent admission required",
     )
     require(sha(read_plain(job["authority_path"])) == job["authority_sha256"], "Authority drift")
-    config = job["agent_save"]
-    require(
-        set(config) == {"token", "filename"}
-        and re.fullmatch(r"[A-Za-z0-9]{19}", config["token"])
-        and config["filename"] == config["token"] + ".SMRailroadsSavedGame",
-        "Exact new agent save contract required",
-    )
+    if job["purpose"] in (PURPOSE, CACHED_SAVE_PURPOSE):
+        config = job.get("agent_save")
+        require(
+            type(config) is dict
+            and set(config) == {"token", "filename"}
+            and type(config["token"]) is str
+            and re.fullmatch(r"[A-Za-z0-9]{19}", config["token"])
+            and config["filename"] == config["token"] + ".SMRailroadsSavedGame",
+            "Exact new agent save contract required",
+        )
     if job["purpose"] in (
         CATALOGUE_MENU_PURPOSE,
         CACHED_MENU_PURPOSE,
