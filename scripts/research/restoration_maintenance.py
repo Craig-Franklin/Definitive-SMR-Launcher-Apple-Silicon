@@ -22,6 +22,7 @@ sys.path.insert(0, str(REPOSITORY / "src"))
 
 from active_job_control import decode, read_plain, require, sha
 from runner_journal import write_once
+from unique_save_file import signature
 from smr_launcher.activation import (
     _assert_no_symlink_ancestor,
     _assert_regular_tree,
@@ -124,11 +125,12 @@ def tree_snapshot(path):
 
 
 def file_snapshot(path):
+    """Bind stable identity and metadata; this read may update access time."""
     before = Path(path).stat(follow_symlinks=False)
     data = read_plain(path, maximum=262144)
     info = Path(path).stat(follow_symlinks=False)
     require(
-        before == info and info.st_nlink == 1 and stat.S_ISREG(info.st_mode),
+        signature(before) == signature(info) and info.st_nlink == 1 and stat.S_ISREG(info.st_mode),
         "Plain unchanged preference required",
     )
     return {"sha256": sha(data), "mode": stat.S_IMODE(info.st_mode), "mtime_ns": info.st_mtime_ns}

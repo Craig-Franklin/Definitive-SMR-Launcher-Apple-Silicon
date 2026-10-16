@@ -10,6 +10,7 @@ import sys
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "src"), str(ROOT / "scripts/research")]
@@ -23,6 +24,116 @@ from smr_launcher.resource_identity import fingerprint_resources
 def dump(path, value):
     path.write_text(json.dumps(value, sort_keys=True) + "\n")
     return {"path": str(path), "bytes": path.stat().st_size, "sha256": sha(path.read_bytes())}
+
+
+class PreferenceSnapshotTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.path = Path(temporary.name).resolve() / "preferences"
+        self.path.write_bytes(b"synthetic preference")
+        self.before = self.path.stat()
+        self.data = self.path.read_bytes()
+
+    def changed_stat(self, field):
+        values = list(self.before)
+        attributes = {
+            name: getattr(self.before, name) for name in dir(self.before) if name.startswith("st_")
+        }
+        attributes[field] += 1
+        if field == "st_atime":
+            attributes["st_atime_ns"] += 1_000_000_000
+        fields = (
+            "st_mode",
+            "st_ino",
+            "st_dev",
+            "st_nlink",
+            "st_uid",
+            "st_gid",
+            "st_size",
+            "st_atime",
+            "st_mtime",
+            "st_ctime",
+        )
+        if field in fields:
+            values[fields.index(field)] = attributes[field]
+        return os.stat_result(values, attributes)
+
+    def snapshot_with_metadata(self, after):
+        with (
+            patch("restoration_maintenance.read_plain", return_value=self.data),
+            patch.object(Path, "stat", side_effect=(self.before, after)),
+        ):
+            return file_snapshot(self.path)
+
+    def test_read_updated_access_time_does_not_refuse_unchanged_preference(self):
+        after = self.changed_stat("st_atime")
+        self.assertNotEqual(self.before, after)
+        result = self.snapshot_with_metadata(after)
+        self.assertEqual(
+            result,
+            dict(
+                sha256=sha(self.data),
+                mode=self.before.st_mode & 0o7777,
+                mtime_ns=self.before.st_mtime_ns,
+            ),
+        )
+        self.assertEqual(file_snapshot(self.path), result)
+
+    def test_identity_and_mutation_metadata_drift_still_refuse(self):
+        for field in (
+            "st_dev",
+            "st_ino",
+            "st_mode",
+            "st_nlink",
+            "st_uid",
+            "st_gid",
+            "st_size",
+            "st_mtime_ns",
+            "st_ctime_ns",
+        ):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(ControlRefused, "Plain unchanged preference"):
+                    self.snapshot_with_metadata(self.changed_stat(field))
+
+    def test_same_size_content_change_with_restored_mtime_refuses(self):
+        def mutate_after_read(path, **kwargs):
+            data = read_plain(path, **kwargs)
+            before = path.stat()
+            path.write_bytes(b"x" * len(data))
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+            self.assertEqual(path.stat().st_size, before.st_size)
+            self.assertEqual(path.stat().st_mtime_ns, before.st_mtime_ns)
+            self.assertNotEqual(path.stat().st_ctime_ns, before.st_ctime_ns)
+            return data
+
+        with patch("restoration_maintenance.read_plain", side_effect=mutate_after_read):
+            with self.assertRaisesRegex(ControlRefused, "Plain unchanged preference"):
+                file_snapshot(self.path)
+
+    def test_inode_replacement_after_read_refuses(self):
+        def replace_after_read(path, **kwargs):
+            data = read_plain(path, **kwargs)
+            replacement = path.with_name("replacement")
+            replacement.write_bytes(data)
+            os.replace(replacement, path)
+            self.assertNotEqual(path.stat().st_ino, self.before.st_ino)
+            return data
+
+        with patch("restoration_maintenance.read_plain", side_effect=replace_after_read):
+            with self.assertRaisesRegex(ControlRefused, "Plain unchanged preference"):
+                file_snapshot(self.path)
+
+    def test_symlink_and_hardlink_preferences_still_refuse(self):
+        symbolic = self.path.with_name("symbolic")
+        symbolic.symlink_to(self.path)
+        with self.assertRaises(ControlRefused):
+            file_snapshot(symbolic)
+        linked = self.path.with_name("linked")
+        os.link(self.path, linked)
+        for path in (self.path, linked):
+            with self.subTest(path=path.name), self.assertRaises(ControlRefused):
+                file_snapshot(path)
 
 
 class MaintenanceTests(unittest.TestCase):
