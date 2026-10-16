@@ -114,7 +114,11 @@ class NativePlayRequests:
                 profile_id=record.profile_id, **context(record, app.installation.executable_sha256)
             )
             target.pop("scenario")
-            verification = app.verification_for(record)
+            verification = (
+                app.verification_for(record, nonblocking=True)
+                if launch_deadline is not None
+                else app.verification_for(record)
+            )
             warning = verification.issue if verification else ""
             name = record.name
             if prepare:

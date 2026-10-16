@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
+from threading import Thread
 import time
 
 from test_native_backend import app, record, window
@@ -13,6 +14,105 @@ from smr_launcher.native_backend import NativeLibrary
 from smr_launcher.native_map_tools import dispatch
 from smr_launcher.play_history import context
 from smr_launcher.gui import LaunchCancelledBeforeDispatch
+
+
+class FinitePlayVerificationLocks(TestCase):
+    def setUp(self):
+        from test_application import ApplicationTests
+        import hashlib
+        import json
+
+        self.fixture = ApplicationTests()
+        self.fixture.setUp()
+        self.addCleanup(self.fixture.doCleanups)
+        self.app = self.fixture.application
+        self.app.setup()
+        self.record = self.app.import_archive(self.fixture.archive)
+        stock = (
+            self.app.installation.steamapps_root
+            / "common/Sid Meier's Railroads/SMRailroadsData/assets"
+        )
+        stock.mkdir(parents=True)
+        (stock / "synthetic.xml").write_bytes(b"<Stock/>")
+        root = self.app.prepared / self.record.prepared_directory
+        inventory = self.fixture.root / "inventory.json"
+        inventory.write_text(
+            json.dumps(
+                {
+                    "schema": "smr-e01-inventory-v1",
+                    "editions": [
+                        {
+                            "archive_sha256": self.record.archive_sha256,
+                            "edition_id": self.record.variant_id,
+                            "edition_kind": "original",
+                            "scenarios": [
+                                {
+                                    "scenario_relative_path": name,
+                                    "scenario_sha256": hashlib.sha256(
+                                        (root / name).read_bytes()
+                                    ).hexdigest(),
+                                }
+                                for name in self.record.scenarios
+                            ],
+                        }
+                    ],
+                }
+            )
+        )
+        self.app.bind_scenario_inventory(
+            inventory, hashlib.sha256(inventory.read_bytes()).hexdigest()
+        )
+        self.library, self.launch = NativeLibrary(), Mock()
+        self.params = dict(
+            context(self.record, self.app.installation.executable_sha256),
+            profile_id=self.record.profile_id,
+            prepare_compatibility=False,
+            launch_deadline=time.monotonic() + 20,
+        )
+
+    def preflight(self):
+        return dispatch(self.library, self.app, "maptools.play_preflight", self.params)
+
+    def assert_busy_without_wait(self, call):
+        errors = []
+
+        def run():
+            try:
+                call()
+            except BaseException as exc:
+                errors.append(exc)
+
+        thread = Thread(target=run)
+        with self.app._locked():
+            thread.start()
+            thread.join(1)
+            completed_under_lock = not thread.is_alive()
+        thread.join(2)
+        self.assertFalse(thread.is_alive())
+        self.assertTrue(
+            completed_under_lock, "Finite evidence revalidation waited on the real app flock"
+        )
+        self.assertEqual(len(errors), 1)
+        self.assertIn("application is busy", str(errors[0]).lower())
+        self.launch.assert_not_called()
+
+    def test_finite_preflight_with_real_inventory_refuses_busy_lock(self):
+        self.assertEqual(self.preflight()["launch_deadline"], self.params["launch_deadline"])
+        self.assert_busy_without_wait(self.preflight)
+
+    def test_finite_commit_revalidation_refuses_busy_lock_and_consumes_ticket(self):
+        review = self.preflight()
+        params = dict(
+            self.params, ticket=review["ticket"], fingerprint=review["fingerprint"], confirmed=True
+        )
+        call = lambda: dispatch(
+            self.library, self.app, "maptools.play_commit", params, launch=self.launch
+        )
+        before = self.fixture.snapshot_files(self.app.profiles.live)
+        self.assert_busy_without_wait(call)
+        self.assertEqual(self.fixture.snapshot_files(self.app.profiles.live), before)
+        with self.assertRaisesRegex(ValueError, "was used"):
+            call()
 
 
 class NativePlayTests(TestCase):

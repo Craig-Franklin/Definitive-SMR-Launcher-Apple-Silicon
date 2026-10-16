@@ -1294,7 +1294,9 @@ class LauncherApplication:
             hash_cache=self._resource_hash_cache,
         )
 
-    def _legacy_verification_for(self, record: MapRecord) -> Optional[GameplayVerification]:
+    def _legacy_verification_for(
+        self, record: MapRecord, *, nonblocking: bool = False
+    ) -> Optional[GameplayVerification]:
         """Return gameplay evidence only for the current build and exact live assets."""
         candidates = [
             item
@@ -1304,7 +1306,7 @@ class LauncherApplication:
         ]
         if not candidates:
             return None
-        with self._locked():
+        with self._locked(recover_removal=not nonblocking, nonblocking=nonblocking):
             self._verify_installation_binding()
             if self.profiles.journal.exists():
                 return None
@@ -1420,11 +1422,11 @@ class LauncherApplication:
         return observation.id
 
     def scenario_status_for(
-        self, record: MapRecord, *, options: Optional[dict] = None
+        self, record: MapRecord, *, options: Optional[dict] = None, nonblocking: bool = False
     ) -> VerificationSummary:
         issues = MapIssueStore(self.library).for_map(record, self.installation.executable_sha256)
         records = self.scenario_evidence_store.records()
-        legacy = self._legacy_verification_for(record)
+        legacy = self._legacy_verification_for(record, nonblocking=nonblocking)
         historical = tuple(
             r
             for r in self.verification_store.records()
@@ -1447,19 +1449,21 @@ class LauncherApplication:
             ]
             result = reduce_verification((), scenarios, {}, historical=historical)
         else:
-            with self._locked():
+            with self._locked(recover_removal=not nonblocking, nonblocking=nonblocking):
                 scenarios, context, _, _ = self._scenario_context(record, options)
                 result = reduce_verification(records, scenarios, context, historical=historical)
         return replace(result, status="Known issue", local_issues=issues) if issues else result
 
-    def verification_for(self, record: MapRecord, *, options: Optional[dict] = None):
+    def verification_for(
+        self, record: MapRecord, *, options: Optional[dict] = None, nonblocking: bool = False
+    ):
         """All views share scenario reduction; legacy results remain limited facts."""
         if (
             MapIssueStore(self.library).for_map(record, self.installation.executable_sha256)
             or self.scenario_evidence_store.path.exists()
-            or self._legacy_verification_for(record) is not None
+            or self._legacy_verification_for(record, nonblocking=nonblocking) is not None
         ):
-            return self.scenario_status_for(record, options=options)
+            return self.scenario_status_for(record, options=options, nonblocking=nonblocking)
         return None
 
     def catalogue_verification(self, *, options: Optional[dict] = None) -> dict:
