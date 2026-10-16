@@ -412,7 +412,7 @@ class ServiceLifetimeTests(unittest.TestCase):
 
 
 class CatalogueCompositionTests(unittest.TestCase):
-    def exercise(self, response):
+    def exercise(self, response, *, cached=False, wrong_review=False):
         events = []
 
         class Frozen:
@@ -438,7 +438,19 @@ class CatalogueCompositionTests(unittest.TestCase):
             source_original=dict(archive_sha256="a" * 64),
         )
         target = dict(profile_id="map-target", archive_sha256="a" * 64, variant_id="b" * 64)
-        owner.config = dict(target=target)
+        owner.config = dict(
+            target=target,
+            prepare_compatibility=cached,
+            warning="Experimental cached repair" if cached else "",
+        )
+        if cached:
+            owner.config["selection"] = dict(target, profile_id="map-original", variant_id="z" * 64)
+            owner.config["preparation"] = dict(
+                recipe_id="synthetic-v1",
+                title="Synthetic repair",
+                plan_digest="exact-plan",
+                cached_profile_id=target["profile_id"],
+            )
         owner.game = None
         owner.open_attempted = False
         owner.dispatch_settled = False
@@ -488,9 +500,9 @@ class CatalogueCompositionTests(unittest.TestCase):
                                     "game_executable_sha256",
                                 )
                             },
-                            warning="",
-                            preparation=None,
-                            prepare_compatibility=False,
+                            warning="Changed warning" if wrong_review else owner.config["warning"],
+                            preparation=owner.config["preparation"] if cached else None,
+                            prepare_compatibility=cached,
                             launch_deadline=deadline,
                             ticket="one-use",
                             fingerprint="exact",
@@ -590,6 +602,41 @@ class CatalogueCompositionTests(unittest.TestCase):
         self.assertIs(params["prepare_compatibility"], False)
         self.assertIs(params["confirmed"], True)
         self.assertEqual(params["launch_deadline"], owner.launch_deadline)
+
+    def test_cached_owner_selects_original_but_requires_exact_prepared_launch(self):
+        owner, events, failure = self.exercise(
+            lambda original: dict(
+                ok=True, data=dict(target=original, launched_profile_id="map-target")
+            ),
+            cached=True,
+        )
+        self.assertIsNone(failure)
+        method, params = owner.service.requests[-1]
+        self.assertEqual(params["profile_id"], "map-original")
+        self.assertTrue(params["prepare_compatibility"])
+        self.assertTrue(owner.dispatch_settled)
+        self.assertLess(events.index("service-settled"), events.index("observer-cleanup"))
+
+    def test_cached_owner_refuses_if_package_launches_original_instead_of_cache(self):
+        owner, events, failure = self.exercise(
+            lambda original: dict(
+                ok=True, data=dict(target=original, launched_profile_id=original["profile_id"])
+            ),
+            cached=True,
+        )
+        self.assertIn("outcome unknown", str(failure))
+        self.assertFalse(owner.dispatch_settled)
+        self.assertNotIn("observer-cleanup", events)
+        self.assertNotIn("game-bound", events)
+
+    def test_changed_cached_review_refuses_before_observer_or_commit(self):
+        owner, events, failure = self.exercise(
+            lambda original: self.fail("Commit reached"), cached=True, wrong_review=True
+        )
+        self.assertIn("review scope drift", str(failure))
+        self.assertFalse(owner.open_attempted)
+        self.assertNotIn("observer-armed", events)
+        self.assertNotIn("single-packaged-commit", events)
 
     def test_typed_predispatch_cancel_settles_service_then_observer(self):
         owner, events, failure = self.exercise(

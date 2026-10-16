@@ -25,6 +25,7 @@ from smr_launcher.scenario_evidence import canonical
 from unique_save_file import signature
 
 PURPOSE = "ONE_AGENT_PACKAGED_CATALOGUE_MENU_V1"
+CACHED_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_MENU_V1"
 
 
 class MenuIncomplete(ValueError):
@@ -104,6 +105,8 @@ def verify_sibling_saves(owner):
 def verify_config(job):
     config = job["catalogue_menu"]
     target = config["target"]
+    require(job["purpose"] in (PURPOSE, CACHED_PURPOSE), "Closed catalogue menu purpose required")
+    cached = job["purpose"] == CACHED_PURPOSE
     require(
         set(target) == {"profile_id", "archive_sha256", "variant_id", "scenarios", "assets_sha256"},
         "Exact catalogue target fields required",
@@ -115,9 +118,22 @@ def verify_config(job):
         "Distinct single-scenario edition required",
     )
     require(
-        config["prepare_compatibility"] is False and config["warning"] == "",
-        "First catalogue menu trial requires direct edition without warning",
+        config["prepare_compatibility"] is cached
+        and type(config["warning"]) is str
+        and (0 < len(config["warning"]) <= 16384 if cached else config["warning"] == ""),
+        "Exact direct or cached preparation/warning contract required",
     )
+    if cached:
+        selection = config["selection"]
+        require(
+            set(selection) == {"profile_id", "archive_sha256", "variant_id", "scenarios"}
+            and selection["profile_id"] == "map-" + selection["variant_id"]
+            and selection["profile_id"] not in (target["profile_id"], job["return_profile"])
+            and selection["archive_sha256"] == target["archive_sha256"]
+            and selection["scenarios"] == target["scenarios"]
+            and config["preparation"]["cached_profile_id"] == target["profile_id"],
+            "Exact original-to-cached selection required",
+        )
     for key in ("archive_sha256", "variant_id", "assets_sha256"):
         require(
             len(target[key]) == 64 and all(c in "0123456789abcdef" for c in target[key]),
@@ -284,6 +300,7 @@ class PackagedService:
         self.child.wait()
         self.thread.join(timeout=2)
         require(not self.thread.is_alive(), "Packaged reader unsettled")
+        self.child.stdout.close()
         while not self.messages.empty():
             value = self.messages.get_nowait()
             if value.get("event") == "closed":
@@ -627,6 +644,23 @@ def pilot_class(common, agent_class):
                 self.app, target["profile_id"], self.job["return_profile"]
             )
             paths = [self.app.catalogue_file, self.app.originals / (record.archive_sha256 + ".7z")]
+            if self.config["prepare_compatibility"]:
+                selection = self.config["selection"]
+                selected = [
+                    r for r in self.app.catalogue() if r.profile_id == selection["profile_id"]
+                ]
+                require(
+                    len(selected) == 1
+                    and self.app._is_original_variant(selected[0])
+                    and selected[0].archive_sha256 == selection["archive_sha256"]
+                    and selected[0].variant_id == selection["variant_id"]
+                    and list(selected[0].scenarios) == selection["scenarios"],
+                    "Current original selection drift",
+                )
+                original_root = p._profile_path(selection["profile_id"])
+                p._marker(original_root, selection["profile_id"])
+                for base in (original_root, self.app.prepared / selected[0].prepared_directory):
+                    paths.extend(base / name for name in tree_files(base))
             for base in (
                 self.app.imports / record.imported_directory,
                 self.app.prepared / record.prepared_directory,
@@ -677,12 +711,14 @@ def pilot_class(common, agent_class):
                 event="ready", deadline=min(self.anchor + 60, self.launch_deadline)
             )
             target = self.config["target"]
+            prepare = self.config["prepare_compatibility"]
+            selection = self.config["selection"] if prepare else target
             scope = dict(
-                profile_id=target["profile_id"],
-                archive_sha256=target["archive_sha256"],
-                variant_id=target["variant_id"],
+                profile_id=selection["profile_id"],
+                archive_sha256=selection["archive_sha256"],
+                variant_id=selection["variant_id"],
                 game_executable_sha256=self.job["game_sha256"],
-                prepare_compatibility=False,
+                prepare_compatibility=prepare,
                 launch_deadline=self.launch_deadline,
             )
             self.service.send("play-review", "maptools.play_preflight", scope)
@@ -695,9 +731,9 @@ def pilot_class(common, agent_class):
             }
             require(
                 review["target"] == expected
-                and review["warning"] == ""
-                and review["preparation"] is None
-                and review["prepare_compatibility"] is False
+                and review["warning"] == self.config["warning"]
+                and review["preparation"] == (self.config["preparation"] if prepare else None)
+                and review["prepare_compatibility"] is prepare
                 and review["launch_deadline"] == self.launch_deadline,
                 "Packaged review scope drift",
             )
@@ -762,7 +798,12 @@ def pilot_class(common, agent_class):
                     scope="Exact direct service, observer and game identities; no descendant closure claim",
                 ),
             )
-            engine = dict(game_sha256=self.job["game_sha256"], catalogue_target=target)
+            engine = dict(
+                game_sha256=self.job["game_sha256"],
+                catalogue_target=target,
+                selected_catalogue_edition=selection,
+                prepare_compatibility=prepare,
+            )
             self.journal.append(
                 "selected",
                 dict(

@@ -700,18 +700,26 @@ class LauncherApplication:
             return self._create_compatibility_edition_locked(record, rules, label=label)
 
     def create_recipe_edition(
-        self, record: MapRecord, recipe_id: str, *, expected_plan: Optional[dict] = None
+        self,
+        record: MapRecord,
+        recipe_id: str,
+        *,
+        expected_plan: Optional[dict] = None,
+        reuse_only: bool = False,
     ) -> MapRecord:
-        """Compile a bundled reviewed recipe under one lock into separate saves."""
+        """Compile a reviewed recipe, or read one intact cache without mutation."""
         from .recipe_service import plan_recipe_job, resolve_bundled_recipe
 
-        with self._locked(recover_removal=expected_plan is None):
+        with self._locked(
+            recover_removal=expected_plan is None and not reuse_only, nonblocking=reuse_only
+        ):
             self._stopped()
-            if expected_plan is not None and (
+            if (expected_plan is not None or reuse_only) and (
                 self.profiles.journal.exists() or self.profiles.journal.is_symlink()
             ):
                 raise ApplicationError("Pending activation requires its owner; review Play again")
-            self.profiles.recover()
+            if not reuse_only:
+                self.profiles.recover()
             if record not in self.catalogue() or not self._is_original_variant(record):
                 raise ApplicationError("Recipe compilation requires a current original map")
             rules, binding = resolve_bundled_recipe(self, record, recipe_id)
@@ -719,9 +727,50 @@ class LauncherApplication:
                 current = plan_recipe_job(self, record, recipe_id, resolved=(rules, binding))
                 if current != expected_plan:
                     raise ApplicationError("Compatibility inputs changed; review Play again")
+            if reuse_only:
+                return self._cached_recipe_edition_locked(record, rules, binding)
             return self._create_compatibility_edition_locked(
                 record, rules, label=recipe_id, recipe_binding=binding
             )
+
+    def _cached_recipe_edition_locked(self, original, rules, binding):
+        """Read one intact current compiled edition; never prepare or recover."""
+        from .recipe_identity import expected_patched_context, map_file_context
+
+        source = removal._leaf(self.imports, original.imported_directory, r"[0-9a-f]{32}")
+        if assets_manifest_hash(source) != assets_manifest_hash(self._prepared_root(original)):
+            raise ApplicationError("Original import and prepared assets differ")
+        context = map_file_context(source, hash_cache=self._resource_hash_cache)
+        if context["identity"] != binding.source_files_sha256:
+            raise ApplicationError("Recipe source context changed; review Play again")
+        expected = {
+            **binding.as_json(),
+            "output_files_sha256": expected_patched_context(context, rules)["identity"],
+        }
+        matches = []
+        for edition in self.catalogue():
+            if (
+                not edition.recipe_receipt_sha256
+                or edition.archive_sha256 != original.archive_sha256
+                or edition.game_executable_sha256 != original.game_executable_sha256
+                or edition.imported_directory != original.imported_directory
+            ):
+                continue
+            try:
+                receipt = self._validate_recipe_context(edition, prepared_output=True)
+            except ApplicationError:
+                continue
+            if (
+                receipt["parent_variant"] == original.variant_id
+                and receipt["recipe_binding"] == expected
+            ):
+                matches.append(edition)
+        if len(matches) != 1:
+            raise ApplicationError(
+                "Finite automatic Play requires one intact cached compatibility edition; "
+                "prepare or select the edition in Map Details before Play"
+            )
+        return matches[0]
 
     def inspect_bank_candidate(
         self, profile_id: str, *, scenario_path: str, industry_path: str, model_path: str
@@ -744,7 +793,7 @@ class LauncherApplication:
                 model_path=model_path,
             )
 
-    def plan_recipe_batch(self, requests: list[dict]) -> dict:
+    def plan_recipe_batch(self, requests: list[dict], *, nonblocking: bool = False) -> dict:
         """Return a bounded compilation snapshot, never an execution ticket.
 
         Request order is preserved. A repeated profile/recipe pair is refused,
@@ -769,7 +818,7 @@ class LauncherApplication:
             ):
                 raise ApplicationError("Recipe request needs only profile_id and recipe_id strings")
         jobs, seen = [], {}
-        with self._locked(recover_removal=False):
+        with self._locked(recover_removal=False, nonblocking=nonblocking):
             records = self.catalogue()
             for index, request in enumerate(requests):
                 job = dict(index=index, **request, status="refused")

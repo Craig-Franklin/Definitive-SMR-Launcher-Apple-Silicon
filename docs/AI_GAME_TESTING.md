@@ -31,12 +31,17 @@ as an extra game process while a finite driver owns the queue.
 
 The packaged JSON-lines service has an optional finite dispatch gate on its
 existing `maptools.play_preflight` / `maptools.play_commit` pair. Supply
-`prepare_compatibility: false` and one absolute `launch_deadline` from the
+one absolute `launch_deadline` from the
 owner's original monotonic action clock. The deadline must be in the future,
 at most 480 seconds away at preflight, and identical at commit; it cannot be
-extended by changing or replaying the ticket. This first gate launches only
-an existing edition and does not create a recipe edition. It is a dispatch
-primitive, not a game-test admission or an implemented packaged visual owner.
+extended by changing or replaying the ticket. `prepare_compatibility: false`
+launches an existing selected edition. `prepare_compatibility: true` accepts only
+an original with one applicable recipe and exactly one intact current cached
+edition. Cache lookup is read-only and nonblocking; missing, changed, ambiguous
+or known-issue cache refuses without compiling or registering an edition.
+The review binds the original selection, plan and actual cached profile; the
+commit revalidates all three. Ordinary nonfinite preparation retains its existing
+compilation behavior. This dispatch primitive does not supply game-test admission.
 
 The service rechecks its owner and the fixed deadline at the application/profile
 exchange, settings update and actual `Popen` boundary. Finite launch refuses busy
@@ -242,3 +247,15 @@ This is packaged **backend** acceptance, not a Swift UI click or map gameplay.
 Focused offline controls: `python -m unittest discover -s tests -p test_catalogue_menu.py`.
 The temporary service and profile fixtures do not admit a live trial or prove
 that a game reached its menu. Runtime observations require separate review.
+
+
+`ONE_AGENT_PACKAGED_CACHED_MENU_V1` is the separate original-to-cached menu
+purpose. Its grant binds the exact original selection, prepared target, recipe
+preparation descriptor and full warning text. It uses `prepare_compatibility=true`
+and refuses any changed preflight warning or plan before commit. The prepared
+target, original canonical/prepared data, return state and all saves are pinned.
+It reuses the same service/observer/menu/quit/restoration path and finite bounds;
+it cannot compile, create an edition, start a scenario or load/save a game.
+Current input/output recipe receipts establish file correspondence, not effective
+engine resource precedence or gameplay compatibility. A new released package and
+fresh exact admission are required before testing this purpose live.

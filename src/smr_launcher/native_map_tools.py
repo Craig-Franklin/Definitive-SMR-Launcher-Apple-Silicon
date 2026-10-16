@@ -90,8 +90,6 @@ class NativePlayRequests:
         launch_deadline = params.get("launch_deadline")
         if "launch_deadline" in params:
             require_launch_deadline(launch_deadline)
-            if prepare:
-                raise ValueError("Finite Play requires prepare_compatibility=false")
         preparation = None
         expected_plan = None
         if text(params, "game_executable_sha256") != app.installation.executable_sha256:
@@ -100,6 +98,8 @@ class NativePlayRequests:
         if app.profiles.journal.exists():
             raise ValueError("A profile switch needs recovery; inspect Installation & Recovery")
         if profile == ORIGINAL:
+            if launch_deadline is not None and prepare:
+                raise ValueError("Finite automatic Play requires a cached compatibility edition")
             target = dict(
                 profile_id=ORIGINAL,
                 archive_sha256="",
@@ -123,12 +123,17 @@ class NativePlayRequests:
             name = record.name
             if prepare:
                 choices = app.compatibility_recipes(record)
+                if launch_deadline is not None and len(choices) != 1:
+                    raise ValueError(
+                        "Finite automatic Play requires one cached compatibility edition"
+                    )
                 if len(choices) > 1:
                     warning += "\n\nMultiple compatibility editions are available. Choose one in Map Details; this launch uses the original edition."
                 elif choices:
                     choice = choices[0]
+                    fields = dict(nonblocking=True) if launch_deadline is not None else {}
                     plan = app.plan_recipe_batch(
-                        [dict(profile_id=record.profile_id, recipe_id=choice.recipe_id)]
+                        [dict(profile_id=record.profile_id, recipe_id=choice.recipe_id)], **fields
                     )
                     if plan["all_supported"]:
                         expected_plan = {
@@ -141,6 +146,20 @@ class NativePlayRequests:
                             title=choice.title,
                             plan_digest=digest("native-play-preparation", plan),
                         )
+                        if launch_deadline is not None:
+                            edition = app.create_recipe_edition(
+                                record,
+                                choice.recipe_id,
+                                expected_plan=expected_plan,
+                                reuse_only=True,
+                            )
+                            actual = app.verification_for(edition, nonblocking=True)
+                            if actual and actual.issue:
+                                raise ValueError(
+                                    "Cached edition has a known issue; select it in Map Details "
+                                    "and review Play: " + actual.issue
+                                )
+                            preparation["cached_profile_id"] = edition.profile_id
                         warning += (
                             "\n\n"
                             + choice.title
@@ -150,6 +169,11 @@ class NativePlayRequests:
                             "Original map and saves stay intact; existing saves remain on their own edition."
                         )
                     else:
+                        if launch_deadline is not None:
+                            raise ValueError(
+                                "Finite compatibility preparation unavailable: "
+                                + plan["jobs"][0]["reason"]
+                            )
                         warning += (
                             "\n\nCompatibility preparation is unavailable: "
                             + plan["jobs"][0]["reason"]
@@ -199,9 +223,21 @@ class NativePlayRequests:
             if review["preparation"] is not None:
                 record = library.record(app, launch_profile)
                 edition = app.create_recipe_edition(
-                    record, review["preparation"]["recipe_id"], expected_plan=saved[2]
+                    record,
+                    review["preparation"]["recipe_id"],
+                    expected_plan=saved[2],
+                    **(dict(reuse_only=True) if review["launch_deadline"] is not None else {}),
                 )
-                verification = app.verification_for(edition)
+                if (
+                    review["launch_deadline"] is not None
+                    and edition.profile_id != review["preparation"]["cached_profile_id"]
+                ):
+                    raise ValueError("Cached compatibility edition changed; review Play again")
+                verification = (
+                    app.verification_for(edition, nonblocking=True)
+                    if review["launch_deadline"] is not None
+                    else app.verification_for(edition)
+                )
                 if verification and verification.issue:
                     # The source review did not cover this edition's known issue.
                     # Preparation is complete, but no launch has been attempted.

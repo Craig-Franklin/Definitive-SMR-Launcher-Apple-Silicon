@@ -370,7 +370,7 @@ class NativePlayTests(TestCase):
 
     def test_finite_deadline_is_fixed_consumed_and_existing_edition_only(self):
         deadline = time.monotonic() + 20
-        with self.assertRaisesRegex(ValueError, "prepare_compatibility=false"):
+        with self.assertRaisesRegex(ValueError, "cached compatibility edition"):
             self.preflight(launch_deadline=deadline)
         review = self.preflight(launch_deadline=deadline, prepare_compatibility=False)
         self.assertEqual(review["launch_deadline"], deadline)
