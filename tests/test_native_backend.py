@@ -1200,6 +1200,77 @@ class NativeProtocolTests(TestCase):
             )
             self.assertEqual(snapshot[0]["history_error"], "Synthetic monitor history failure")
 
+    def test_automatic_check_survives_busy_startup_once_and_honors_opt_out_and_close(self):
+        for refusal in ("", "opt_out", "pending", "closing", "eof", "rejected"):
+            with self.subTest(refusal=refusal):
+                w = window()
+                w.pending_update = None
+                w.native_tools = Mock()
+                w.auto_updates = SimpleNamespace(get=lambda: refusal != "opt_out")
+                w.close_when_idle = refusal == "closing"
+                w.busy = True
+                w.check_for_updates()
+                self.assertTrue(w._native_update_check_pending)
+                w._native_tick()
+                w.native_tools.start.assert_not_called()
+                w.busy = False
+                if refusal == "pending":
+                    w.pending_update = Path("/synthetic/pending")
+                if refusal == "eof":
+                    w._native_input_ended.set()
+                if refusal == "rejected":
+                    w.native_tools.start.side_effect = ValueError("busy tool owner")
+                w._native_tick()
+                w._native_tick()
+                self.assertFalse(w._native_update_check_pending)
+                if refusal == "rejected":
+                    w.native_tools.start.assert_called_once_with("update.check", {})
+                    self.assertEqual(w._emit_native.call_args.args[0]["event"], "tools.alert")
+                elif refusal:
+                    w.native_tools.start.assert_not_called()
+                else:
+                    w.native_tools.start.assert_called_once_with("update.check", {})
+
+    def test_update_preference_write_reply_and_fresh_reader_agree(self):
+        from smr_launcher.updates import UpdatePreferences
+        from collections import OrderedDict
+
+        with TemporaryDirectory(dir=Path(gettempdir()).resolve()) as folder:
+            w = window()
+            w._native_completed = OrderedDict()
+            w.auto_updates = SimpleNamespace(value=False)
+            w.auto_updates.get = lambda: w.auto_updates.value
+            w.auto_updates.set = lambda value: setattr(w.auto_updates, "value", value)
+            w.language_preferences = SimpleNamespace(language="en", voice="")
+            w.voices = ()
+            w.pending_update = None
+            w.update_preferences = UpdatePreferences(folder)
+            work = []
+            w._background = lambda operation, completed, **kwargs: work.append(
+                (operation, completed)
+            )
+            w._native_dispatch(
+                dict(id="enable", method="prefs.save", params=dict(automatic_updates=True))
+            )
+            operation, completed = work.pop()
+            completed(True, operation())
+            reply = w._emit_native.call_args.args[0]
+            self.assertTrue(reply["ok"] and reply["data"]["automatic_updates"])
+            self.assertTrue(w.auto_updates.get())
+            self.assertTrue(UpdatePreferences(folder).automatic())
+            # A failed write must not change the owner flag or claim success.
+            w.update_preferences.set_automatic = Mock(side_effect=OSError("disk refused"))
+            w._native_dispatch(
+                dict(id="disable", method="prefs.save", params=dict(automatic_updates=False))
+            )
+            operation, completed = work.pop()
+            try:
+                operation()
+            except OSError as exc:
+                completed(False, exc)
+            self.assertFalse(w._emit_native.call_args.args[0]["ok"])
+            self.assertTrue(w.auto_updates.get() and UpdatePreferences(folder).automatic())
+
     def test_preferences_reuse_existing_public_translation_catalogue(self):
         from smr_launcher.language import TRANSLATIONS
 

@@ -109,6 +109,9 @@ class NativeFrontendTests(unittest.TestCase):
                     "-swift-version",
                     "5",
                     "-O",
+                    # Keep optimization while retaining failed assertion messages.
+                    "-assert-config",
+                    "Debug",
                     "src/native/Backend.swift",
                     "src/native/LauncherModel.swift",
                     "tests/native/ModelChecks.swift",

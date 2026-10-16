@@ -3,10 +3,12 @@
 import json
 import sys
 import time
+from threading import Thread
 
 counts = {}
 configuration = {}
 recorded = False
+preference = False
 for line in sys.stdin:
     request = json.loads(line)
     method = request["method"]
@@ -35,6 +37,52 @@ for line in sys.stdin:
             }
         )
         print(json.dumps(value), flush=True)
+        continue
+    if method == "prefs":
+        captured = preference
+        request_id = request["id"]
+
+        def prefs_reply(request_id=request_id, captured=captured):
+            if configuration.get("slow_prefs"):
+                time.sleep(0.2)
+            print(
+                json.dumps(
+                    {
+                        "id": request_id,
+                        "ok": True,
+                        "data": {"automatic_updates": captured, "language": "en", "voice": ""},
+                    }
+                ),
+                flush=True,
+            )
+
+        if configuration.get("slow_prefs"):
+            Thread(target=prefs_reply, daemon=True).start()
+        else:
+            prefs_reply()
+        continue
+    if method == "prefs.save":
+        if configuration.get("slow_pref_save"):
+            time.sleep(0.15)
+        failed = configuration.get("reject_pref_save")
+        if not failed:
+            preference = request["params"].get("automatic_updates", preference)
+        print(
+            json.dumps(
+                {
+                    "id": request["id"],
+                    "ok": not failed,
+                    **(
+                        {"error": "synthetic preference write refused"}
+                        if failed
+                        else {
+                            "data": {"automatic_updates": preference, "language": "en", "voice": ""}
+                        }
+                    ),
+                }
+            ),
+            flush=True,
+        )
         continue
     if method == "artwork":
         if configuration.get("slow_artwork"):

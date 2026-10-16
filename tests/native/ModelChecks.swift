@@ -1,8 +1,10 @@
 import AppKit
+import Darwin
 import Foundation
 
 @main struct ModelChecks {
     @MainActor static func main() async throws {
+        setbuf(stdout, nil)
         let model = LauncherModel(fixture: true)
         model.maps = try (0..<1000).map { index in
             try MapItem(["id": "fixture-\(index)", "name": String(format: "Map %04d", index),

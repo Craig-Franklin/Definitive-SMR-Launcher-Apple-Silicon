@@ -672,8 +672,19 @@ class NativeBackendWindow(LauncherWindow):
         )
 
     def check_for_updates(self):
-        if not self.busy and self.pending_update is None and not self.initializing:
-            self.native_tools.start("update.check", {})
+        if (
+            self.closed
+            or self.pending_update is not None
+            or self._native_input_ended.is_set()
+            or getattr(self, "_native_disconnected", False)
+            or getattr(self, "_native_parent_approved_close", False)
+        ):
+            return
+        if self.busy or self.initializing or self._native_inflight is not None:
+            self._native_update_check_pending = True
+            return
+        self._native_update_check_pending = False
+        self.native_tools.start("update.check", {})
 
     def _native_status(self):
         return dict(
@@ -818,6 +829,26 @@ class NativeBackendWindow(LauncherWindow):
         if status != self._native_last_status:
             self._native_last_status = status
             self._emit_native(dict(event="status", data=status))
+        if (
+            getattr(self, "_native_update_check_pending", False)
+            and not self.busy
+            and not self.initializing
+            and self._native_inflight is None
+            and self._native_requests.empty()
+        ):
+            self._native_update_check_pending = False
+            if self.auto_updates.get() and self.pending_update is None and not self.close_when_idle:
+                try:
+                    self.check_for_updates()
+                except Exception:
+                    self._emit_native(
+                        dict(
+                            event="tools.alert",
+                            data=dict(
+                                message="The automatic update check could not start. Inspect update status before checking again."
+                            ),
+                        )
+                    )
         if not self.busy and not self.initializing and self._native_inflight is None:
             try:
                 request = self._native_requests.get_nowait()
