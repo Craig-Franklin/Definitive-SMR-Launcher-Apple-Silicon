@@ -15,15 +15,17 @@ extension ModelChecks {
         _ = model.visible; _ = model.visible; _ = model.visible
         precondition(model.visibleBuilds == builds, "Navigation, status and drafts must not repeat query/sort")
 
-        _ = try await backend.call("fixture.configure", ["slow_details": true])
+        _ = try await backend.call("fixture.configure", ["slow_details": true, "hold_details": true])
         model.selection = map.id; model.details[map.id] = nil
         let before = try await backend.call("fixture.counts")
         async let first: Void = model.loadDetails(map.id)
         async let second: Void = model.loadDetails(map.id)
-        try await Task.sleep(nanoseconds: 70_000_000)
+        // Observe the pending read itself; the fixture cannot finish it until release.
+        while model.reading == 0 { await Task.yield() }
         precondition(model.reading == 1 && !model.busy, "A detail read must not own the mutation gate")
         model.select(other)
         precondition(model.selection == other.id, "Cached selection must remain usable during delayed reads")
+        _ = try await backend.call("fixture.release_details")
         _ = await (first, second)
         let after = try await backend.call("fixture.counts")
         precondition((after["details"] as? Int ?? 0) == (before["details"] as? Int ?? 0) + 1, "Concurrent identical detail loads must coalesce")

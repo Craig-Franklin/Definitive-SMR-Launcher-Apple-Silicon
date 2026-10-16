@@ -9,6 +9,7 @@ counts = {}
 configuration = {}
 recorded = False
 preference = False
+held_details = []
 for line in sys.stdin:
     request = json.loads(line)
     method = request["method"]
@@ -19,6 +20,13 @@ for line in sys.stdin:
         continue
     if method == "fixture.counts":
         print(json.dumps({"id": request["id"], "ok": True, "data": counts}), flush=True)
+        continue
+    if method == "fixture.release_details":
+        for value in held_details:
+            print(json.dumps(value), flush=True)
+        held_details.clear()
+        configuration.pop("hold_details", None)
+        print(json.dumps({"id": request["id"], "ok": True, "data": {}}), flush=True)
         continue
     if method == "briefing.translate":
         if configuration.get("slow_translation"):
@@ -166,6 +174,9 @@ for line in sys.stdin:
                 "recorded": 1,
             }
         )
+        if method == "details" and configuration.get("hold_details"):
+            held_details.append(value)
+            continue
         print(json.dumps(value), flush=True)
         continue
     if method == "disconnect":
