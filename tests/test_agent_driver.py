@@ -426,6 +426,100 @@ class AgentRouteTests(unittest.TestCase):
         self.assertEqual(result["outcome"]["status"], "automation_failed")
         self.assertTrue(result["stopped"] and result["restored"] and result["terminal_finished"])
 
+    def test_transport_partial_skips_cargo_and_uses_existing_confirmed_quit(self):
+        self.owner.job["purpose"] = driver.TRANSPORT_PURPOSE
+        self.quit_confirmation = True
+        self.reply_transform = lambda value: (
+            dict(value, choice="partial", action=[], observation="Second stop not established")
+            if "action" in self.stage_indexes and "finished" not in self.stage_indexes
+            else value
+        )
+        result = self.run_trial()
+        self.assertTrue(result["stopped"] and result["restored"] and result["terminal_finished"])
+        self.assertEqual(result["outcome"]["partial_reason"], "Second stop not established")
+        self.assertEqual(result["outcome"]["agent_observed_stages"], ["world", "finished"])
+        self.assertNotIn("continued", self.stage_indexes)
+        self.assertFalse(result["outcome"]["cargo_credit"])
+        self.assertEqual(
+            self.actions[-2:],
+            [["hotkey", "--key", "CmdOrCtrl+Q"], ["press-key", "--key", "Return"]],
+        )
+
+    def assert_transport_cutoff(self, final_ingress):
+        self.owner.job["purpose"] = driver.TRANSPORT_PURPOSE
+        self.quit_confirmation = True
+
+        def expire_work():
+            if "action" in self.stage_indexes and "finished" not in self.stage_indexes:
+                self.clock[0] = self.owner.anchor + driver.TRANSPORT_WORK_SECONDS
+
+        if final_ingress:
+            self.before_poll = expire_work
+        else:
+
+            def reply(value):
+                expire_work()
+                return value
+
+            self.reply_transform = reply
+        result = self.run_trial()
+        self.assertTrue(result["stopped"] and result["restored"] and result["terminal_finished"])
+        self.assertIn("quit margin", result["outcome"]["partial_reason"])
+        self.assertNotIn("continued", self.stage_indexes)
+        self.assertFalse(self.owner.uncertain_input)
+        self.assertEqual(len(self.actions), 3, "Only world input, Quit and confirmation")
+        self.assertLess(self.clock[0], self.owner.anchor + driver.ACTION_SECONDS)
+
+    def test_transport_cutoff_during_reply_preserves_quit_margin(self):
+        self.assert_transport_cutoff(False)
+
+    def test_transport_cutoff_during_final_ingress_preserves_quit_margin(self):
+        self.assert_transport_cutoff(True)
+
+    def test_depot_shortcut_is_transport_only(self):
+        frame = {"window": {"width": 800, "height": 600}}
+        action = ["press-key", "--key", "B"]
+        self.assertEqual(
+            driver.validate_action(
+                "action", action, frame, "token", "owned_window", purpose=driver.TRANSPORT_PURPOSE
+            ),
+            action,
+        )
+        for purpose, stage in (
+            (driver.PURPOSE, "action"),
+            (driver.WINDOW_PURPOSE, "menu"),
+            (driver.TRANSPORT_PURPOSE, "world"),
+        ):
+            with self.assertRaises(ControlRefused):
+                driver.validate_action(
+                    stage, action, frame, "token", "owned_window", purpose=purpose
+                )
+
+    def assert_partial_refused(self, purpose, action):
+        self.owner.launch()
+        self.owner.job["purpose"] = purpose
+        self.reply_transform = lambda value: dict(value, choice="partial", action=action)
+        with self.assertRaisesRegex(ControlRefused, "Partial finish"):
+            self.owner.decisions.stage("action", "Synthetic prerequisite")
+        self.assertEqual(self.actions, [])
+
+    def test_partial_cannot_carry_input(self):
+        self.assert_partial_refused(driver.TRANSPORT_PURPOSE, ["press-key", "--key", "B"])
+
+    def test_partial_cannot_finish_save_cycle_early(self):
+        self.assert_partial_refused(driver.PURPOSE, [])
+
+    def test_transport_stage_budget_ends_with_normal_quit_without_seventeenth_input(self):
+        self.owner.job["purpose"] = driver.TRANSPORT_PURPOSE
+        self.reply_transform = lambda value: (
+            dict(value, choice="wait", action=[]) if "finished" not in self.stage_indexes else value
+        )
+        result = self.run_trial()
+        self.assertTrue(result["stopped"] and result["restored"] and result["terminal_finished"])
+        self.assertEqual(self.stage_indexes["world"], 16)
+        self.assertEqual(self.actions, [["hotkey", "--key", "CmdOrCtrl+Q"]])
+        self.assertIn("budget exhausted", result["outcome"]["partial_reason"])
+
     def test_transport_purpose_has_distinct_admission_and_refuses_save_pair(self):
         self.assertEqual(
             driver.admission_decisions(driver.TRANSPORT_PURPOSE),

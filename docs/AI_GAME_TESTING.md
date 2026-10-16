@@ -143,10 +143,21 @@ supports `ONE_AGENT_UK_TRANSPORT_ACTION_V1`. This is a single-launch operation:
 observe the world, establish a station/engine/car/route, observe cargo delivery,
 then quit normally and restore. Its distinct admission/review decisions cannot
 be substituted with a save-cycle grant. It uses the same 480/900-second bounds
-and existing input grammar; it does not run the save/reopen cycle or permit the
+and existing input grammar, with `press-key --key B` for the documented depot
+tool during transport actions. It does not run the save/reopen cycle or permit the
 paired Save As shortcut. Goods offered, matching cars and actual delivery are
 separate observations. Movement or income alone cannot establish delivery.
 Raw cargo credit remains false until the owner reviews the actual evidence.
+
+Transport work ends at 390 seconds from the original anchor, leaving time for
+the existing observed quit/confirmation and receipt path inside 480 seconds.
+The final input guard rejects new transport work at that cutoff. A dispatched
+provider call still uses its original bounded completion wait. A transport
+reply with `choice: "partial"` and an empty action ends work immediately and
+skips remaining transport stages. It records the incomplete prerequisite and
+quits normally; it grants no cargo or full-scenario credit. The same transition
+applies when a transport stage exhausts its 16 decisions. Cancellation, lost
+ownership and unknown delivery still use the existing refusal/cleanup path.
 
 Run with the repository's Python 3.12 development environment:
 

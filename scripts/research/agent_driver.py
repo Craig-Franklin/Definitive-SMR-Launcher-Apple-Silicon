@@ -35,6 +35,7 @@ from unique_save_file import SaveIntent, SaveScope, finite
 PURPOSE = "ONE_AGENT_VISUAL_SAVE_REOPEN_PILOT_V1"
 WINDOW_PURPOSE = "ONE_AGENT_WINDOW_MENU_PILOT_V1"
 TRANSPORT_PURPOSE = "ONE_AGENT_UK_TRANSPORT_ACTION_V1"
+TRANSPORT_WORK_SECONDS = 390
 STAGES = ("world", "action", "filename", "saved", "quit", "reopened", "continued", "finished")
 MENU_STAGES = ("launcher", "menu", "returned")
 ACTION_SECONDS = 480
@@ -57,6 +58,19 @@ def admission_decisions(purpose):
 
 class StaleFrame(ControlRefused):
     """Final dispatch refused before native input child creation."""
+
+
+class TransportIncomplete(ValueError):
+    """End transport work and enter the existing normal-quit path."""
+
+
+def transport_work_guard(owner):
+    if (
+        owner.job["purpose"] == TRANSPORT_PURPOSE
+        and getattr(owner, "transport_work_active", False)
+        and time.monotonic() >= owner.anchor + TRANSPORT_WORK_SECONDS
+    ):
+        raise TransportIncomplete("Transport work cutoff reached; quit margin reserved")
 
 
 def completed_error(common, failure, argv, runtime, deadline):
@@ -186,7 +200,7 @@ class AgentJobControl(ActiveJobControl):
         return active
 
 
-def validate_action(stage, action, frame, token, receiver):
+def validate_action(stage, action, frame, token, receiver, *, purpose=None):
     """Closed native input grammar; target selectors and focus recovery refuse."""
     require(type(action) is list and all(type(x) is str for x in action), "Action grammar")
     require(stage in STAGES + MENU_STAGES and action, "Unknown action stage")
@@ -232,6 +246,12 @@ def validate_action(stage, action, frame, token, receiver):
             "menu": {"Escape"},
             "returned": {"Escape"},
         }
+        if (
+            purpose == TRANSPORT_PURPOSE
+            and stage in ("action", "continued")
+            and command == "press-key"
+        ):
+            allowed[stage] = {"B"}
         require(
             len(action) == 3 and action[1] == "--key" and action[2] in allowed.get(stage, set()),
             "Unnamed keyboard action refused",
@@ -290,6 +310,7 @@ class AgentDecisions:
         quitting = stage in ("quit", "finished")
         for _ in range(16):
             owner.guard_running(allow_exit=quitting and quit_inputs > 0)
+            transport_work_guard(owner)
             if quitting and quit_inputs and owner.monitor.inspect(owner.game.pid) is None:
                 return {
                     "stage": stage,
@@ -302,6 +323,7 @@ class AgentDecisions:
             self.sequence += 1
             label = f"Agent{self.sequence:03d}"
             receipt, frame, window = owner.agent_frame(label, deadline)
+            transport_work_guard(owner)
             captured = owner.frame_started
             if stage in ("launcher", "world", "reopened") and frame["window"].get("title") == (
                 "Sid Meier's Railroads! Options"
@@ -367,11 +389,13 @@ class AgentDecisions:
             reply_path = owner.directory / (label + "-decision.json")
             while not reply_path.exists():
                 owner.guard_running()
+                transport_work_guard(owner)
                 require(
                     time.monotonic() < reply_deadline,
                     "Agent decision deadline expired",
                 )
                 time.sleep(0.1)
+            transport_work_guard(owner)
             require(time.monotonic() < reply_deadline, "Agent decision deadline expired")
             decision = decode(read_plain(reply_path, maximum=65536))
             require(
@@ -388,7 +412,7 @@ class AgentDecisions:
                 }
                 and decision["request_sha256"] == request_sha
                 and decision["evidence_kind"] == "agent_visual_decision"
-                and decision["choice"] in ("action", "observed", "wait", "stop")
+                and decision["choice"] in ("action", "observed", "wait", "stop", "partial")
                 and type(decision["action"]) is list
                 and type(decision["observation"]) is str
                 and 0 < len(decision["observation"]) <= 2048
@@ -400,8 +424,17 @@ class AgentDecisions:
                 require(decision["action"] == [], "Stop cannot carry input")
                 raise ValueError("Agent stopped uncertain scene")
             owner.guard_running()
+            transport_work_guard(owner)
             require(time.monotonic() < reply_deadline, "Agent decision deadline expired")
             require(time.monotonic() < deadline, "Fixed agent stage deadline expired")
+            if decision["choice"] == "partial":
+                require(
+                    owner.job["purpose"] == TRANSPORT_PURPOSE
+                    and stage in ("world", "action", "continued")
+                    and decision["action"] == [],
+                    "Partial finish is transport-only and cannot carry input",
+                )
+                raise TransportIncomplete(decision["observation"])
             if decision["choice"] == "wait":
                 require(decision["action"] == [], "Wait cannot carry input")
                 owner.write(
@@ -474,6 +507,7 @@ class AgentDecisions:
                 frame,
                 owner.job["agent_save"]["token"],
                 decision["receiver"],
+                purpose=owner.job["purpose"],
             )
             if quitting:
                 require(
@@ -503,6 +537,10 @@ class AgentDecisions:
                     "machine_scene_predicate": False,
                     "human_confirmation": False,
                 }
+        if owner.job["purpose"] == TRANSPORT_PURPOSE and getattr(
+            owner, "transport_work_active", False
+        ):
+            raise TransportIncomplete("Finite transport stage action budget exhausted")
         raise ValueError("Finite agent stage action budget exhausted")
 
 
@@ -593,6 +631,7 @@ def pilot_class(common):
                     time.monotonic() < min(deadline, self.anchor + ACTION_SECONDS),
                     "Agent dispatch deadline expired",
                 )
+                transport_work_guard(self)
                 if before_spawn:
                     before_spawn()
 
@@ -911,6 +950,7 @@ def pilot_class(common):
                 )
                 if validate:
                     validate()
+                transport_work_guard(self)
                 require(time.monotonic() < deadline, "Fixed agent operation deadline expired")
                 if not 0 <= time.monotonic() - captured < FRAME_SECONDS:
                     raise StaleFrame("Agent frame expired before delivery")
@@ -1063,32 +1103,53 @@ def pilot_class(common):
 
         def observe(self):
             if self.job["purpose"] == TRANSPORT_PURPOSE:
-                world = self.decisions.stage(
-                    "world",
-                    "Start the selected original Alternate UK scenario. Observe its playable world and actual starting city; pause while planning construction.",
-                )
-                route = self.decisions.stage(
-                    "action",
-                    "Use the current world to establish a short connected route between actual terminals. Build the required station or resource annex, buy an available engine and attach cars matching visibly offered goods. Observe the selected endpoints, engine, cars and route; purchases or a moving train alone do not prove delivery.",
-                )
-                cargo = self.decisions.stage(
-                    "continued",
-                    "Run the established route and observe three distinct facts: goods offered at its source, matching cars attached/loaded, and actual arrival and unloading or an explicit delivery result at the destination. Do not infer delivery from movement, time passing or unrelated income. Stop honestly if these facts cannot be observed within this attempt.",
-                )
+                world = route = cargo = None
+                partial_reason = None
+                self.transport_work_active = True
+                try:
+                    world = self.decisions.stage(
+                        "world",
+                        "Start the selected original Alternate UK scenario. Observe its playable world and actual starting city; pause while planning construction.",
+                    )
+                    route = self.decisions.stage(
+                        "action",
+                        "Use the current world to establish a short connected route between actual terminals. Build the required station or resource annex, buy an available engine and attach cars matching visibly offered goods. Observe the selected endpoints, engine, cars and route; purchases or a moving train alone do not prove delivery.",
+                    )
+                    cargo = self.decisions.stage(
+                        "continued",
+                        "Run the established route and observe three distinct facts: goods offered at its source, matching cars attached/loaded, and actual arrival and unloading or an explicit delivery result at the destination. Do not infer delivery from movement, time passing or unrelated income. Stop honestly if these facts cannot be observed within this attempt.",
+                    )
+                except TransportIncomplete as failure:
+                    partial_reason = str(failure)
+                    self.write(
+                        "transport-partial.json", {"reason": partial_reason, "cargo_credit": False}
+                    )
+                finally:
+                    self.transport_work_active = False
                 self.normal_quit("finished", None)
                 return {
                     "status": "safety_stop",
                     "cause": "agent_visual_transport_action_requires_review",
-                    "world_loaded": "agent_observed",
+                    "world_loaded": "agent_observed" if world else "unknown",
                     "gameplay_credit": False,
                     "save_reopen_credit": False,
                     "cargo_credit": False,
                     "evidence_kind": "agent_visual_observations",
                     "human_confirmation": False,
-                    "agent_observed_stages": ["world", "action", "continued", "finished"],
+                    "agent_observed_stages": [
+                        name
+                        for name, value in (
+                            ("world", world),
+                            ("action", route),
+                            ("continued", cargo),
+                        )
+                        if value is not None
+                    ]
+                    + ["finished"],
                     "world": world,
                     "route": route,
                     "cargo": cargo,
+                    "partial_reason": partial_reason,
                 }
             if self.job["purpose"] == WINDOW_PURPOSE:
                 launcher = self.decisions.stage(
