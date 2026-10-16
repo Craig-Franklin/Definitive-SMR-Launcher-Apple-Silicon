@@ -2,8 +2,8 @@
 
 **Technical reference and recorded observations.** Current compatibility scope,
 status and acceptance live in [issue #1](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/1)
-and assigned issues. Execution is paused; historical commands and passed checks
-do not grant runtime authority. Any resumption also requires applicable private authority.
+and assigned issues. Historical commands and passed checks do not grant runtime
+authority. Game testing requires applicable current private authority.
 
 The [historical compatibility audit](COMPATIBILITY_AUDIT_PLAN.md) preserves
 corpus findings and proposed gates. Use [knowledge verification](rea-research/KNOWLEDGE_USE.md)
@@ -33,6 +33,28 @@ version, archive hash, game executable hash, provenance, rationale, and each
 changed file's before/after hash. Repeating a rule is idempotent. A mismatch
 stops preparation. Changes that affect gameplay must remain clearly labelled
 compatibility editions with separate saves.
+
+Normal native Play checks the selected original for an exact bundled recipe.
+When one recipe passes the existing planner, Play presents its limitations and
+offers **Prepare & Play Compatibility Edition** or **Play Original Edition**.
+Preparation calls the same maintained compiler/cache service as Map Details,
+then launches the resulting edition through the existing protected launch path.
+The original map and its saves remain on their original edition. A prepared
+edition keeps its own saves; no saves are copied or migrated by this choice.
+If the resulting edition has its own known issue, preparation stops before
+launch and displays that warning. Select that edition and review Play again;
+the original's review cannot authorize a different edition's known warning.
+
+The one-use Play review binds the original edition, executable, warning and
+resource plan. Confirmation rechecks the review; the compiler compares the
+expected plan under its application lock before preparation. Changed inputs,
+pending activation recovery or unknown preparation/launch outcomes stop the
+operation. Multiple recipes or unavailable preparation are shown explicitly and
+require review before launching the original. Already-prepared editions and
+Original Game retain their existing launch behavior. The finite visual driver
+continues to use its explicitly admitted isolated profile and does not take this
+native UI preparation path. Source tests of this integration do not establish
+packaged or game acceptance.
 
 Static XML parsing is an early diagnostic step. It does not exercise the engine's
 resource registries, merged stock definitions, terrain, scheduling or runtime

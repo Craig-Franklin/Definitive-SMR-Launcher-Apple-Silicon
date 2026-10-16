@@ -654,13 +654,15 @@ def _donor_record(app):
     return donor_records[0]
 
 
-def plan_recipe_job(app, record, recipe_id: str) -> dict:
+def plan_recipe_job(app, record, recipe_id: str, *, resolved=None) -> dict:
     """Project the existing resolver result without retaining payload bytes.
 
     Caller holds the application lock. Donor archive identity is a catalogue
     claim, as in the existing resolver; only donor member bytes are verified.
     """
-    rules, binding = resolve_bundled_recipe(app, record, recipe_id)
+    # Preparation can compare the review with the exact rules it will consume,
+    # without resolving a second, potentially different resource snapshot.
+    rules, binding = resolved or resolve_bundled_recipe(app, record, recipe_id)
     recipe = _RECIPES[recipe_id]
     changes = []
     for rule in rules:

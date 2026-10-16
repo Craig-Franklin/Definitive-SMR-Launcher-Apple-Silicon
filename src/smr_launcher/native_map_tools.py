@@ -77,6 +77,11 @@ class NativePlayRequests:
     @staticmethod
     def inspect(library, app, params):
         profile = text(params, "profile_id")
+        prepare = params.get("prepare_compatibility", True)
+        if type(prepare) is not bool:
+            raise ValueError("prepare_compatibility must be Boolean")
+        preparation = None
+        expected_plan = None
         if text(params, "game_executable_sha256") != app.installation.executable_sha256:
             raise ValueError("The game build changed; review Play again")
         app._stopped()
@@ -100,17 +105,56 @@ class NativePlayRequests:
             verification = app.verification_for(record)
             warning = verification.issue if verification else ""
             name = record.name
+            if prepare:
+                choices = app.compatibility_recipes(record)
+                if len(choices) > 1:
+                    warning += "\n\nMultiple compatibility editions are available. Choose one in Map Details; this launch uses the original edition."
+                elif choices:
+                    choice = choices[0]
+                    plan = app.plan_recipe_batch(
+                        [dict(profile_id=record.profile_id, recipe_id=choice.recipe_id)]
+                    )
+                    if plan["all_supported"]:
+                        expected_plan = {
+                            k: v
+                            for k, v in plan["jobs"][0].items()
+                            if k not in ("index", "profile_id", "recipe_id", "status")
+                        }
+                        preparation = dict(
+                            recipe_id=choice.recipe_id,
+                            title=choice.title,
+                            plan_digest=digest("native-play-preparation", plan),
+                        )
+                        warning += (
+                            "\n\n"
+                            + choice.title
+                            + "\n"
+                            + choice.description
+                            + "\n\nPrepare or reuse a separate compatibility edition and play it. "
+                            "Original map and saves stay intact; existing saves remain on their own edition."
+                        )
+                    else:
+                        warning += (
+                            "\n\nCompatibility preparation is unavailable: "
+                            + plan["jobs"][0]["reason"]
+                            + ". This launch uses the original edition. Inspect Map Details before continuing."
+                        )
+        warning = warning.strip()
         return dict(
             target=target,
             name=name,
             warning=warning,
-            fingerprint=digest("native-play-review", target, warning),
+            preparation=preparation,
+            prepare_compatibility=prepare,
+            expected_plan=expected_plan,
+            fingerprint=digest("native-play-review", target, warning, prepare, preparation),
         )
 
     def preflight(self, library, app, params):
         review = self.inspect(library, app, params)
+        expected_plan = review.pop("expected_plan")
         ticket = secrets.token_hex(32)
-        self.tickets[ticket] = (app, review)
+        self.tickets[ticket] = (app, review, expected_plan)
         while len(self.tickets) > 32:
             self.tickets.popitem(last=False)
         return dict(ticket=ticket, **review)
@@ -131,8 +175,29 @@ class NativePlayRequests:
             raise ValueError("The Play target or warning changed; review Play again before launch")
         if launch is None:
             raise ValueError("The protected native launch operation is unavailable")
+        launch_profile = review["target"]["profile_id"]
         try:
-            launch(review["target"]["profile_id"])
+            if review["preparation"] is not None:
+                record = library.record(app, launch_profile)
+                edition = app.create_recipe_edition(
+                    record, review["preparation"]["recipe_id"], expected_plan=saved[2]
+                )
+                verification = app.verification_for(edition)
+                if verification and verification.issue:
+                    # The source review did not cover this edition's known issue.
+                    # Preparation is complete, but no launch has been attempted.
+                    return dict(
+                        target=review["target"],
+                        prepared_profile_id=edition.profile_id,
+                        message=(
+                            edition.name
+                            + " is ready but has a known issue: "
+                            + verification.issue
+                            + " Select this edition in the library and review Play before launching."
+                        ),
+                    )
+                launch_profile = edition.profile_id
+            launch(launch_profile)
         except Exception as exc:
             # Profile preparation or launch may have progressed before failure.
             # A failure receipt cannot certify that nothing happened.
@@ -140,7 +205,9 @@ class NativePlayRequests:
                 "Native launch outcome unknown; inspect before trying again: " + str(exc)
             ) from exc
         return dict(
-            target=review["target"], message="Railroads launched. Quit it before changing maps."
+            target=review["target"],
+            launched_profile_id=launch_profile,
+            message="Railroads launched. Quit it before changing maps.",
         )
 
 

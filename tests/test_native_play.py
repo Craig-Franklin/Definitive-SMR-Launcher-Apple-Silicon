@@ -19,6 +19,7 @@ class NativePlayTests(TestCase):
         self.addCleanup(folder.cleanup)
         self.app = app(Path(folder.name).resolve())
         self.app._stopped = Mock()
+        self.app.compatibility_recipes = Mock(return_value=())
         self.app.profiles = SimpleNamespace(
             journal=SimpleNamespace(exists=Mock(return_value=False))
         )
@@ -158,6 +159,250 @@ class NativePlayTests(TestCase):
         self.commit(review, profile_id="original-game", archive_sha256="", variant_id="")
         self.launch.assert_called_once_with("original-game")
         self.app.verification_for.assert_not_called()
+
+    def preparation(self):
+        choice = SimpleNamespace(
+            recipe_id="reviewed-test-repair",
+            title="Test compatibility edition",
+            description="Experimental repair; gameplay unverified.",
+        )
+        self.app.compatibility_recipes.return_value = (choice,)
+        self.app.plan_recipe_batch = Mock(
+            return_value=dict(
+                all_supported=True,
+                jobs=[dict(status="supported", binding="current-resource-binding")],
+            )
+        )
+        edition = replace(record(), profile_id="synthetic-compiled", variant_id="d" * 64)
+        self.app.create_recipe_edition = Mock(return_value=edition)
+        return edition
+
+    def test_preflight_does_not_prepare_and_commit_uses_maintained_service_then_actual_edition(
+        self,
+    ):
+        edition = self.preparation()
+        review = self.preflight()
+        self.assertIn("Experimental", review["warning"])
+        self.assertIn("saves remain on their own edition", review["warning"])
+        self.app.create_recipe_edition.assert_not_called()
+        self.launch.assert_not_called()
+        self.launch.side_effect = lambda profile: (
+            self.app.create_recipe_edition.assert_called_once_with(
+                record(),
+                "reviewed-test-repair",
+                expected_plan={"binding": "current-resource-binding"},
+            )
+        )
+        result = self.commit(review)
+        self.launch.assert_called_once_with(edition.profile_id)
+        self.assertEqual(result["target"]["profile_id"], record().profile_id)
+        self.assertEqual(result["launched_profile_id"], edition.profile_id)
+        with self.assertRaisesRegex(ValueError, "was used"):
+            self.commit(review)
+
+    def test_original_choice_is_reviewed_separately_and_never_prepares(self):
+        self.preparation()
+        review = self.preflight()
+        with self.assertRaisesRegex(ValueError, "target or warning changed"):
+            self.commit(review, prepare_compatibility=False)
+        review = self.preflight(prepare_compatibility=False)
+        self.assertIsNone(review["preparation"])
+        self.assertEqual(review["warning"], "")
+        self.commit(review, prepare_compatibility=False)
+        self.app.create_recipe_edition.assert_not_called()
+        self.launch.assert_called_once_with(record().profile_id)
+
+    def test_changed_plan_or_unconfirmed_preparation_never_compiles_or_launches(self):
+        self.preparation()
+        review = self.preflight()
+        self.app.plan_recipe_batch.return_value["jobs"][0]["binding"] = "changed-stock-or-donor"
+        with self.assertRaisesRegex(ValueError, "target or warning changed"):
+            self.commit(review)
+        with self.assertRaisesRegex(ValueError, "confirmation"):
+            self.commit(self.preflight(), confirmed=False)
+        self.app.create_recipe_edition.assert_not_called()
+        self.launch.assert_not_called()
+
+    def test_unavailable_or_ambiguous_recipe_is_visible_original_launch_only(self):
+        self.preparation()
+        self.app.plan_recipe_batch.return_value = dict(
+            all_supported=False, jobs=[dict(reason="Donor unavailable")]
+        )
+        review = self.preflight()
+        self.assertIsNone(review["preparation"])
+        self.assertIn("Donor unavailable", review["warning"])
+        self.assertIn("uses the original edition", review["warning"])
+        self.commit(review)
+        choice = self.app.compatibility_recipes.return_value[0]
+        self.app.compatibility_recipes.return_value = (choice, choice)
+        review = self.preflight()
+        self.assertIsNone(review["preparation"])
+        self.assertIn("Multiple compatibility editions", review["warning"])
+        self.app.create_recipe_edition.assert_not_called()
+
+    def test_preparation_failure_retains_unknown_consumed_ticket_without_launch(self):
+        self.preparation()
+        review = self.preflight()
+        self.app.create_recipe_edition.side_effect = OSError("Synthetic late preparation failure")
+        with self.assertRaisesRegex(RuntimeError, "Native launch outcome unknown"):
+            self.commit(review)
+        with self.assertRaisesRegex(ValueError, "was used"):
+            self.commit(review)
+        self.app.create_recipe_edition.assert_called_once()
+        self.launch.assert_not_called()
+
+    def test_preparation_option_must_be_boolean(self):
+        for value in ("false", 0, 1, None):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "Boolean"):
+                self.preflight(prepare_compatibility=value)
+
+    def test_real_preparation_cache_preserves_original_and_sibling_saves(self):
+        from test_application import ApplicationTests
+        from smr_launcher import recipe_service
+
+        fixture = ApplicationTests()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        original, rule, binding, _stock = fixture.compiled_fixture()
+        application = fixture.application
+        saves = application.profiles._profile_path(original.profile_id) / "Saves"
+        (saves / "original.sav").write_bytes(b"original user save")
+        source_before = fixture.snapshot_files(application.imports / original.imported_directory)
+        archive_before = fixture.archive.read_bytes()
+        params = {
+            **context(original, application.installation.executable_sha256),
+            "profile_id": original.profile_id,
+        }
+        choice = SimpleNamespace(
+            recipe_id=binding.recipe_id, title="Synthetic repair", description="Experimental"
+        )
+        library, launched = NativeLibrary(), []
+        with (
+            patch.object(application, "compatibility_recipes", return_value=(choice,)),
+            patch.object(recipe_service, "resolve_bundled_recipe", return_value=((rule,), binding)),
+            patch.dict(recipe_service._RECIPES, {binding.recipe_id: SimpleNamespace(additions=())}),
+        ):
+            for index in (1, 2):
+                review = dispatch(library, application, "maptools.play_preflight", params)
+                self.assertNotIn(
+                    "expected_plan", review, "Resource paths stay inside backend tickets"
+                )
+                result = dispatch(
+                    library,
+                    application,
+                    "maptools.play_commit",
+                    dict(
+                        params,
+                        ticket=review["ticket"],
+                        fingerprint=review["fingerprint"],
+                        confirmed=True,
+                    ),
+                    launch=launched.append,
+                )
+                edition = next(
+                    r
+                    for r in application.catalogue()
+                    if r.profile_id == result["launched_profile_id"]
+                )
+                application._validate_recipe_context(edition, prepared_output=True)
+                edition_saves = application.profiles._profile_path(edition.profile_id) / "Saves"
+                if index == 1:
+                    (edition_saves / "compiled.sav").write_bytes(b"compiled user save")
+                self.assertEqual(
+                    (edition_saves / "compiled.sav").read_bytes(), b"compiled user save"
+                )
+            self.assertEqual(launched, [edition.profile_id, edition.profile_id])
+            self.assertEqual(len(application.catalogue()), 2)
+            self.assertEqual((saves / "original.sav").read_bytes(), b"original user save")
+            self.assertEqual(
+                fixture.snapshot_files(application.imports / original.imported_directory),
+                source_before,
+            )
+            self.assertEqual(fixture.archive.read_bytes(), archive_before)
+            # A cached edition has independent warning history. Preparing it
+            # cannot borrow consent to the original's different warning state.
+            with patch.object(
+                application,
+                "verification_for",
+                side_effect=lambda r: (
+                    SimpleNamespace(issue="Known cached-edition crash")
+                    if r.profile_id == edition.profile_id
+                    else None
+                ),
+            ):
+                review = dispatch(library, application, "maptools.play_preflight", params)
+                result = dispatch(
+                    library,
+                    application,
+                    "maptools.play_commit",
+                    dict(
+                        params,
+                        ticket=review["ticket"],
+                        fingerprint=review["fingerprint"],
+                        confirmed=True,
+                    ),
+                    launch=launched.append,
+                )
+                self.assertNotIn("launched_profile_id", result)
+                self.assertEqual(result["prepared_profile_id"], edition.profile_id)
+                self.assertIn("Known cached-edition crash", result["message"])
+                self.assertEqual(launched, [edition.profile_id, edition.profile_id])
+                with self.assertRaisesRegex(ValueError, "was used"):
+                    dispatch(
+                        library,
+                        application,
+                        "maptools.play_commit",
+                        dict(
+                            params,
+                            ticket=review["ticket"],
+                            fingerprint=review["fingerprint"],
+                            confirmed=True,
+                        ),
+                        launch=launched.append,
+                    )
+                # Selecting the actual edition uses the unchanged warning review.
+                actual_params = {
+                    **context(edition, application.installation.executable_sha256),
+                    "profile_id": edition.profile_id,
+                }
+                with patch.object(application, "compatibility_recipes", return_value=()):
+                    actual_review = dispatch(
+                        library, application, "maptools.play_preflight", actual_params
+                    )
+                    self.assertEqual(actual_review["warning"], "Known cached-edition crash")
+                    dispatch(
+                        library,
+                        application,
+                        "maptools.play_commit",
+                        dict(
+                            actual_params,
+                            ticket=actual_review["ticket"],
+                            fingerprint=actual_review["fingerprint"],
+                            confirmed=True,
+                        ),
+                        launch=launched.append,
+                    )
+                    self.assertEqual(launched[-1], edition.profile_id)
+            self.assertEqual((saves / "original.sav").read_bytes(), b"original user save")
+            self.assertEqual((edition_saves / "compiled.sav").read_bytes(), b"compiled user save")
+            before = application.catalogue_file.read_bytes()
+            with self.assertRaisesRegex(Exception, "Compatibility inputs changed"):
+                application.create_recipe_edition(
+                    original, binding.recipe_id, expected_plan={"changed": True}
+                )
+            self.assertEqual(application.catalogue_file.read_bytes(), before)
+            application.profiles.journal.write_text("unresolved owner journal")
+            try:
+                with self.assertRaisesRegex(Exception, "Pending activation requires its owner"):
+                    application.create_recipe_edition(
+                        original, binding.recipe_id, expected_plan={"changed": True}
+                    )
+                self.assertEqual(
+                    application.profiles.journal.read_text(), "unresolved owner journal"
+                )
+                self.assertEqual(application.catalogue_file.read_bytes(), before)
+            finally:
+                application.profiles.journal.unlink()
 
     def test_native_dispatch_delivers_verification_and_launch_errors_without_tk_dialogs(self):
         owner = window()

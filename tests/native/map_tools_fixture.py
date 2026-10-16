@@ -27,7 +27,18 @@ for line in sys.stdin:
             "ticket": "synthetic-ticket",
             "fingerprint": "synthetic-fingerprint",
             "warning": configuration.get("warning", ""),
+            "preparation": (
+                {"title": "Synthetic compatibility edition"}
+                if configuration.get("preparation") and params.get("prepare_compatibility", True)
+                else None
+            ),
         }
+        if configuration.get("preparation"):
+            value["warning"] = (
+                "Separate compatibility edition; original saves stay intact"
+                if params.get("prepare_compatibility", True)
+                else ""
+            )
     elif method == "maptools.play_commit":
         ok = not configuration.get("reject_commit")
         value = (

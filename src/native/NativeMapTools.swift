@@ -61,6 +61,8 @@ struct NativePlayConsent {
     let ticket: String
     let fingerprint: String
     let warning: String
+    let prepareCompatibility: Bool
+    let preparationTitle: String
 }
 
 struct MapToolDraft {
@@ -147,7 +149,7 @@ struct MapToolDraft {
         }
     }
     func cancelPlay() { playIntent = UUID(); playReview = nil }
-    func beginPlay(_ model: LauncherModel, _ map: MapItem?) async {
+    func beginPlay(_ model: LauncherModel, _ map: MapItem?, prepareCompatibility: Bool = true) async {
         guard !playPending else { return }
         playPending = true; cancelPlay()
         let intent = playIntent
@@ -174,16 +176,23 @@ struct MapToolDraft {
             model.error = "The previous native launch outcome is unknown. Inspect the active profile and game before a new launch."
             return
         }
-        await model.request("maptools.play_preflight", target.parameters) { result in
+        var params = target.parameters
+        params["prepare_compatibility"] = prepareCompatibility
+        await model.request("maptools.play_preflight", params) { result in
             guard self.playIntent == intent, self.currentPlay(model, target),
                   target.matches(result.object("target")), !result.text("ticket").isEmpty,
                   !result.text("fingerprint").isEmpty else { return }
             self.playReview = NativePlayConsent(intent: intent, target: target, ticket: result.text("ticket"),
-                fingerprint: result.text("fingerprint"), warning: result.text("warning"))
+                fingerprint: result.text("fingerprint"), warning: result.text("warning"),
+                prepareCompatibility: prepareCompatibility, preparationTitle: result.object("preparation").text("title"))
         }
         if let review = playReview, review.intent == intent, review.warning.isEmpty {
             await confirmPlay(model, review)
         }
+    }
+    func beginOriginalPlay(_ model: LauncherModel, _ review: NativePlayConsent) async {
+        guard playIntent == review.intent, currentPlay(model, review.target), !review.preparationTitle.isEmpty else { return }
+        await beginPlay(model, model.selected, prepareCompatibility: false)
     }
     func confirmPlay(_ model: LauncherModel, _ review: NativePlayConsent?) async {
         guard let review, await waitForOperation(model) else { return }
@@ -196,6 +205,7 @@ struct MapToolDraft {
         cancelPlay()
         var params = target.parameters
         params["ticket"] = review.ticket; params["fingerprint"] = review.fingerprint; params["confirmed"] = true
+        params["prepare_compatibility"] = review.prepareCompatibility
         var received = false
         await model.request("maptools.play_commit", params) { result in
             received = true
@@ -548,13 +558,16 @@ struct NativePlayReviewModifier: ViewModifier {
             .onChange(of: tools.originalBuild) { _ in
                 if tools.playReview?.target.profile == "original-game" { tools.cancelPlay() }
             }
-            .confirmationDialog("Known map issue", isPresented: Binding(get: { tools.playReview != nil && tools.playReview?.warning.isEmpty == false }, set: { if !$0 { tools.playReview = nil } }), titleVisibility: .visible) {
+            .confirmationDialog(tools.playReview?.preparationTitle.isEmpty == false ? "Compatibility edition available" : "Known map issue", isPresented: Binding(get: { tools.playReview != nil && tools.playReview?.warning.isEmpty == false }, set: { if !$0 { tools.playReview = nil } }), titleVisibility: .visible) {
                 if let review = tools.playReview {
-                    Button("Launch This Edition Anyway") { Task { await tools.confirmPlay(model, review) } }
+                    Button(review.preparationTitle.isEmpty ? "Launch This Edition Anyway" : "Prepare & Play Compatibility Edition") { Task { await tools.confirmPlay(model, review) } }
+                    if !review.preparationTitle.isEmpty {
+                        Button("Play Original Edition") { Task { await tools.beginOriginalPlay(model, review) } }
+                    }
                 }
                 Button("Cancel", role: .cancel) { tools.cancelPlay() }
             } message: {
-                if let review = tools.playReview { Text(review.target.name + "\n" + review.target.identity + "\n\n" + review.warning + "\n\nLaunch this map anyway?") }
+                if let review = tools.playReview { Text(review.target.name + "\n" + review.target.identity + "\n\n" + review.warning) }
             }
     }
 }

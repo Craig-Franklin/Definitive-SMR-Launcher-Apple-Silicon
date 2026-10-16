@@ -699,16 +699,26 @@ class LauncherApplication:
         with self._locked():
             return self._create_compatibility_edition_locked(record, rules, label=label)
 
-    def create_recipe_edition(self, record: MapRecord, recipe_id: str) -> MapRecord:
+    def create_recipe_edition(
+        self, record: MapRecord, recipe_id: str, *, expected_plan: Optional[dict] = None
+    ) -> MapRecord:
         """Compile a bundled reviewed recipe under one lock into separate saves."""
-        from .recipe_service import resolve_bundled_recipe
+        from .recipe_service import plan_recipe_job, resolve_bundled_recipe
 
-        with self._locked():
+        with self._locked(recover_removal=expected_plan is None):
             self._stopped()
+            if expected_plan is not None and (
+                self.profiles.journal.exists() or self.profiles.journal.is_symlink()
+            ):
+                raise ApplicationError("Pending activation requires its owner; review Play again")
             self.profiles.recover()
             if record not in self.catalogue() or not self._is_original_variant(record):
                 raise ApplicationError("Recipe compilation requires a current original map")
             rules, binding = resolve_bundled_recipe(self, record, recipe_id)
+            if expected_plan is not None:
+                current = plan_recipe_job(self, record, recipe_id, resolved=(rules, binding))
+                if current != expected_plan:
+                    raise ApplicationError("Compatibility inputs changed; review Play again")
             return self._create_compatibility_edition_locked(
                 record, rules, label=recipe_id, recipe_binding=binding
             )
