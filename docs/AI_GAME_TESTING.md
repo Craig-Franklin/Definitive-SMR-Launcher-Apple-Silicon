@@ -215,3 +215,30 @@ the actual full cycle and preservation of its current return state.
 
 The repository skill is
 [smr-game-driver](../.agents/skills/smr-game-driver/SKILL.md).
+
+
+The separate `ONE_AGENT_PACKAGED_CATALOGUE_MENU_V1` purpose tests one existing
+catalogue edition through the released backend's `--native-service` Play API.
+Its exact grant binds the signed package, target edition/assets/build, current
+return profile and file preimages. It fixes `prepare_compatibility=false` and
+requires an empty warning. The root never activates the target before Play.
+The independent observer arms before the single commit; the owner binds the
+new game's birth and executable, then closes and reaps the service before
+menu interaction. Unknown unbound dispatch retains the observer and holds
+restoration, even when no game PID is visible.
+
+This purpose allows fresh Feral Play, one visible Credits or Options submenu,
+Back/Escape and normal quit. It forbids scenario selection, loading, gameplay,
+saving, settings changes, copying, registration and recipe creation. Menu work
+ends at 390 seconds; action and restoration retain the original 480/900 bounds.
+After exact owned absence and settled dispatch/input, the maintained profile
+switch returns to the captured current profile. Only target Settings.ini and
+the two declared global preference files are restored; their postimages remain
+in private evidence. Existing saves in both editions and sibling catalogue
+profiles must match; every new target file stays intact. Foreign activation,
+a journal, changed existing data or uncertain dispatch holds restoration.
+This is packaged **backend** acceptance, not a Swift UI click or map gameplay.
+
+Focused offline controls: `python -m unittest discover -s tests -p test_catalogue_menu.py`.
+The temporary service and profile fixtures do not admit a live trial or prove
+that a game reached its menu. Runtime observations require separate review.

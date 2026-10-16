@@ -35,6 +35,7 @@ from unique_save_file import SaveIntent, SaveScope, finite
 PURPOSE = "ONE_AGENT_VISUAL_SAVE_REOPEN_PILOT_V1"
 WINDOW_PURPOSE = "ONE_AGENT_WINDOW_MENU_PILOT_V1"
 TRANSPORT_PURPOSE = "ONE_AGENT_UK_TRANSPORT_ACTION_V1"
+CATALOGUE_MENU_PURPOSE = "ONE_AGENT_PACKAGED_CATALOGUE_MENU_V1"
 TRANSPORT_WORK_SECONDS = 390
 STAGES = ("world", "action", "filename", "saved", "quit", "reopened", "continued", "finished")
 MENU_STAGES = ("launcher", "menu", "returned")
@@ -51,6 +52,7 @@ def admission_decisions(purpose):
         PURPOSE: "AGENT_SAVE_REOPEN_PILOT",
         WINDOW_PURPOSE: "AGENT_WINDOW_MENU_PILOT",
         TRANSPORT_PURPOSE: "AGENT_UK_TRANSPORT_ACTION",
+        CATALOGUE_MENU_PURPOSE: "AGENT_PACKAGED_CATALOGUE_MENU",
     }
     require(purpose in names, "Fresh agent purpose required")
     return "ADMIT_ONE_" + names[purpose], "GO_ONE_" + names[purpose]
@@ -1288,15 +1290,20 @@ def verify_entry(job, admission, job_sha):
         and config["filename"] == config["token"] + ".SMRailroadsSavedGame",
         "Exact new agent save contract required",
     )
-    require(
-        job["source_original"]
-        == {
-            "archive_sha256": "732ad2ee0c7e1a120876e2792e028d8ac27bf243559e5776e8d7d3aebccb90e9",
-            "variant_id": "e09bd4eef4862c86953410a65ce6c39c66cfe411036bfcfa6cd464bf5841c162",
-            "scenario": "UserMaps/Alternate_UK_SAM/RRT_Scenario_Alternate_UK.xml",
-        },
-        "Exact Alternate UK source required",
-    )
+    if job["purpose"] == CATALOGUE_MENU_PURPOSE:
+        from catalogue_menu import verify_config
+
+        verify_config(job)
+    else:
+        require(
+            job["source_original"]
+            == {
+                "archive_sha256": "732ad2ee0c7e1a120876e2792e028d8ac27bf243559e5776e8d7d3aebccb90e9",
+                "variant_id": "e09bd4eef4862c86953410a65ce6c39c66cfe411036bfcfa6cd464bf5841c162",
+                "scenario": "UserMaps/Alternate_UK_SAM/RRT_Scenario_Alternate_UK.xml",
+            },
+            "Exact Alternate UK source required",
+        )
     paths = set()
     for row in job["closure"]:
         raw = read_plain(row["path"])
@@ -1335,6 +1342,8 @@ def verify_entry(job, admission, job_sha):
         )
     )
     needed.add(job["native_source"])
+    if job["purpose"] == CATALOGUE_MENU_PURPOSE:
+        needed.add(str(Path(__file__).with_name("catalogue_menu.py").resolve()))
     require(needed.issubset(paths), "Actual imported source paths missing from closure")
     raw_review = read_plain(admission["review"]["path"])
     review = decode(raw_review)
@@ -1376,7 +1385,12 @@ def main():
         "Exact delegated queue lease required",
     )
     queue.guard(lease)
-    owner = pilot_class(common)(job, common_root, admission, lambda: queue.guard(lease))
+    owner_class = pilot_class(common)
+    if job["purpose"] == CATALOGUE_MENU_PURPOSE:
+        from catalogue_menu import pilot_class as catalogue_pilot_class
+
+        owner_class = catalogue_pilot_class(common, owner_class)
+    owner = owner_class(job, common_root, admission, lambda: queue.guard(lease))
     result = run_calibration(owner)
     print(json.dumps(result, sort_keys=True))
     return 0 if result["terminal_finished"] and not result["errors"] else 2
