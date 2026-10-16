@@ -73,7 +73,7 @@ struct NativePreferences: View {
                 }
             }
             VStack(alignment: .leading, spacing: 8) {
-                Button("Refresh Voices") { Task { await model.request("prefs", ["refresh_voices": true]) { model.preferences = $0 } } }
+                Button("Refresh Voices") { Task { await model.loadPreferences(refreshVoices: true) } }
                 Button("Manage Voices…") { Task { await model.workflow("voice-settings") } }
                 Button("Translation Languages…") { Task { await model.workflow("translation-settings") } }
             }.disabled(disabled)
@@ -84,7 +84,12 @@ struct NativePreferences: View {
     private var updates: some View {
         Group {
             LabeledContent("Installed launcher", value: model.tools.text("version", "Reading…"))
-            Toggle("Automatically install verified updates when I quit", isOn: flag("automatic_updates")).disabled(disabled)
+            if model.preferences["automatic_updates"] == nil {
+                ProgressView("Reading update preference…")
+                Button("Retry Preference Read") { Task { await model.loadPreferences() } }.disabled(disabled)
+            } else {
+                Toggle("Automatically install verified updates when I quit", isOn: flag("automatic_updates")).disabled(disabled)
+            }
             Text("Releases come only from Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon. Downloads must pass archive identity, publisher and staged-app checks.").font(.caption)
             if model.tools.flag("update_pending") {
                 Label("Verified update staged. Review install or quit without installing when you quit.", systemImage: "checkmark.shield")

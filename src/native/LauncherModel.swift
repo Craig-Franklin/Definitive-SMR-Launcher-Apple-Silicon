@@ -160,6 +160,7 @@ final class ScrollMemory { var point: NSPoint? }
     let gridScroll = ScrollMemory()
     var detailScroll: [String: ScrollMemory] = [:]
     private let backend: Backend
+    private var preferenceRevision = 0
     private var quitting = false
     private var started = false
     private var pendingRefresh = false
@@ -780,11 +781,31 @@ final class ScrollMemory { var point: NSPoint? }
         }
         await workflow("quit", extras: ["update_choice": choice])
     }
-    func loadPreferences() async {
-        await request("prefs") { self.preferences = $0 }
+    func loadPreferences(refreshVoices: Bool = false) async {
+        let revision = preferenceRevision
+        await request("prefs", refreshVoices ? ["refresh_voices": true] : [:]) { value in
+            guard revision == self.preferenceRevision else { return }
+            self.preferences = value
+        }
     }
     func savePreference(_ key: String, _ value: Any) async {
-        await request("prefs.save", [key: value]) { self.preferences = $0 }
+        // Capture rollback state only after earlier mutations settle. It must
+        // never be another request's unconfirmed optimistic value.
+        while busy {
+            do { try await Task.sleep(nanoseconds: 20_000_000) } catch { return }
+        }
+        guard !Task.isCancelled else { return }
+        let previous = preferences[key]
+        preferenceRevision += 1
+        let revision = preferenceRevision
+        preferences[key] = value
+        var saved = false
+        await request("prefs.save", [key: value]) { reply in
+            saved = true
+            guard revision == self.preferenceRevision else { return }
+            self.preferences = reply
+        }
+        if !saved && revision == preferenceRevision { preferences[key] = previous }
     }
     func loadActivity() async { await request("activity") { self.activity = $0.rows("records") } }
     func loadCollection(refresh: Bool = false) async {

@@ -113,6 +113,42 @@ extension ModelChecks {
 
         try await checkImages()
         try await checkDeferredArtwork(backend)
+        try await checkUpdatePreference(backend)
+    }
+
+    @MainActor static func checkUpdatePreference(_ backend: Backend) async throws {
+        let model = LauncherModel(fixture: false, backend: backend)
+        model.connected = true
+        precondition(model.preferences["automatic_updates"] == nil, "Unread preference must remain unknown")
+        _ = try await backend.call("fixture.configure", [:])
+        await model.loadPreferences()
+        precondition(!model.preferences.flag("automatic_updates"))
+        _ = try await backend.call("fixture.configure", ["slow_pref_save": true])
+        let saving = Task { await model.savePreference("automatic_updates", true) }
+        while !model.busy { await Task.yield() }
+        precondition(model.preferences.flag("automatic_updates"), "Toggle must keep the selected value while its save is pending")
+        await saving.value
+        precondition(model.preferences.flag("automatic_updates") && model.error.isEmpty)
+        let reopened = LauncherModel(fixture: false, backend: backend)
+        reopened.connected = true
+        await reopened.loadPreferences()
+        precondition(reopened.preferences.flag("automatic_updates"), "Fresh presentation must read the saved preference")
+        _ = try await backend.call("fixture.configure", ["reject_pref_save": true])
+        await model.savePreference("automatic_updates", false)
+        precondition(model.preferences.flag("automatic_updates") && model.error == "synthetic preference write refused")
+        _ = try await backend.call("fixture.configure", ["slow_prefs": true])
+        let stale = Task { await model.loadPreferences() }
+        while model.reading == 0 { await Task.yield() }
+        await model.savePreference("automatic_updates", false)
+        await stale.value
+        precondition(!model.preferences.flag("automatic_updates"), "Late preference read cannot reset a newer selected/saved value")
+        _ = try await backend.call("fixture.configure", ["slow_pref_save": true, "reject_pref_save": true])
+        let refusedFirst = Task { await model.savePreference("automatic_updates", true) }
+        while !model.busy { await Task.yield() }
+        let refusedSecond = Task { await model.savePreference("automatic_updates", false) }
+        await refusedFirst.value; await refusedSecond.value
+        precondition(!model.preferences.flag("automatic_updates"), "Two overlapping refused writes must restore confirmed false, not unsaved optimistic true")
+        print("Update preference checks passed; unread/pending/fresh-read/refusal/stale-refresh and overlapping double-refusal rollback")
     }
 
     @MainActor static func checkDeferredArtwork(_ backend: Backend) async throws {
