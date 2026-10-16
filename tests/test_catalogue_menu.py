@@ -206,6 +206,138 @@ class CatalogueRestoreTests(unittest.TestCase):
         (self.owner.profiles.live / "Saves/existing.sav").write_bytes(b"changed user save")
         self.assert_refusal_preserves("Existing target file changed")
 
+    def partial_autosave_origin(self):
+        self.owned_autosave()
+        proof = self.owner.config["owned_autosave"]
+        path = Path(proof["origin_readback"])
+        origin = menu.decode(path.read_bytes())
+        first = origin["service_settled"]
+        first.update(commit_sent=True, returncode=0, pending=None, eof_closed=True)
+        first["commit_response"]["ok"] = True
+        origin.update(
+            invocation=dict(returncode=2),
+            service_settled=[
+                first,
+                dict(
+                    commit_sent=False,
+                    commit_response=None,
+                    reaped=True,
+                    returncode=0,
+                    pending=None,
+                    eof_closed=True,
+                ),
+            ],
+            exact_normal_exit=dict(
+                result=dict(state="observed_exited", stop_requested=False, terminal=True)
+            ),
+            current_test_autosave=proof["facts"],
+            new_target_files_retained={},
+        )
+        path.write_bytes(menu.canonical(origin))
+        proof["origin_sha256"] = menu.sha(path.read_bytes())
+        return path, origin
+
+    def test_settled_partial_origin_preserves_named_save_and_both_autosave_versions(self):
+        self.partial_autosave_origin()
+        self.assertEqual(menu.autosave_origin(self.owner.job), self.owner.config["owned_autosave"])
+        self.assertTrue(menu.restore_catalogue(self.owner))
+        target = self.owner.profiles._profile_path(self.target.profile_id)
+        self.assertEqual((target / "Saves/existing.sav").read_bytes(), b"existing target save")
+        self.assertEqual((target / menu.OWNED_AUTOSAVE).read_bytes(), b"new game autosave")
+        self.assertEqual(self.owner.autosave_preimage.read_bytes(), b"prior owned autosave")
+
+    def test_partial_origin_requires_settled_services_no_second_commit_and_normal_exit(self):
+        path, original = self.partial_autosave_origin()
+        for cause in (
+            "lease",
+            "pending",
+            "eof",
+            "reap",
+            "second-commit",
+            "stop",
+            "facts",
+            "target",
+        ):
+            with self.subTest(cause=cause):
+                origin = menu.decode(menu.canonical(original))
+                if cause == "lease":
+                    origin["lease_released"] = False
+                elif cause == "pending":
+                    origin["service_settled"][1]["pending"] = "unsettled"
+                elif cause == "eof":
+                    origin["service_settled"][1]["eof_closed"] = False
+                elif cause == "reap":
+                    origin["service_settled"][0]["reaped"] = False
+                elif cause == "second-commit":
+                    origin["service_settled"][1]["commit_sent"] = True
+                elif cause == "stop":
+                    origin["exact_normal_exit"]["result"]["stop_requested"] = True
+                elif cause == "facts":
+                    origin["current_test_autosave"] = dict(origin["current_test_autosave"], bytes=1)
+                else:
+                    origin["service_settled"][0]["commit_response"]["data"][
+                        "launched_profile_id"
+                    ] = "foreign"
+                path.write_bytes(menu.canonical(origin))
+                self.owner.config["owned_autosave"]["origin_sha256"] = menu.sha(path.read_bytes())
+                with self.assertRaisesRegex(ControlRefused, "settled owned trial"):
+                    menu.autosave_origin(self.owner.job)
+
+    def test_save_config_admits_strict_named_files_with_proven_autosave(self):
+        self.owned_autosave()
+        bundle = self.owner.directory / "Synthetic.app"
+        helper = bundle / "Contents/MacOS/Definitive SMR Launcher Apple Silicon"
+        helper.parent.mkdir(parents=True)
+        helper.write_bytes(b"synthetic helper, never executed")
+        receipt = self.owner.directory / "artifact.json"
+        receipt.write_bytes(
+            menu.canonical(
+                dict(
+                    source_commit="synthetic",
+                    tag="synthetic",
+                    zip_sha256="a" * 64,
+                    codesign_verified=True,
+                    gatekeeper_accepted=True,
+                )
+            )
+        )
+        target = dict(
+            profile_id=self.target.profile_id,
+            variant_id=self.target.profile_id[4:],
+            archive_sha256="a" * 64,
+            assets_sha256="b" * 64,
+            scenarios=["synthetic.xml"],
+        )
+        self.owner.config.update(
+            target=target,
+            scenario_title="Synthetic Canyon",
+            prepare_compatibility=True,
+            warning="Experimental",
+            selection=dict(
+                profile_id="map-" + "c" * 64,
+                variant_id="c" * 64,
+                archive_sha256="a" * 64,
+                scenarios=target["scenarios"],
+            ),
+            preparation=dict(cached_profile_id=target["profile_id"]),
+            package=dict(
+                bundle=str(bundle),
+                executable=str(helper),
+                executable_sha256=menu.sha(helper.read_bytes()),
+                receipt_path=str(receipt),
+                receipt_sha256=menu.sha(receipt.read_bytes()),
+                source_commit="synthetic",
+                tag="synthetic",
+                zip_sha256="a" * 64,
+            ),
+        )
+        self.owner.job["source_original"] = dict(
+            archive_sha256=target["archive_sha256"],
+            variant_id=target["variant_id"],
+            scenario="synthetic.xml",
+        )
+        self.assertIs(menu.verify_config(self.owner.job), self.owner.config)
+
     def test_corrupt_owned_autosave_copy_or_origin_holds_before_switch(self):
         copy = self.owned_autosave()
         copy.write_bytes(b"corrupt archive")
@@ -604,7 +736,7 @@ class CatalogueCompositionTests(unittest.TestCase):
         with self.assertRaisesRegex(ControlRefused, "without pre-existing saves"):
             menu.verify_config(job)
 
-    def test_save_pilot_never_admits_named_or_unproven_old_saves(self):
+    def test_save_pilot_requires_proven_autosave_even_with_named_files(self):
         for saves, message in (
             ({"Saves/personal.sav": {}}, "Only the proven"),
             ({menu.OWNED_AUTOSAVE: {}}, "Exact autosave origin"),

@@ -84,7 +84,7 @@ def existing_target_unchanged(root, before):
 
 
 def autosave_origin(job):
-    """Accept only the exact autosave newly created by a settled owned trial."""
+    """Accept the exact owned autosave from an independently settled trial."""
     config = job["catalogue_menu"]
     proof = config["owned_autosave"]
     require(
@@ -94,16 +94,45 @@ def autosave_origin(job):
     raw = read_plain(proof["origin_readback"])
     require(sha(raw) == proof["origin_sha256"], "Owned autosave origin changed")
     origin = decode(raw)
+    service = origin["service_settled"]
+    if type(service) is list:
+        # A failed second-launch attempt does not invalidate the first game's
+        # observed normal exit or the root's preservation/lease settlement.
+        require(len(service) == 2, "Exact settled two-service origin required")
+        first, second = service
+        exit_result = origin["exact_normal_exit"]["result"]
+        completed = (
+            origin["invocation"]["returncode"] == 2
+            and first["commit_sent"] is True
+            and first["commit_response"]["ok"] is True
+            and second["commit_sent"] is False
+            and second["commit_response"] is None
+            and all(
+                row["reaped"] is True
+                and row["returncode"] == 0
+                and row["pending"] is None
+                and row["eof_closed"] is True
+                for row in service
+            )
+            and exit_result["state"] == "observed_exited"
+            and exit_result["stop_requested"] is False
+            and exit_result["terminal"] is True
+        )
+        facts = origin["current_test_autosave"]
+        service = first
+    else:
+        completed = origin["invocation"]["returncode"] == 0
+        facts = origin["new_target_files_retained"].get(OWNED_AUTOSAVE)
     require(
         origin["lease_released"] is True
         and origin["preservation_verified"] is True
         and origin["terminal_finished"] is True
         and origin["game_absent"] is True
-        and origin["service_settled"]["reaped"] is True
-        and origin["invocation"]["returncode"] == 0
-        and origin["service_settled"]["commit_response"]["data"]["launched_profile_id"]
+        and service["reaped"] is True
+        and completed
+        and service["commit_response"]["data"]["launched_profile_id"]
         == config["target"]["profile_id"]
-        and origin["new_target_files_retained"].get(OWNED_AUTOSAVE) == proof["facts"]
+        and facts == proof["facts"]
         and config["preservation"]["target_files"].get(OWNED_AUTOSAVE) == proof["facts"]
         and 0 < proof["facts"]["bytes"] <= 512 * 1024**2,
         "Autosave must be the exact retained new file from a settled owned trial",
@@ -188,8 +217,11 @@ def verify_config(job):
         }
         if job["purpose"] == SAVE_PURPOSE:
             require(
-                saves == {OWNED_AUTOSAVE},
-                "Only the proven owned autosave may precede this save pilot",
+                OWNED_AUTOSAVE in saves
+                and not saves.intersection(
+                    f"Saves/Auto{i}.SMRailroadsSavedGame" for i in range(1, 5)
+                ),
+                "Only the proven owned autosave may rotate; pretrial Auto1..4 refuse",
             )
             autosave_origin(job)
         else:

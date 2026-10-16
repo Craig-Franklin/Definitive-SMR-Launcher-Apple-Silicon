@@ -282,13 +282,17 @@ retain separate service/observer receipts. The existing exact-file save-cycle
 helper revalidates the unique save immediately before every relaunch/reopen
 delivery. There is no source-backend fallback, construction or transport stage.
 
-The first pilot accepts only the exact `Auto0` newly created by a previously
-settled owned trial, with its original readback and current file facts bound in
-the job. It preserves that one file durably in private evidence before launch;
+The save pilot requires the exact owned `Auto0` from a previously settled trial,
+with its original readback and current file facts bound in the job. A partial
+trial can supply that provenance only after its first normal exit, both services
+have settled, the second service sent no commit, and root preservation and lease
+settlement passed. This does not turn its failed invocation into reopen success.
+The pilot preserves that one file durably in private evidence before launch;
 the replacement autosave remains in the target edition. Restoration verifies the
 old copy and never writes it over the newer file. Every other pre-existing save
-remains subject to strict unchanged-file checks; unrelated or unproven saves
-refuse admission. The named new save keeps its strict file identity through
+remains subject to strict unchanged-file checks, including named saves retained
+from an earlier attempt. Missing or unproven autosave provenance refuses admission.
+The named new save keeps its strict file identity through
 reopening. The already-preserved `Auto0` and scratch slots `Auto1..4` created within
 this invocation may rotate; pretrial `Auto1..4` still refuse admission. This is a
 focused preservation rule for owned test data, not a general save backup or import
