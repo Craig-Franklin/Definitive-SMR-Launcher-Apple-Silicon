@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
-from types import SimpleNamespace
+from types import SimpleNamespace, MethodType
 import unittest
 from unittest.mock import patch
 
@@ -685,6 +685,86 @@ class AgentRouteTests(unittest.TestCase):
                     "owned_window",
                     purpose=driver.CACHED_LOAD_PURPOSE,
                 )
+
+    def cached_save_owner(self):
+        import catalogue_menu
+
+        parent = type(self.owner)
+        cls = catalogue_menu.pilot_class(self.common, parent)
+        self.owner.__class__ = cls
+        # Exercise the real catalogue save workflow and input/quit guards with
+        # synthetic physical lifecycle hooks. Package-only launch composition
+        # is independently covered by test_catalogue_menu.
+        for name in ("prepare", "launch", "stop", "restore"):
+            setattr(self.owner, name, MethodType(getattr(parent, name), self.owner))
+        self.owner.job["purpose"] = driver.CACHED_SAVE_PURPOSE
+        self.owner.config = dict(
+            target=dict(profile_id=self.owner.diagnostic), scenario_title="Synthetic Canyon"
+        )
+
+    def test_catalogue_save_workflow_binds_exact_file_reopens_and_has_both_normal_exits(self):
+        self.cached_save_owner()
+        result = self.run_trial()
+        self.assertTrue(result["stopped"] and result["restored"] and result["terminal_finished"])
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(self.owner.launches, 2)
+        self.assertEqual(
+            set(self.stage_indexes), {"world", "filename", "saved", "quit", "reopened", "finished"}
+        )
+        self.assertFalse(
+            result["outcome"]["gameplay_credit"] or result["outcome"]["save_reopen_credit"]
+        )
+        self.assertEqual(self.keep.read_bytes(), b"preserved original synthetic save")
+        self.assertTrue((self.directory / "save-after-reopen-identity.json").is_file())
+        self.assertEqual(self.actions.count(["hotkey", "--key", "CmdOrCtrl+Q"]), 2)
+        self.assertFalse(any(action[0] == "drag" for action in self.actions))
+
+    def test_catalogue_save_unknown_first_normal_exit_never_relaunches(self):
+        self.cached_save_owner()
+        self.corrupt_exit = True
+        result = self.run_trial()
+        self.assertEqual(self.owner.launches, 1)
+        self.assertTrue(result["errors"])
+        self.assertNotIn("reopened", self.stage_indexes)
+        self.assertFalse((self.directory / "save-after-reopen-identity.json").exists())
+
+    def test_catalogue_save_reopens_when_new_scratch_slot_rotates_inside_owned_invocation(self):
+        self.cached_save_owner()
+        slot = self.owner.profiles.live / "Saves/Auto1.SMRailroadsSavedGame"
+        rotated = [False]
+
+        def reply(value):
+            if "world" in self.stage_indexes and not slot.exists():
+                slot.write_bytes(b"new scratch slot created inside this invocation")
+            if "reopened" in self.stage_indexes and not rotated[0]:
+                slot.write_bytes(b"new scratch slot rotated during reopening")
+                rotated[0] = True
+            return value
+
+        self.reply_transform = reply
+        result = self.run_trial()
+        self.assertEqual(result["errors"], [])
+        self.assertTrue(rotated[0] and result["stopped"] and result["restored"])
+        self.assertTrue((self.directory / "save-after-reopen-identity.json").is_file())
+        self.assertEqual(self.keep.read_bytes(), b"preserved original synthetic save")
+        self.assertFalse(result["outcome"]["save_reopen_credit"])
+
+    def test_only_save_purpose_can_pair_observed_world_with_opening_save_as(self):
+        self.owner.launch()
+        action = ["hotkey", "--key", "CmdOrCtrl+S"]
+        self.reply_transform = lambda value: dict(value, choice="observed", action=action)
+        self.owner.job["purpose"] = driver.CACHED_LOAD_PURPOSE
+        with self.assertRaisesRegex(ControlRefused, "Only observed track"):
+            self.owner.decisions.stage("world", "Synthetic observed world")
+        self.assertEqual(self.actions, [])
+        sequence = self.owner.decisions.sequence
+        self.owner.decisions = driver.AgentDecisions(self.owner)
+        self.owner.decisions.sequence = sequence
+        self.owner.job["purpose"] = driver.CACHED_SAVE_PURPOSE
+        observed = self.owner.decisions.stage("world", "Synthetic observed world and Save As")
+        self.assertEqual(self.actions, [action])
+        self.assertFalse(observed["machine_scene_predicate"])
+        self.assertEqual(list((self.owner.profiles.live / "Saves").iterdir()), [self.keep])
 
     def test_transport_stage_budget_ends_with_normal_quit_without_seventeenth_input(self):
         self.owner.job["purpose"] = driver.TRANSPORT_PURPOSE

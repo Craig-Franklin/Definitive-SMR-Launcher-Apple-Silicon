@@ -155,6 +155,94 @@ class CatalogueRestoreTests(unittest.TestCase):
         self.owner.app.activate("original-game")
         self.assert_refusal_preserves("Foreign active")
 
+    def owned_autosave(self):
+        path = self.owner.profiles.live / menu.OWNED_AUTOSAVE
+        path.write_bytes(b"prior owned autosave")
+        facts = menu.file_facts(path)
+        self.owner.baseline["target_files"][menu.OWNED_AUTOSAVE] = facts
+        self.owner.job["purpose"] = menu.SAVE_PURPOSE
+        self.owner.job["catalogue_menu"] = self.owner.config
+        origin = self.owner.directory / "prior-root-readback.json"
+        origin.write_bytes(
+            menu.canonical(
+                dict(
+                    lease_released=True,
+                    preservation_verified=True,
+                    terminal_finished=True,
+                    game_absent=True,
+                    invocation=dict(returncode=0),
+                    service_settled=dict(
+                        reaped=True,
+                        commit_response=dict(data=dict(launched_profile_id=self.target.profile_id)),
+                    ),
+                    new_target_files_retained={menu.OWNED_AUTOSAVE: facts},
+                )
+            )
+        )
+        self.owner.config.update(
+            preservation=self.owner.baseline,
+            owned_autosave=dict(
+                origin_readback=str(origin),
+                origin_sha256=menu.sha(origin.read_bytes()),
+                facts=facts,
+            ),
+        )
+        copy = menu.preserve_owned_autosave(self.owner, self.owner.profiles.live)
+        self.owner.autosave_preimage = copy
+        path.write_bytes(b"new game autosave")
+        return copy
+
+    def test_owned_autosave_rotation_retains_old_copy_and_new_save_without_overwrite(self):
+        copy = self.owned_autosave()
+        self.assertTrue(menu.restore_catalogue(self.owner))
+        self.assertEqual(copy.read_bytes(), b"prior owned autosave")
+        target = self.owner.profiles._profile_path(self.target.profile_id)
+        self.assertEqual((target / menu.OWNED_AUTOSAVE).read_bytes(), b"new game autosave")
+        self.assertEqual((target / "Saves/existing.sav").read_bytes(), b"existing target save")
+        self.assertEqual((target / "Saves/new.sav").read_bytes(), b"new save remains")
+
+    def test_owned_autosave_exception_never_allows_changed_named_save(self):
+        self.owned_autosave()
+        (self.owner.profiles.live / "Saves/existing.sav").write_bytes(b"changed user save")
+        self.assert_refusal_preserves("Existing target file changed")
+
+    def test_corrupt_owned_autosave_copy_or_origin_holds_before_switch(self):
+        copy = self.owned_autosave()
+        copy.write_bytes(b"corrupt archive")
+        self.assert_refusal_preserves("preimage changed")
+        copy.write_bytes(b"prior owned autosave")
+        origin = Path(self.owner.config["owned_autosave"]["origin_readback"])
+        origin.write_bytes(b"changed origin")
+        self.assert_refusal_preserves("origin changed")
+
+    def test_missing_owned_autosave_copy_keeps_strict_original_check(self):
+        self.owned_autosave()
+        self.owner.autosave_preimage = None
+        self.assert_refusal_preserves("Existing target file changed")
+
+    def test_unsettled_origin_never_authorizes_autosave_rotation(self):
+        self.owned_autosave()
+        proof = self.owner.config["owned_autosave"]
+        path = Path(proof["origin_readback"])
+        origin = menu.decode(path.read_bytes())
+        origin["terminal_finished"] = False
+        path.write_bytes(menu.canonical(origin))
+        proof["origin_sha256"] = menu.sha(path.read_bytes())
+        with self.assertRaisesRegex(ControlRefused, "settled owned trial"):
+            menu.autosave_origin(self.owner.job)
+
+    def test_changed_owned_autosave_refuses_snapshot_without_replacing_any_file(self):
+        copy = self.owned_autosave()
+        with self.assertRaisesRegex(ControlRefused, "collision"):
+            menu.preserve_owned_autosave(self.owner, self.owner.profiles.live)
+        copy.unlink()
+        with self.assertRaisesRegex(ControlRefused, "changed before preservation"):
+            menu.preserve_owned_autosave(self.owner, self.owner.profiles.live)
+        self.assertFalse(copy.exists())
+        self.assertEqual(
+            (self.owner.profiles.live / menu.OWNED_AUTOSAVE).read_bytes(), b"new game autosave"
+        )
+
     def test_journal_and_live_service_hold(self):
         self.owner.profiles.journal.write_bytes(b"pending")
         self.assert_refusal_preserves("Activation journal")
@@ -245,6 +333,35 @@ class PackagedBoundaryTests(unittest.TestCase):
         self.assertTrue(service.commit_sent)
         self.assertEqual(service.pending, "play-commit")
         self.assertTrue(service.owner.open_attempted)
+
+    def test_relaunch_final_validator_precedes_commit_mark_and_write(self):
+        for cause in ("changed-save", "late", "cancel"):
+            service = self.service()
+            service.owner.launch_deadline = 390.0
+            clock = [389.0]
+            calls = []
+
+            def validate():
+                calls.append("validate")
+                self.assertFalse(service.commit_sent or service.owner.open_attempted)
+                if cause == "changed-save":
+                    raise ControlRefused("Exact saved file changed")
+                if cause == "late":
+                    clock[0] = 391.0
+                if cause == "cancel":
+                    service.owner.control.cancelled = True
+
+            service.owner.delivery_validation = validate
+            with (
+                patch.object(menu.time, "monotonic", side_effect=lambda: clock[0]),
+                patch.object(menu.os, "write") as write,
+            ):
+                with self.assertRaises(ControlRefused):
+                    service.send("play-commit", "maptools.play_commit", {}, commit=True)
+                write.assert_not_called()
+            self.assertEqual(calls, ["validate"])
+            self.assertFalse(service.commit_sent or service.owner.open_attempted)
+            self.assertIsNone(service.pending)
 
     def test_partial_nonblocking_write_stays_unknown_and_cannot_replay(self):
         service = self.service()
@@ -487,7 +604,41 @@ class CatalogueCompositionTests(unittest.TestCase):
         with self.assertRaisesRegex(ControlRefused, "without pre-existing saves"):
             menu.verify_config(job)
 
-    def exercise(self, response, *, cached=False, wrong_review=False):
+    def test_save_pilot_never_admits_named_or_unproven_old_saves(self):
+        for saves, message in (
+            ({"Saves/personal.sav": {}}, "Only the proven"),
+            ({menu.OWNED_AUTOSAVE: {}}, "Exact autosave origin"),
+        ):
+            job = dict(
+                purpose=menu.SAVE_PURPOSE,
+                catalogue_menu=dict(
+                    target={},
+                    scenario_title="Synthetic Canyon",
+                    preservation=dict(target_files=saves),
+                    owned_autosave={},
+                ),
+            )
+            with self.assertRaisesRegex(ControlRefused, message):
+                menu.verify_config(job)
+
+    def test_save_pilot_refuses_pretrial_auto1_even_with_proven_auto0(self):
+        job = dict(
+            purpose=menu.SAVE_PURPOSE,
+            catalogue_menu=dict(
+                target={},
+                scenario_title="Synthetic Canyon",
+                preservation=dict(
+                    target_files={
+                        menu.OWNED_AUTOSAVE: {},
+                        "Saves/Auto1.SMRailroadsSavedGame": {},
+                    }
+                ),
+            ),
+        )
+        with self.assertRaisesRegex(ControlRefused, "Only the proven"):
+            menu.verify_config(job)
+
+    def exercise(self, response, *, cached=False, wrong_review=False, two_launches=False):
         events = []
 
         class Frozen:
@@ -506,12 +657,17 @@ class CatalogueCompositionTests(unittest.TestCase):
         owner.anchor = time.monotonic()
         owner.launch_deadline = owner.anchor + 120
         owner.creation = []
+        owner.operation_directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        owner.directory = owner.operation_directory
+        owner.first_stop_verified = False
         owner.controller_identity = dict(pid=123)
         owner.job = dict(
             job="synthetic-catalogue-job",
             game_sha256="g" * 64,
             source_original=dict(archive_sha256="a" * 64),
         )
+        if two_launches:
+            owner.job["purpose"] = menu.SAVE_PURPOSE
         target = dict(profile_id="map-target", archive_sha256="a" * 64, variant_id="b" * 64)
         owner.config = dict(
             target=target,
@@ -543,7 +699,9 @@ class CatalogueCompositionTests(unittest.TestCase):
         class Service:
             def __init__(self, pilot):
                 self.stdout = SimpleNamespace(closed=False)
-                self.identity = Process(200, 2000, "/synthetic/packaged-backend")
+                self.identity = Process(
+                    200 + pilot.launches, 2000 + pilot.launches, "/synthetic/packaged-backend"
+                )
                 self.pending = None
                 self.commit_sent = False
                 self.requests = []
@@ -560,6 +718,7 @@ class CatalogueCompositionTests(unittest.TestCase):
 
             def receive(self, *, event=None, deadline):
                 if event == "ready":
+                    self.ready_deadline = deadline
                     return dict(event="ready")
                 if self.pending == "play-review":
                     scope = self.requests[-1][1]
@@ -605,7 +764,7 @@ class CatalogueCompositionTests(unittest.TestCase):
 
         def bind(pilot, unused):
             events.append("game-bound")
-            pilot.game = Process(300, 3000, "/synthetic/game")
+            pilot.game = Process(300 + pilot.launches, 3000 + pilot.launches, "/synthetic/game")
 
         owner.assert_service_closed = lambda: self.assertTrue(owner.service.stdout.closed)
         with (
@@ -615,6 +774,17 @@ class CatalogueCompositionTests(unittest.TestCase):
         ):
             try:
                 owner.launch()
+                if two_launches:
+                    first = owner.game
+                    with self.assertRaisesRegex(ControlRefused, "Exact first stop"):
+                        owner.launch()
+                    owner.first_stop_verified = True
+                    with patch.object(menu.time, "monotonic", return_value=owner.anchor + 200):
+                        owner.launch()
+                    self.assertEqual(owner.service.ready_deadline, owner.anchor + 210)
+                    self.assertFalse(first.same(owner.game))
+                    with self.assertRaisesRegex(ControlRefused, "Two launches"):
+                        owner.launch()
                 failure = None
             except Exception as exc:
                 failure = exc
@@ -691,6 +861,23 @@ class CatalogueCompositionTests(unittest.TestCase):
         self.assertTrue(params["prepare_compatibility"])
         self.assertTrue(owner.dispatch_settled)
         self.assertLess(events.index("service-settled"), events.index("observer-cleanup"))
+
+    def test_two_launch_owner_keeps_both_package_commits_and_fixed_second_cutoff(self):
+        owner, events, failure = self.exercise(
+            lambda original: dict(
+                ok=True, data=dict(target=original, launched_profile_id="map-target")
+            ),
+            cached=True,
+            two_launches=True,
+        )
+        self.assertIsNone(failure)
+        self.assertEqual(events.count("single-packaged-commit"), 2)
+        self.assertEqual(events.count("observer-armed"), 2)
+        self.assertEqual(events.count("service-settled"), 2)
+        self.assertEqual(owner.launches, 2)
+        self.assertEqual(owner.launch_deadline, owner.anchor + 390)
+        self.assertTrue((owner.operation_directory / "launch-1/observer").is_dir())
+        self.assertTrue((owner.operation_directory / "launch-2/observer").is_dir())
 
     def test_cached_owner_refuses_if_package_launches_original_instead_of_cache(self):
         owner, events, failure = self.exercise(

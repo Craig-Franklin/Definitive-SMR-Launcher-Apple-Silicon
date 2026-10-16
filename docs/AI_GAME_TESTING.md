@@ -272,3 +272,31 @@ permitted. An unavailable title, incomplete load, 16-decision cap or original
 the 480/900-second bounds. An uncertain dispatched input still holds restoration.
 World observation, normal exit and preservation require independent review;
 they do not establish gameplay, repair completeness or save/reopen compatibility.
+
+`ONE_AGENT_PACKAGED_CACHED_SAVE_REOPEN_V1` is the distinct unique-save/exact-reopen
+integration purpose. It uses two recorded packaged Play transactions in the same
+480-second operation: first normal exit and exact stop must precede relaunch;
+second normal exit must precede restoration. The second packaged launch has the
+original 390-second cutoff, including its final dispatch boundary. Both launches
+retain separate service/observer receipts. The existing exact-file save-cycle
+helper revalidates the unique save immediately before every relaunch/reopen
+delivery. There is no source-backend fallback, construction or transport stage.
+
+The first pilot accepts only the exact `Auto0` newly created by a previously
+settled owned trial, with its original readback and current file facts bound in
+the job. It preserves that one file durably in private evidence before launch;
+the replacement autosave remains in the target edition. Restoration verifies the
+old copy and never writes it over the newer file. Every other pre-existing save
+remains subject to strict unchanged-file checks; unrelated or unproven saves
+refuse admission. The named new save keeps its strict file identity through
+reopening. The already-preserved `Auto0` and scratch slots `Auto1..4` created within
+this invocation may rotate; pretrial `Auto1..4` still refuse admission. This is a
+focused preservation rule for owned test data, not a general save backup or import
+path.
+
+An observed paused world may pair with opening Save As once. The filename field,
+exact token, save commit and exact reopened row/world still require their own
+fresh evidence. Incomplete world/filename prerequisites enter normal quit;
+unknown dispatch or failed exact-exit evidence retains its original failure and
+cleanup hold. Successful source controls do not establish actual save/reopen
+acceptance, gameplay or a complete scenario.

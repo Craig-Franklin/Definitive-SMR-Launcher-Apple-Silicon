@@ -38,6 +38,7 @@ TRANSPORT_PURPOSE = "ONE_AGENT_UK_TRANSPORT_ACTION_V1"
 CATALOGUE_MENU_PURPOSE = "ONE_AGENT_PACKAGED_CATALOGUE_MENU_V1"
 CACHED_MENU_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_MENU_V1"
 CACHED_LOAD_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_LOAD_V1"
+CACHED_SAVE_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_SAVE_REOPEN_V1"
 TRANSPORT_WORK_SECONDS = 390
 STAGES = ("world", "action", "filename", "saved", "quit", "reopened", "continued", "finished")
 MENU_STAGES = ("launcher", "menu", "returned")
@@ -57,6 +58,7 @@ def admission_decisions(purpose):
         CATALOGUE_MENU_PURPOSE: "AGENT_PACKAGED_CATALOGUE_MENU",
         CACHED_MENU_PURPOSE: "AGENT_PACKAGED_CACHED_MENU",
         CACHED_LOAD_PURPOSE: "AGENT_PACKAGED_CACHED_LOAD",
+        CACHED_SAVE_PURPOSE: "AGENT_PACKAGED_CACHED_SAVE_REOPEN",
     }
     require(purpose in names, "Fresh agent purpose required")
     return "ADMIT_ONE_" + names[purpose], "GO_ONE_" + names[purpose]
@@ -443,7 +445,9 @@ class AgentDecisions:
             require(time.monotonic() < reply_deadline, "Agent decision deadline expired")
             require(time.monotonic() < deadline, "Fixed agent stage deadline expired")
             if decision["choice"] == "partial":
-                if owner.job["purpose"] == CACHED_LOAD_PURPOSE and stage == "world":
+                if (owner.job["purpose"] == CACHED_LOAD_PURPOSE and stage == "world") or (
+                    owner.job["purpose"] == CACHED_SAVE_PURPOSE and stage in ("world", "filename")
+                ):
                     require(decision["action"] == [], "Partial load cannot carry input")
                     from catalogue_menu import MenuIncomplete
 
@@ -474,13 +478,15 @@ class AgentDecisions:
                 require(not return_after_input, "One save input required")
                 if decision["action"]:
                     require(
-                        owner.job["purpose"] == PURPOSE
-                        and stage == "action"
+                        (
+                            (owner.job["purpose"] == PURPOSE and stage == "action")
+                            or (owner.job["purpose"] == CACHED_SAVE_PURPOSE and stage == "world")
+                        )
                         and decision["action"] == ["hotkey", "--key", "CmdOrCtrl+S"]
                         and decision["receiver"] == "owned_window",
                         "Only observed track may pair with opening Save As",
                     )
-                    # The same fresh frame supports both the track observation
+                    # The same fresh frame supports the track/world observation
                     # and opening Save As. Filename recognition and actual saving
                     # still happen later under their original guards.
                     action = validate_action(
@@ -561,7 +567,9 @@ class AgentDecisions:
             owner, "transport_work_active", False
         ):
             raise TransportIncomplete("Finite transport stage action budget exhausted")
-        if owner.job["purpose"] == CACHED_LOAD_PURPOSE and stage == "world":
+        if (owner.job["purpose"] == CACHED_LOAD_PURPOSE and stage == "world") or (
+            owner.job["purpose"] == CACHED_SAVE_PURPOSE and stage in ("world", "filename")
+        ):
             from catalogue_menu import MenuIncomplete
 
             raise MenuIncomplete("Finite scenario-load decision budget exhausted")
@@ -685,7 +693,7 @@ def pilot_class(common):
                 require(self.observer.poll() is None, "Independent observer exited")
             self.sample()
 
-        def launch(self):
+        def next_launch(self):
             number = self.launches + 1
             require(number in (1, 2), "Two launches maximum")
             if number == 2:
@@ -695,6 +703,10 @@ def pilot_class(common):
                 self.open_attempted = False
                 self.seq = 0
                 self.next_sample = time.monotonic()
+            return number
+
+        def launch(self):
+            number = self.next_launch()
             with self.launch_files(number):
                 self.helper_packet = self.directory / "observer"
                 self.helper_packet.mkdir(mode=0o700)
@@ -1026,11 +1038,14 @@ def pilot_class(common):
 
         def reopen_once(self, checked, *, validate_delivery, deadline):
             require(deadline == self.anchor + ACTION_SECONDS, "Original cycle deadline required")
+            observation = (
+                "; observe the saved paused world and HUD. No construction, purchases, transport or saving."
+                if self.job["purpose"] == CACHED_SAVE_PURPOSE
+                else "; observe the saved world and earlier track action."
+            )
             return self.decisions.stage(
                 "reopened",
-                "Load exactly "
-                + self.job["agent_save"]["token"]
-                + "; observe the saved world and earlier track action.",
+                "Load exactly " + self.job["agent_save"]["token"] + observation,
                 validate=validate_delivery,
             )
 
@@ -1303,7 +1318,12 @@ def verify_entry(job, admission, job_sha):
         and config["filename"] == config["token"] + ".SMRailroadsSavedGame",
         "Exact new agent save contract required",
     )
-    if job["purpose"] in (CATALOGUE_MENU_PURPOSE, CACHED_MENU_PURPOSE, CACHED_LOAD_PURPOSE):
+    if job["purpose"] in (
+        CATALOGUE_MENU_PURPOSE,
+        CACHED_MENU_PURPOSE,
+        CACHED_LOAD_PURPOSE,
+        CACHED_SAVE_PURPOSE,
+    ):
         from catalogue_menu import verify_config
 
         verify_config(job)
@@ -1355,7 +1375,12 @@ def verify_entry(job, admission, job_sha):
         )
     )
     needed.add(job["native_source"])
-    if job["purpose"] in (CATALOGUE_MENU_PURPOSE, CACHED_MENU_PURPOSE, CACHED_LOAD_PURPOSE):
+    if job["purpose"] in (
+        CATALOGUE_MENU_PURPOSE,
+        CACHED_MENU_PURPOSE,
+        CACHED_LOAD_PURPOSE,
+        CACHED_SAVE_PURPOSE,
+    ):
         needed.add(str(Path(__file__).with_name("catalogue_menu.py").resolve()))
     require(needed.issubset(paths), "Actual imported source paths missing from closure")
     raw_review = read_plain(admission["review"]["path"])
@@ -1399,7 +1424,12 @@ def main():
     )
     queue.guard(lease)
     owner_class = pilot_class(common)
-    if job["purpose"] in (CATALOGUE_MENU_PURPOSE, CACHED_MENU_PURPOSE, CACHED_LOAD_PURPOSE):
+    if job["purpose"] in (
+        CATALOGUE_MENU_PURPOSE,
+        CACHED_MENU_PURPOSE,
+        CACHED_LOAD_PURPOSE,
+        CACHED_SAVE_PURPOSE,
+    ):
         from catalogue_menu import pilot_class as catalogue_pilot_class
 
         owner_class = catalogue_pilot_class(common, owner_class)

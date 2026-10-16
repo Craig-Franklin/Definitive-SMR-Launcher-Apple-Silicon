@@ -17,6 +17,13 @@ input, stop it or switch its profile. If busy, continue independent source/docs.
 After personal play, preserve the current profile, saves and preferences as the
 return state. Reuse unchanged source baselines; do not restore a pre-play state.
 
+For packaged catalogue tests, use the exact purpose in the guide and the released
+backend's `--native-service` Play path. Do not substitute source Play or activate
+the target first. The cached save/reopen purpose reuses the existing strict save
+helper and requires two separately recorded packaged launches, both normal exits
+and preservation of the one proven prior test autosave. Its source/job review and
+fresh admission remain separate from actual game/save acceptance.
+
 Use the existing one-use admission and maintained `LauncherApplication.play`
 route. Finish source/knowledge reads before the finite interval. Compose the
 existing reply, next-request read and image display in one host call per scene.

@@ -27,6 +27,8 @@ from unique_save_file import signature
 PURPOSE = "ONE_AGENT_PACKAGED_CATALOGUE_MENU_V1"
 CACHED_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_MENU_V1"
 LOAD_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_LOAD_V1"
+SAVE_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_SAVE_REOPEN_V1"
+OWNED_AUTOSAVE = "Saves/Auto0.SMRailroadsSavedGame"
 
 
 class MenuIncomplete(ValueError):
@@ -81,6 +83,67 @@ def existing_target_unchanged(root, before):
     return actual
 
 
+def autosave_origin(job):
+    """Accept only the exact autosave newly created by a settled owned trial."""
+    config = job["catalogue_menu"]
+    proof = config["owned_autosave"]
+    require(
+        set(proof) == {"origin_readback", "origin_sha256", "facts"},
+        "Exact autosave origin required",
+    )
+    raw = read_plain(proof["origin_readback"])
+    require(sha(raw) == proof["origin_sha256"], "Owned autosave origin changed")
+    origin = decode(raw)
+    require(
+        origin["lease_released"] is True
+        and origin["preservation_verified"] is True
+        and origin["terminal_finished"] is True
+        and origin["game_absent"] is True
+        and origin["service_settled"]["reaped"] is True
+        and origin["invocation"]["returncode"] == 0
+        and origin["service_settled"]["commit_response"]["data"]["launched_profile_id"]
+        == config["target"]["profile_id"]
+        and origin["new_target_files_retained"].get(OWNED_AUTOSAVE) == proof["facts"]
+        and config["preservation"]["target_files"].get(OWNED_AUTOSAVE) == proof["facts"]
+        and 0 < proof["facts"]["bytes"] <= 512 * 1024**2,
+        "Autosave must be the exact retained new file from a settled owned trial",
+    )
+    return proof
+
+
+def target_files_unchanged(owner, root):
+    before = owner.baseline["target_files"]
+    archive = getattr(owner, "autosave_preimage", None)
+    if owner.job.get("purpose") == SAVE_PURPOSE and archive is not None:
+        proof = autosave_origin(owner.job)
+        actual = file_facts(archive)
+        require(
+            all(actual[k] == proof["facts"][k] for k in ("sha256", "bytes", "mode", "mtime_ns")),
+            "Owned autosave preimage changed; preserve for inspection",
+        )
+        before = {name: facts for name, facts in before.items() if name != OWNED_AUTOSAVE}
+    return existing_target_unchanged(root, before)
+
+
+def preserve_owned_autosave(owner, root):
+    proof = autosave_origin(owner.job)
+    source = root / OWNED_AUTOSAVE
+    copy = owner.directory / "owned-Auto0-preimage"
+    require(not copy.exists() and not copy.is_symlink(), "Autosave preimage collision")
+    require(file_facts(source) == proof["facts"], "Owned autosave changed before preservation")
+    shutil.copy2(source, copy)
+    with copy.open("r+b") as stream:
+        os.fsync(stream.fileno())
+    _fsync_dir(copy.parent)
+    require(file_facts(source) == proof["facts"], "Owned autosave changed while preserving")
+    copied = file_facts(copy)
+    require(
+        all(copied[k] == proof["facts"][k] for k in ("sha256", "bytes", "mode", "mtime_ns")),
+        "Owned autosave preimage differs",
+    )
+    return copy
+
+
 def sibling_saves(app, target_id, return_id):
     return {
         record.profile_id: tree_files(app.profiles._profile_path(record.profile_id) / "Saves")
@@ -107,11 +170,11 @@ def verify_config(job):
     config = job["catalogue_menu"]
     target = config["target"]
     require(
-        job["purpose"] in (PURPOSE, CACHED_PURPOSE, LOAD_PURPOSE),
+        job["purpose"] in (PURPOSE, CACHED_PURPOSE, LOAD_PURPOSE, SAVE_PURPOSE),
         "Closed catalogue purpose required",
     )
-    cached = job["purpose"] in (CACHED_PURPOSE, LOAD_PURPOSE)
-    if job["purpose"] == LOAD_PURPOSE:
+    cached = job["purpose"] in (CACHED_PURPOSE, LOAD_PURPOSE, SAVE_PURPOSE)
+    if job["purpose"] in (LOAD_PURPOSE, SAVE_PURPOSE):
         title = config.get("scenario_title")
         require(
             type(title) is str
@@ -120,10 +183,17 @@ def verify_config(job):
             and all(ord(c) >= 32 and ord(c) != 127 for c in title),
             "Exact reviewed rendered scenario title required",
         )
-        require(
-            not any(name.startswith("Saves/") for name in config["preservation"]["target_files"]),
-            "First scenario load requires a target without pre-existing saves",
-        )
+        saves = {
+            name for name in config["preservation"]["target_files"] if name.startswith("Saves/")
+        }
+        if job["purpose"] == SAVE_PURPOSE:
+            require(
+                saves == {OWNED_AUTOSAVE},
+                "Only the proven owned autosave may precede this save pilot",
+            )
+            autosave_origin(job)
+        else:
+            require(not saves, "First scenario load requires a target without pre-existing saves")
     require(
         set(target) == {"profile_id", "archive_sha256", "variant_id", "scenarios", "assets_sha256"},
         "Exact catalogue target fields required",
@@ -258,6 +328,9 @@ class PackagedService:
         require(len(raw) <= 4096, "Bounded packaged request required")
         with self.owner.mutation_guard():
             self.owner.control._poll_locked()
+            validator = getattr(self.owner, "delivery_validation", None)
+            if commit and validator is not None:
+                validator()
             require(not self.owner.control.cancelled, "Cancelled before packaged request")
             require(time.monotonic() < self.owner.launch_deadline, "Packaged launch cutoff expired")
             # This private pipe has one writer. Record uncertainty before its
@@ -493,7 +566,7 @@ def restore_catalogue(owner):
         target = p.live if active == target_id else p._profile_path(target_id)
         returned = p._profile_path(return_id) if active == target_id else p.live
         require(tree_files(returned) == owner.baseline["return_files"], "Return profile changed")
-        existing_target_unchanged(target, owner.baseline["target_files"])
+        target_files_unchanged(owner, target)
         verify_sibling_saves(owner)
         p._marker(target, target_id)
         require(
@@ -546,7 +619,7 @@ def restore_catalogue(owner):
         require(
             tree_files(p.live) == owner.baseline["return_files"], "Return profile readback differs"
         )
-        after = existing_target_unchanged(target, owner.baseline["target_files"])
+        after = target_files_unchanged(owner, target)
         require(
             all(
                 after.get(name) == facts
@@ -567,6 +640,11 @@ def restore_catalogue(owner):
             game_absent=True,
             journal_absent=True,
             all_new_files_retained=True,
+            **(
+                {"owned_autosave_preimage": str(owner.autosave_preimage)}
+                if getattr(owner, "autosave_preimage", None)
+                else {}
+            ),
             elapsed=time.monotonic() - owner.anchor,
         ),
     )
@@ -584,6 +662,7 @@ def pilot_class(common, agent_class):
             self.service = None
             self.dispatch_settled = False
             self.preimages = []
+            self.autosave_preimage = None
 
         def spawn_input(self, argv, *, deadline, before_spawn=None, **kwargs):
             def final_menu_guard():
@@ -661,6 +740,8 @@ def pilot_class(common, agent_class):
                 self.app, target["profile_id"], self.job["return_profile"]
             )
             paths = [self.app.catalogue_file, self.app.originals / (record.archive_sha256 + ".7z")]
+            if self.job["purpose"] == SAVE_PURPOSE:
+                paths.append(Path(autosave_origin(self.job)["origin_readback"]))
             if self.config["prepare_compatibility"]:
                 selection = self.config["selection"]
                 selected = [
@@ -691,6 +772,9 @@ def pilot_class(common, agent_class):
                 "Archive drift",
             )
             self.baseline = baseline
+            if self.job["purpose"] == SAVE_PURPOSE:
+                self.autosave_preimage = preserve_owned_autosave(self, root)
+                target_files_unchanged(self, root)
             for role, path in (
                 ("settings", root / "Settings.ini"),
                 ("feral", self.app.installation.support_root / "Preferences Data"),
@@ -715,18 +799,40 @@ def pilot_class(common, agent_class):
                     target=target,
                     baseline=baseline,
                     mutable_preimages=self.preimages,
+                    **(
+                        {"owned_autosave_preimage": str(self.autosave_preimage)}
+                        if self.autosave_preimage
+                        else {}
+                    ),
                 ),
             )
             self.phases["preparation_complete"] = time.monotonic()
 
         def launch(self):
-            require(self.launches == 0, "One packaged launch maximum")
-            self.launches = 1
+            if self.job.get("purpose") == SAVE_PURPOSE:
+                number = self.next_launch()
+                with self.launch_files(number):
+                    self.launches = number
+                    self.service = None
+                    self.dispatch_settled = False
+                    self.helper_packet = self.directory / "observer"
+                    self.helper_packet.mkdir(mode=0o700)
+                    self.launch_deadline = self.anchor + (120 if number == 1 else 390)
+                    self._launch_packaged()
+            else:
+                require(self.launches == 0, "One packaged launch maximum")
+                self.launches = 1
+                self._launch_packaged()
+
+        def _launch_packaged(self):
             self.require_stopped()
             self.service = PackagedService(self)
-            self.service.receive(
-                event="ready", deadline=min(self.anchor + 60, self.launch_deadline)
+            ready_deadline = (
+                self.anchor + 60
+                if self.launches == 1
+                else min(self.anchor + 390, time.monotonic() + 10)
             )
+            self.service.receive(event="ready", deadline=min(ready_deadline, self.launch_deadline))
             target = self.config["target"]
             prepare = self.config["prepare_compatibility"]
             selection = self.config["selection"] if prepare else target
@@ -821,16 +927,17 @@ def pilot_class(common, agent_class):
                 selected_catalogue_edition=selection,
                 prepare_compatibility=prepare,
             )
-            self.journal.append(
-                "selected",
-                dict(
-                    process={k: asdict(self.game)[k] for k in ("pid", "birth_us", "executable")},
-                    selected_at_us=time.time_ns() // 1000,
-                    observed_inputs=self.job["source_original"],
-                    observed_engine_inputs=engine,
-                    observed_input_identity=sha(canonical(engine)),
-                ),
+            selection_receipt = dict(
+                process={k: asdict(self.game)[k] for k in ("pid", "birth_us", "executable")},
+                selected_at_us=time.time_ns() // 1000,
+                observed_inputs=self.job["source_original"],
+                observed_engine_inputs=engine,
+                observed_input_identity=sha(canonical(engine)),
             )
+            if self.launches == 1:
+                self.journal.append("selected", selection_receipt)
+            else:
+                self.write("relaunch-selection.json", selection_receipt)
 
         def guard_running(self, *, allow_exit=False):
             self.verify_available()
@@ -860,6 +967,8 @@ def pilot_class(common, agent_class):
             self.sample()
 
         def observe(self):
+            if self.job["purpose"] == SAVE_PURPOSE:
+                return self.observe_save_reopen()
             observations = {}
             partial = None
             loading = self.job["purpose"] == LOAD_PURPOSE
@@ -913,6 +1022,90 @@ def pilot_class(common, agent_class):
                 partial_reason=partial,
                 **observations,
             )
+
+        def observe_save_reopen(self):
+            from save_cycle import observe_save_cycle
+            from unique_save_file import SaveIntent, SaveScope
+
+            source = self.job["source_original"]
+            self.scope = SaveScope(
+                self.job["job"],
+                source["archive_sha256"],
+                source["variant_id"],
+                source["scenario"],
+                self.job["game_sha256"],
+                self.config["target"]["profile_id"],
+                str(self.profiles.live),
+            )
+            self.menu_work_active = True
+            try:
+                world = self.decisions.stage(
+                    "world",
+                    "Use visible Single Player and verify selected scenario title exactly "
+                    + repr(self.config["scenario_title"])
+                    + " before one Start. Observe playable world/HUD and pause with visible control. No construction, purchases or transport. Once the paused world is observed, you may pair that observation with CmdS once to open Save As. If the exact title/world is unavailable, return partial with no input.",
+                )
+                mapping = self.decisions.stage(
+                    "filename",
+                    "Open Save As if not already open. Enter exactly "
+                    + self.job["agent_save"]["token"]
+                    + "; observe the filename field/caret and do not save yet. Refuse overwrite. Return partial with no input if the field cannot be identified.",
+                )
+                intent = SaveIntent(
+                    str(self.profiles.live / "Saves"),
+                    self.job["agent_save"]["filename"],
+                    sha(canonical(mapping)),
+                )
+                outcome = observe_save_cycle(
+                    self,
+                    self.scope,
+                    intent,
+                    minimum_stable_seconds=1,
+                    deadline=self.anchor + 480,
+                    scratch_autosaves=tuple(f"Auto{i}.SMRailroadsSavedGame" for i in range(5)),
+                )
+                outcome.update(
+                    cause="packaged_cached_save_exact_reopen_requires_review",
+                    world_loaded="agent_observed",
+                    world=world,
+                    evidence_kind="agent_visual_observations",
+                    human_confirmation=False,
+                )
+                return outcome
+            except MenuIncomplete as exc:
+                self.menu_work_active = False
+                self.normal_quit("finished", None)
+                return dict(
+                    status="safety_stop",
+                    cause="packaged_cached_save_prerequisite_incomplete",
+                    partial_reason=str(exc),
+                    world_loaded="unknown",
+                    gameplay_credit=False,
+                    save_reopen_credit=False,
+                    evidence_kind="agent_visual_observations",
+                    human_confirmation=False,
+                )
+            finally:
+                self.menu_work_active = False
+
+        def normal_quit(self, stage, validate):
+            work = getattr(self, "menu_work_active", False)
+            if self.job.get("purpose") == SAVE_PURPOSE:
+                self.menu_work_active = False
+            try:
+                return super().normal_quit(stage, validate)
+            finally:
+                self.menu_work_active = work
+
+        def observe_reopened_world_and_continued_action(self, *, validate_delivery, deadline):
+            if self.job["purpose"] != SAVE_PURPOSE:
+                return super().observe_reopened_world_and_continued_action(
+                    validate_delivery=validate_delivery, deadline=deadline
+                )
+            require(deadline == self.anchor + 480, "Original cycle deadline required")
+            validate_delivery()
+            self.normal_quit("finished", validate_delivery)
+            return dict(scope="exact_reopened_world_only", continued_action=False)
 
         def stop(self):
             self.verify_cleanup_owner()
