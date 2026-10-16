@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Event, Thread
@@ -67,6 +68,10 @@ from .updates import (
     start_install_helper,
     trusted_team_from_bundle,
 )
+
+
+class LaunchCancelledBeforeDispatch(ValueError):
+    """No launch child was attempted; profile work may already have completed."""
 
 
 def _display_name(name: str) -> str:
@@ -3269,9 +3274,18 @@ class LauncherWindow:
             self.crash_monitor = None
             self.crash_status.set("Crash monitoring needs inspection; you can still play.")
 
-    def _play_with_crash_monitor(self, profile_id: str):
+    def _require_launch_owner(self, app):
+        if self.closed or self.close_when_idle or self.app is not app:
+            raise LaunchCancelledBeforeDispatch(
+                "The launcher owner changed or is closing; launch cancelled"
+            )
+
+    def _play_with_crash_monitor(self, profile_id: str, *, mutation_guard=None):
+        app = self.app
+
         def launch():
             # Existing application/profile guards run before this callback.
+            self._require_launch_owner(app)
             if self.crash_monitor is not None:
                 try:
                     self.crash_monitor.arm(profile_id)
@@ -3279,9 +3293,13 @@ class LauncherWindow:
                     self.crash_monitor.status = (
                         "Crash monitoring needs inspection; you can still play."
                     )
-            child = subprocess.Popen(
-                ["/usr/bin/open", "-a", str(self.app.installation.executable.parents[2])]
-            )
+            # Monitor arming and the profile transaction can block. Recheck the
+            # captured owner at the actual dispatch boundary, not only on entry.
+            with mutation_guard() if mutation_guard is not None else nullcontext():
+                self._require_launch_owner(app)
+                child = subprocess.Popen(
+                    ["/usr/bin/open", "-a", str(app.installation.executable.parents[2])]
+                )
             if self.crash_monitor is not None:
                 try:
                     self.crash_monitor.bind_after_launch(profile_id)
@@ -3291,7 +3309,9 @@ class LauncherWindow:
                     )
             return child
 
-        return self.app.play(profile_id, launch=launch)
+        if mutation_guard is not None:
+            return app.play(profile_id, launch=launch, mutation_guard=mutation_guard)
+        return app.play(profile_id, launch=launch)
 
     def crash_reports(self) -> None:
         popup = tk.Toplevel(self.root)

@@ -8,10 +8,11 @@ from datetime import datetime
 from collections import OrderedDict
 import getpass
 import secrets
+import time
 from pathlib import Path
 
 from .activation import ORIGINAL
-from .gui import LauncherWindow, MAC_TEST_LABELS, _checks_text
+from .gui import LauncherWindow, LaunchCancelledBeforeDispatch, MAC_TEST_LABELS, _checks_text
 from .history_ui import timeline_text
 from .play_history import (
     FAILURES,
@@ -39,6 +40,12 @@ def text(params, key):
 def confirmed(params):
     if params.get("confirmed") is not True:
         raise ValueError("Explicit native confirmation is required")
+
+
+def require_launch_deadline(deadline):
+    now = time.monotonic()
+    if type(deadline) not in (int, float) or not now < deadline <= now + 480:
+        raise ValueError("Finite Play deadline expired or exceeds 480 seconds")
 
 
 def dispatch(library, app, method, params, *, launch=None):
@@ -80,6 +87,11 @@ class NativePlayRequests:
         prepare = params.get("prepare_compatibility", True)
         if type(prepare) is not bool:
             raise ValueError("prepare_compatibility must be Boolean")
+        launch_deadline = params.get("launch_deadline")
+        if "launch_deadline" in params:
+            require_launch_deadline(launch_deadline)
+            if prepare:
+                raise ValueError("Finite Play requires prepare_compatibility=false")
         preparation = None
         expected_plan = None
         if text(params, "game_executable_sha256") != app.installation.executable_sha256:
@@ -146,8 +158,11 @@ class NativePlayRequests:
             warning=warning,
             preparation=preparation,
             prepare_compatibility=prepare,
+            launch_deadline=launch_deadline,
             expected_plan=expected_plan,
-            fingerprint=digest("native-play-review", target, warning, prepare, preparation),
+            fingerprint=digest(
+                "native-play-review", target, warning, prepare, preparation, launch_deadline
+            ),
         )
 
     def preflight(self, library, app, params):
@@ -197,7 +212,16 @@ class NativePlayRequests:
                         ),
                     )
                 launch_profile = edition.profile_id
-            launch(launch_profile)
+            if review["launch_deadline"] is not None:
+                launch(launch_profile, launch_deadline=review["launch_deadline"])
+            else:
+                launch(launch_profile)
+        except LaunchCancelledBeforeDispatch as exc:
+            return dict(
+                target=review["target"],
+                launch_dispatched=False,
+                message="Launch cancelled before dispatch: " + str(exc),
+            )
         except Exception as exc:
             # Profile preparation or launch may have progressed before failure.
             # A failure receipt cannot certify that nothing happened.

@@ -6,11 +6,13 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
+import time
 
 from test_native_backend import app, record, window
 from smr_launcher.native_backend import NativeLibrary
 from smr_launcher.native_map_tools import dispatch
 from smr_launcher.play_history import context
+from smr_launcher.gui import LaunchCancelledBeforeDispatch
 
 
 class NativePlayTests(TestCase):
@@ -128,6 +130,16 @@ class NativePlayTests(TestCase):
         with self.assertRaisesRegex(ValueError, "was used"):
             self.commit(review)
         self.launch.assert_called_once()
+
+    def test_known_predispatch_cancellation_is_not_launch_success_or_unknown(self):
+        review = self.preflight()
+        self.launch.side_effect = LaunchCancelledBeforeDispatch("Owner closed")
+        result = self.commit(review)
+        self.assertFalse(result["launch_dispatched"])
+        self.assertNotIn("launched_profile_id", result)
+        self.assertIn("cancelled before dispatch", result["message"])
+        with self.assertRaisesRegex(ValueError, "was used"):
+            self.commit(review)
 
     def test_ticket_is_bounded_owner_bound_and_fingerprint_cannot_be_substituted(self):
         reviews = [self.preflight() for _ in range(33)]
@@ -255,6 +267,45 @@ class NativePlayTests(TestCase):
         for value in ("false", 0, 1, None):
             with self.subTest(value=value), self.assertRaisesRegex(ValueError, "Boolean"):
                 self.preflight(prepare_compatibility=value)
+
+    def test_finite_deadline_is_fixed_consumed_and_existing_edition_only(self):
+        deadline = time.monotonic() + 20
+        with self.assertRaisesRegex(ValueError, "prepare_compatibility=false"):
+            self.preflight(launch_deadline=deadline)
+        review = self.preflight(launch_deadline=deadline, prepare_compatibility=False)
+        self.assertEqual(review["launch_deadline"], deadline)
+        with self.assertRaisesRegex(ValueError, "target or warning changed"):
+            self.commit(review, launch_deadline=deadline + 1, prepare_compatibility=False)
+        self.launch.assert_not_called()
+        review = self.preflight(launch_deadline=deadline, prepare_compatibility=False)
+        self.commit(review, launch_deadline=deadline, prepare_compatibility=False)
+        self.launch.assert_called_once_with(record().profile_id, launch_deadline=deadline)
+
+    def test_finite_deadline_refuses_bad_values_and_expiry_without_dispatch(self):
+        now = time.monotonic()
+        for value in (
+            None,
+            True,
+            "future",
+            now - 1,
+            now + 481,
+            float("nan"),
+            float("inf"),
+            10**1000,
+        ):
+            with (
+                self.subTest(value=str(value)[:30]),
+                self.assertRaisesRegex(ValueError, "deadline"),
+            ):
+                self.preflight(launch_deadline=value, prepare_compatibility=False)
+        deadline = now + 20
+        review = self.preflight(launch_deadline=deadline, prepare_compatibility=False)
+        with patch("smr_launcher.native_map_tools.time.monotonic", return_value=deadline):
+            with self.assertRaisesRegex(ValueError, "deadline expired"):
+                self.commit(review, launch_deadline=deadline, prepare_compatibility=False)
+        with self.assertRaisesRegex(ValueError, "was used"):
+            self.commit(review, launch_deadline=deadline, prepare_compatibility=False)
+        self.launch.assert_not_called()
 
     def test_real_preparation_cache_preserves_original_and_sibling_saves(self):
         from test_application import ApplicationTests

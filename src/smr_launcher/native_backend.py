@@ -6,6 +6,7 @@ are session caches, never validation authority for a game operation.
 """
 
 from collections import OrderedDict
+from contextlib import contextmanager
 from dataclasses import asdict, fields
 import base64
 import ctypes
@@ -21,7 +22,7 @@ from .updates import start_install_helper
 from .annotations import AnnotationStore
 from .gallery import MAX_SNAPSHOT_ART_BYTES, gallery_snapshot
 from .collection import fetch_catalogue, read_cached_catalogue, write_cached_catalogue
-from .gui import LauncherWindow, _checks_text
+from .gui import LauncherWindow, LaunchCancelledBeforeDispatch, _checks_text
 from .application import LauncherApplication
 from .history_ui import confirm_checkpoint, save_digest, timeline_text
 from .language import (
@@ -32,7 +33,11 @@ from .language import (
     translate_briefing,
 )
 from .voices import list_voices, open_voice_settings
-from .native_map_tools import NativePlayRequests, dispatch as dispatch_map_tools
+from .native_map_tools import (
+    NativePlayRequests,
+    dispatch as dispatch_map_tools,
+    require_launch_deadline,
+)
 from .play_history import (
     CHECKPOINTS,
     FAILURES,
@@ -876,7 +881,9 @@ class NativeBackendWindow(LauncherWindow):
                         app,
                         method,
                         params,
-                        launch=lambda profile: self._native_launch(app, profile),
+                        launch=lambda profile, **fields: self._native_launch(
+                            app, profile, **fields
+                        ),
                     )
                 else:
                     raise ValueError("Unknown native method: " + method)
@@ -911,9 +918,33 @@ class NativeBackendWindow(LauncherWindow):
         except Exception as exc:
             self._native_reply(request, False, exc)
 
-    def _native_launch(self, app, profile):
-        if self.closed or self.close_when_idle or self.initializing or self.app is not app:
-            raise ValueError("The launcher owner changed or is closing; launch cancelled")
+    def _require_launch_owner(self, app):
+        super()._require_launch_owner(app)
+        if (
+            self.initializing
+            or getattr(self, "_native_disconnected", False)
+            or self._native_input_ended.is_set()
+        ):
+            raise LaunchCancelledBeforeDispatch(
+                "The launcher owner changed or is closing; launch cancelled"
+            )
+
+    def _native_launch(self, app, profile, *, launch_deadline=None):
+        self._require_launch_owner(app)
+        if launch_deadline is not None:
+
+            @contextmanager
+            def guard():
+                self._require_launch_owner(app)
+                try:
+                    require_launch_deadline(launch_deadline)
+                except ValueError as exc:
+                    raise LaunchCancelledBeforeDispatch(str(exc)) from exc
+                yield
+
+            # Existing guarded application/profile locks are nonblocking; the
+            # same fixed gate covers exchange, settings and final Popen.
+            return self._play_with_crash_monitor(profile, mutation_guard=guard)
         return self._play_with_crash_monitor(profile)
 
     def _native_preferences(self):

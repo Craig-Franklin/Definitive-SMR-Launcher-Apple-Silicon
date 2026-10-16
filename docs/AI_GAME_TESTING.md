@@ -29,6 +29,29 @@ packaged launcher UI. Command startup alone does not establish a ready menu or
 provide subsequent observation/input ownership. Do not launch the ordinary CLI
 as an extra game process while a finite driver owns the queue.
 
+The packaged JSON-lines service has an optional finite dispatch gate on its
+existing `maptools.play_preflight` / `maptools.play_commit` pair. Supply
+`prepare_compatibility: false` and one absolute `launch_deadline` from the
+owner's original monotonic action clock. The deadline must be in the future,
+at most 480 seconds away at preflight, and identical at commit; it cannot be
+extended by changing or replaying the ticket. This first gate launches only
+an existing edition and does not create a recipe edition. It is a dispatch
+primitive, not a game-test admission or an implemented packaged visual owner.
+
+The service rechecks its owner and the fixed deadline at the application/profile
+exchange, settings update and actual `Popen` boundary. Finite launch refuses busy
+locks instead of waiting. Native input EOF/disconnection prevents a later
+dispatch; an outer owner cancels by closing its dedicated service input pipe.
+Queued `workflow.quit` and a `closed` event alone are not cancellation proof.
+An explicit `launch_dispatched: false` response is a consumed, pre-dispatch
+cancellation, not launch success or proof that the profile was unchanged.
+An already dispatched LaunchServices request cannot be undone by this check.
+The outer owner must keep its independent observer armed until pending service
+work and the exact game identity are positively settled, then perform owned stop
+and restoration. Service exit or temporary game absence alone cannot authorize
+restoration after an uncertain dispatch. No packaged game pilot is admitted by
+these source checks; the existing source-backend driver remains unchanged.
+
 ## Finite visual execution
 
 Use the project's Python 3.12 environment for the driver and all authoritative
