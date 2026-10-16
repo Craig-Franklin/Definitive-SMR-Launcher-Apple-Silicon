@@ -138,6 +138,16 @@ has met those acceptance criteria.
 
 ## Focused source checks
 
+For the first Alternate UK transport acceptance task, the same driver also
+supports `ONE_AGENT_UK_TRANSPORT_ACTION_V1`. This is a single-launch operation:
+observe the world, establish a station/engine/car/route, observe cargo delivery,
+then quit normally and restore. Its distinct admission/review decisions cannot
+be substituted with a save-cycle grant. It uses the same 480/900-second bounds
+and existing input grammar; it does not run the save/reopen cycle or permit the
+paired Save As shortcut. Goods offered, matching cars and actual delivery are
+separate observations. Movement or income alone cannot establish delivery.
+Raw cargo credit remains false until the owner reviews the actual evidence.
+
 Run with the repository's Python 3.12 development environment:
 
 ```sh

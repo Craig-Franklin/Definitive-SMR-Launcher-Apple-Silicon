@@ -405,6 +405,68 @@ class AgentRouteTests(unittest.TestCase):
         self.assertFalse(result["outcome"]["gameplay_credit"])
         self.assertFalse(result["outcome"]["save_reopen_credit"])
 
+    def test_transport_action_uses_one_launch_no_save_and_exact_normal_exit(self):
+        self.owner.job["purpose"] = driver.TRANSPORT_PURPOSE
+        result = self.run_trial()
+        self.assertTrue(result["stopped"] and result["restored"] and result["terminal_finished"])
+        self.assertEqual(self.owner.launches, 1)
+        self.assertEqual(set(self.stage_indexes), {"world", "action", "continued", "finished"})
+        self.assertEqual(list((self.owner.profiles.live / "Saves").iterdir()), [self.keep])
+        self.assertFalse(result["outcome"]["cargo_credit"])
+        self.assertFalse(result["outcome"]["save_reopen_credit"])
+        self.assertEqual(
+            result["outcome"]["cause"], "agent_visual_transport_action_requires_review"
+        )
+
+    def test_transport_action_keeps_normal_exit_refusal_and_cleanup(self):
+        self.owner.job["purpose"] = driver.TRANSPORT_PURPOSE
+        self.corrupt_exit = True
+        result = self.run_trial()
+        self.assertIn("Exact normal exit receipt required", result["outcome"]["cause"])
+        self.assertEqual(result["outcome"]["status"], "automation_failed")
+        self.assertTrue(result["stopped"] and result["restored"] and result["terminal_finished"])
+
+    def test_transport_purpose_has_distinct_admission_and_refuses_save_pair(self):
+        self.assertEqual(
+            driver.admission_decisions(driver.TRANSPORT_PURPOSE),
+            ("ADMIT_ONE_AGENT_UK_TRANSPORT_ACTION", "GO_ONE_AGENT_UK_TRANSPORT_ACTION"),
+        )
+        with self.assertRaisesRegex(ControlRefused, "purpose"):
+            driver.admission_decisions("unreviewed-purpose")
+        self.owner.job["purpose"] = driver.TRANSPORT_PURPOSE
+        self.owner.launch()
+        self.reply_transform = lambda value: dict(
+            value, choice="observed", action=["hotkey", "--key", "CmdOrCtrl+S"]
+        )
+        with self.assertRaisesRegex(ControlRefused, "Only observed track"):
+            self.owner.decisions.stage("action", "Synthetic route observation")
+        self.assertEqual(self.actions, [])
+
+    def test_transport_entry_refuses_old_save_cycle_grant(self):
+        actor = {"session": "synthetic", "terminal": "synthetic", "cwd": str(Path.cwd())}
+        root = {"run": "run_9c111880b18c"}
+        job = {
+            "purpose": driver.TRANSPORT_PURPOSE,
+            "common_root": "/synthetic/common",
+            "actor_binding": {"driver_actor": actor},
+            "root": root,
+        }
+        admission = {
+            "decision": "ADMIT_ONE_AGENT_SAVE_REOPEN_PILOT",
+            "job_sha256": "a" * 64,
+            "runtime_owner": "synthetic",
+            "root": root,
+        }
+        with (
+            patch.object(driver, "verify_launch_backend"),
+            patch.dict(
+                driver.os.environ,
+                {"CODEX_THREAD_ID": "synthetic", "ORCA_TERMINAL_HANDLE": "synthetic"},
+            ),
+            self.assertRaisesRegex(ControlRefused, "Exact root grant"),
+        ):
+            driver.verify_entry(job, admission, "a" * 64)
+
     def test_malformed_extra_or_hidden_windows_refuse_before_capture_or_input(self):
         self.owner.launch()
         for windows in (

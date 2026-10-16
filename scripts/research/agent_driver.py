@@ -34,6 +34,7 @@ from unique_save_file import SaveIntent, SaveScope, finite
 
 PURPOSE = "ONE_AGENT_VISUAL_SAVE_REOPEN_PILOT_V1"
 WINDOW_PURPOSE = "ONE_AGENT_WINDOW_MENU_PILOT_V1"
+TRANSPORT_PURPOSE = "ONE_AGENT_UK_TRANSPORT_ACTION_V1"
 STAGES = ("world", "action", "filename", "saved", "quit", "reopened", "continued", "finished")
 MENU_STAGES = ("launcher", "menu", "returned")
 ACTION_SECONDS = 480
@@ -41,6 +42,17 @@ FRAME_SECONDS = 60
 NATIVE_SOURCE_SHA256 = "1eabe4e19f52bc6684c0b58e6cbc2c92ccf8b8d95d160205e3164432e9951601"
 LAUNCHER_CALIBRATION_SHA256 = "cfa6ec9095af74e7230e2f87a281988e958b1a97a4f6dc57750f2f3812df352c"
 CLICK_SOURCE_SHA256 = "7beb128e95a8e4ed0f18e188a7a97231d6fd70a9e130ca1a4c6adff5eda395eb"
+
+
+def admission_decisions(purpose):
+    """Keep each finite operation bound to its own grant and review vocabulary."""
+    names = {
+        PURPOSE: "AGENT_SAVE_REOPEN_PILOT",
+        WINDOW_PURPOSE: "AGENT_WINDOW_MENU_PILOT",
+        TRANSPORT_PURPOSE: "AGENT_UK_TRANSPORT_ACTION",
+    }
+    require(purpose in names, "Fresh agent purpose required")
+    return "ADMIT_ONE_" + names[purpose], "GO_ONE_" + names[purpose]
 
 
 class StaleFrame(ControlRefused):
@@ -409,7 +421,8 @@ class AgentDecisions:
                 require(not return_after_input, "One save input required")
                 if decision["action"]:
                     require(
-                        stage == "action"
+                        owner.job["purpose"] == PURPOSE
+                        and stage == "action"
                         and decision["action"] == ["hotkey", "--key", "CmdOrCtrl+S"]
                         and decision["receiver"] == "owned_window",
                         "Only observed track may pair with opening Save As",
@@ -1049,6 +1062,34 @@ def pilot_class(common):
             )
 
         def observe(self):
+            if self.job["purpose"] == TRANSPORT_PURPOSE:
+                world = self.decisions.stage(
+                    "world",
+                    "Start the selected original Alternate UK scenario. Observe its playable world and actual starting city; pause while planning construction.",
+                )
+                route = self.decisions.stage(
+                    "action",
+                    "Use the current world to establish a short connected route between actual terminals. Build the required station or resource annex, buy an available engine and attach cars matching visibly offered goods. Observe the selected endpoints, engine, cars and route; purchases or a moving train alone do not prove delivery.",
+                )
+                cargo = self.decisions.stage(
+                    "continued",
+                    "Run the established route and observe three distinct facts: goods offered at its source, matching cars attached/loaded, and actual arrival and unloading or an explicit delivery result at the destination. Do not infer delivery from movement, time passing or unrelated income. Stop honestly if these facts cannot be observed within this attempt.",
+                )
+                self.normal_quit("finished", None)
+                return {
+                    "status": "safety_stop",
+                    "cause": "agent_visual_transport_action_requires_review",
+                    "world_loaded": "agent_observed",
+                    "gameplay_credit": False,
+                    "save_reopen_credit": False,
+                    "cargo_credit": False,
+                    "evidence_kind": "agent_visual_observations",
+                    "human_confirmation": False,
+                    "agent_observed_stages": ["world", "action", "continued", "finished"],
+                    "world": world,
+                    "route": route,
+                    "cargo": cargo,
+                }
             if self.job["purpose"] == WINDOW_PURPOSE:
                 launcher = self.decisions.stage(
                     "launcher",
@@ -1138,8 +1179,7 @@ def verify_launch_backend(common_root):
 
 
 def verify_entry(job, admission, job_sha):
-    window_pilot = job["purpose"] == WINDOW_PURPOSE
-    require(job["purpose"] in (PURPOSE, WINDOW_PURPOSE), "Fresh agent purpose required")
+    admission_decision, review_decision = admission_decisions(job["purpose"])
     verify_launch_backend(job["common_root"])
     actor = job["actor_binding"]["driver_actor"]
     require(
@@ -1150,12 +1190,7 @@ def verify_entry(job, admission, job_sha):
     )
     require(
         job["root"]["run"] == "run_9c111880b18c"
-        and admission["decision"]
-        == (
-            "ADMIT_ONE_AGENT_WINDOW_MENU_PILOT"
-            if window_pilot
-            else "ADMIT_ONE_AGENT_SAVE_REOPEN_PILOT"
-        )
+        and admission["decision"] == admission_decision
         and admission["job_sha256"] == job_sha
         and admission["runtime_owner"] == actor["terminal"]
         and admission["root"] == job["root"],
@@ -1228,8 +1263,7 @@ def verify_entry(job, admission, job_sha):
     review = decode(raw_review)
     require(
         sha(raw_review) == admission["review"]["sha256"]
-        and review["decision"]
-        == ("GO_ONE_AGENT_WINDOW_MENU_PILOT" if window_pilot else "GO_ONE_AGENT_SAVE_REOPEN_PILOT")
+        and review["decision"] == review_decision
         and review["job_sha256"] == job_sha
         and review["closure"] == job["closure"]
         and not review["findings"],
