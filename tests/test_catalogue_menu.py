@@ -246,6 +246,54 @@ class CatalogueRestoreTests(unittest.TestCase):
         self.assertEqual((target / menu.OWNED_AUTOSAVE).read_bytes(), b"new game autosave")
         self.assertEqual(self.owner.autosave_preimage.read_bytes(), b"prior owned autosave")
 
+    def test_second_committed_owned_stop_can_supply_autosave_without_normal_quit_credit(self):
+        path, origin = self.partial_autosave_origin()
+        origin["job"] = "synthetic-owned-job"
+        origin["exact_normal_exit"]["process"] = dict(pid=100)
+        origin["service_settled"][1].update(
+            commit_sent=True,
+            commit_response=dict(ok=True, data=dict(launched_profile_id=self.target.profile_id)),
+        )
+        origin["second_observer"] = dict(
+            job=origin["job"],
+            process=dict(pid=200),
+            result=dict(state="observed_exited", terminal=True, stop_requested=True),
+        )
+        origin["owned_absences"] = [dict(pid=200, role="game", positive_absence=True)]
+        for cause in (
+            None,
+            "unknown-response",
+            "wrong-target",
+            "wrong-job",
+            "wrong-pid",
+            "not-absent",
+        ):
+            with self.subTest(cause=cause):
+                value = menu.decode(menu.canonical(origin))
+                if cause == "unknown-response":
+                    value["service_settled"][1]["commit_response"] = None
+                elif cause == "wrong-target":
+                    value["service_settled"][1]["commit_response"]["data"][
+                        "launched_profile_id"
+                    ] = "foreign"
+                elif cause == "wrong-job":
+                    value["second_observer"]["job"] = "foreign"
+                elif cause == "wrong-pid":
+                    value["second_observer"]["process"]["pid"] = 100
+                elif cause == "not-absent":
+                    value["owned_absences"][0]["positive_absence"] = False
+                path.write_bytes(menu.canonical(value))
+                self.owner.config["owned_autosave"]["origin_sha256"] = menu.sha(path.read_bytes())
+                if cause:
+                    with self.assertRaisesRegex(ControlRefused, "settled owned trial"):
+                        menu.autosave_origin(self.owner.job)
+                else:
+                    self.assertEqual(
+                        menu.autosave_origin(self.owner.job), self.owner.config["owned_autosave"]
+                    )
+                    self.assertEqual(value["invocation"]["returncode"], 2)
+                    self.assertTrue(value["second_observer"]["result"]["stop_requested"])
+
     def test_partial_origin_requires_settled_services_no_second_commit_and_normal_exit(self):
         path, original = self.partial_autosave_origin()
         for cause in (

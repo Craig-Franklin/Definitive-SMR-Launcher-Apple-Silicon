@@ -101,12 +101,33 @@ def autosave_origin(job):
         require(len(service) == 2, "Exact settled two-service origin required")
         first, second = service
         exit_result = origin["exact_normal_exit"]["result"]
+        response = second["commit_response"]
+        observed = origin.get("second_observer", {})
+        pid = observed.get("process", {}).get("pid")
+        second_owned_exit = (
+            second["commit_sent"] is True
+            and type(response) is dict
+            and response.get("ok") is True
+            and response["data"]["launched_profile_id"] == config["target"]["profile_id"]
+            and type(origin.get("job")) is str
+            and observed.get("job") == origin["job"]
+            and type(pid) is int
+            and pid > 0
+            and pid != origin["exact_normal_exit"].get("process", {}).get("pid")
+            and observed.get("result", {}).get("state") == "observed_exited"
+            and observed["result"]["terminal"] is True
+            and any(
+                row.get("pid") == pid
+                and row.get("role") == "game"
+                and row.get("positive_absence") is True
+                for row in origin.get("owned_absences", [])
+            )
+        )
         completed = (
             origin["invocation"]["returncode"] == 2
             and first["commit_sent"] is True
             and first["commit_response"]["ok"] is True
-            and second["commit_sent"] is False
-            and second["commit_response"] is None
+            and ((second["commit_sent"] is False and response is None) or second_owned_exit)
             and all(
                 row["reaped"] is True
                 and row["returncode"] == 0

@@ -446,7 +446,8 @@ class AgentDecisions:
             require(time.monotonic() < deadline, "Fixed agent stage deadline expired")
             if decision["choice"] == "partial":
                 if (owner.job["purpose"] == CACHED_LOAD_PURPOSE and stage == "world") or (
-                    owner.job["purpose"] == CACHED_SAVE_PURPOSE and stage in ("world", "filename")
+                    owner.job["purpose"] == CACHED_SAVE_PURPOSE
+                    and stage in ("world", "filename", "reopened")
                 ):
                     require(decision["action"] == [], "Partial load cannot carry input")
                     from catalogue_menu import MenuIncomplete
@@ -1039,7 +1040,7 @@ def pilot_class(common):
         def reopen_once(self, checked, *, validate_delivery, deadline):
             require(deadline == self.anchor + ACTION_SECONDS, "Original cycle deadline required")
             observation = (
-                "; observe the saved paused world and HUD. No construction, purchases, transport or saving."
+                "; observe the matching saved world and HUD. If running, pause once using the current visible control, then observe the paused banner. Do not assume the pause state persisted. If this cannot be established promptly, return partial with no input; normal quit follows. No construction, purchases, transport or saving."
                 if self.job["purpose"] == CACHED_SAVE_PURPOSE
                 else "; observe the saved world and earlier track action."
             )

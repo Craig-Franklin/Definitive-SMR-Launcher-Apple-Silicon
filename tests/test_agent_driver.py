@@ -728,6 +728,50 @@ class AgentRouteTests(unittest.TestCase):
         self.assertNotIn("reopened", self.stage_indexes)
         self.assertFalse((self.directory / "save-after-reopen-identity.json").exists())
 
+    def test_catalogue_reopened_partial_takes_final_normal_quit_without_cycle_credit(self):
+        self.cached_save_owner()
+        self.reply_transform = lambda value: (
+            dict(value, choice="partial", action=[], observation="Reopened pause state unavailable")
+            if self.stage_indexes.get("reopened", 0) >= 3 and "finished" not in self.stage_indexes
+            else value
+        )
+        result = self.run_trial()
+        self.assertEqual(result["errors"], [])
+        self.assertTrue(result["stopped"] and result["restored"] and result["terminal_finished"])
+        self.assertEqual(self.owner.launches, 2)
+        self.assertEqual(self.actions.count(["hotkey", "--key", "CmdOrCtrl+Q"]), 2)
+        self.assertEqual(result["outcome"]["partial_reason"], "Reopened pause state unavailable")
+        self.assertFalse(result["outcome"]["save_reopen_credit"])
+        self.assertFalse((self.directory / "save-after-reopen-identity.json").exists())
+        self.assertEqual(self.keep.read_bytes(), b"preserved original synthetic save")
+
+    def test_catalogue_reopened_partial_with_input_refuses_before_delivery(self):
+        self.cached_save_owner()
+        self.reply_transform = lambda value: (
+            dict(value, choice="partial")
+            if "reopened" in self.stage_indexes and "finished" not in self.stage_indexes
+            else value
+        )
+        result = self.run_trial()
+        self.assertTrue(result["errors"])
+        self.assertEqual(self.actions.count(["hotkey", "--key", "CmdOrCtrl+Q"]), 1)
+        self.assertNotIn("finished", self.stage_indexes)
+        self.assertFalse((self.directory / "save-after-reopen-identity.json").exists())
+        self.assertEqual(self.keep.read_bytes(), b"preserved original synthetic save")
+
+    def test_catalogue_reopened_world_can_pause_with_current_frame_before_observation(self):
+        self.cached_save_owner()
+        self.reply_transform = lambda value: (
+            dict(value, choice="action", action=["click", "--x", "30", "--y", "40"])
+            if self.stage_indexes.get("reopened", 0) == 3
+            else value
+        )
+        result = self.run_trial()
+        self.assertEqual(result["errors"], [])
+        self.assertIn(["click", "--x", "30", "--y", "40"], self.actions)
+        self.assertEqual(self.actions.count(["hotkey", "--key", "CmdOrCtrl+Q"]), 2)
+        self.assertTrue((self.directory / "save-after-reopen-identity.json").exists())
+
     def test_catalogue_save_reopens_when_new_scratch_slot_rotates_inside_owned_invocation(self):
         self.cached_save_owner()
         slot = self.owner.profiles.live / "Saves/Auto1.SMRailroadsSavedGame"

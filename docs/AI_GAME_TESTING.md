@@ -285,8 +285,11 @@ delivery. There is no source-backend fallback, construction or transport stage.
 The save pilot requires the exact owned `Auto0` from a previously settled trial,
 with its original readback and current file facts bound in the job. A partial
 trial can supply that provenance only after its first normal exit, both services
-have settled, the second service sent no commit, and root preservation and lease
-settlement passed. This does not turn its failed invocation into reopen success.
+have settled, and root preservation and lease settlement passed. The second
+service must either have sent no commit, or have launched the exact known target
+with its distinct owned game independently proved absent. An owned cleanup stop
+can establish that absence; it cannot earn normal-quit or full-cycle credit.
+This does not turn the failed invocation into reopen success.
 The pilot preserves that one file durably in private evidence before launch;
 the replacement autosave remains in the target edition. Restoration verifies the
 old copy and never writes it over the newer file. Every other pre-existing save
@@ -300,7 +303,9 @@ path.
 
 An observed paused world may pair with opening Save As once. The filename field,
 exact token, save commit and exact reopened row/world still require their own
-fresh evidence. Incomplete world/filename prerequisites enter normal quit;
+fresh evidence. On reopen, match the saved world/HUD and use the current visible
+pause control if needed; do not assume the saved pause state persists. Incomplete
+world/filename/reopened prerequisites enter normal quit with a no-input partial;
 unknown dispatch or failed exact-exit evidence retains its original failure and
 cleanup hold. Successful source controls do not establish actual save/reopen
 acceptance, gameplay or a complete scenario.
