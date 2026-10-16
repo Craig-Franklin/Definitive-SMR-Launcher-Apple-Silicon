@@ -271,6 +271,81 @@ class MaintenanceTests(unittest.TestCase):
         self.assertEqual(tree_snapshot(self.live), before)
         self.assertEqual(self.manager._state()["active"], self.diagnostic)
 
+    def completed_quit(self):
+        request = {
+            "job": self.job["job"],
+            "stage": "finished",
+            "frame": {"window": {"id": 30}},
+            "process": {"pid": 12},
+        }
+        request_pin = dump(self.root / "request.json", request)
+        decision = {
+            "request_sha256": request_pin["sha256"],
+            "choice": "action",
+            "receiver": "owned_window",
+            "action": ["hotkey", "--key", "CmdOrCtrl+Q"],
+        }
+        response = {
+            "ok": True,
+            "_meta": {"runtimeId": "synthetic-runtime"},
+            "result": {
+                "action": {"path": "synthetic", "actionName": "hotkey", "targetWindowId": 30},
+                "snapshot": {"window": {"id": 30}, "app": {"pid": 12}},
+            },
+        }
+        self.plan["completion"].update(
+            kind="completed_quit_hotkey",
+            request=request_pin,
+            decision=dump(self.root / "decision.json", decision),
+            response=dump(self.root / "quit-response.json", response),
+            expected_response=response,
+            exited=dump(
+                self.root / "quit-exit.json",
+                {"pid": 11, "reaped": True, "owned_wait_returncode": 0},
+            ),
+        )
+        self.seal()
+
+    def test_completed_quit_restores_without_normal_exit_or_effect_credit(self):
+        self.completed_quit()
+        original = read_plain(self.root / "outcome.json")
+        receipt = decode(read_plain(self.operation().run()))
+        self.assertEqual(tree_snapshot(self.live), self.plan["baseline"]["live"])
+        self.assertEqual(
+            tree_snapshot(self.manager._profile_path(self.diagnostic)),
+            self.plan["diagnostic_snapshot"],
+        )
+        for row in self.plan["preferences"]:
+            self.assertEqual(file_snapshot(row["path"]), row["baseline"])
+        self.assertEqual(read_plain(self.root / "outcome.json"), original)
+        self.assertEqual(receipt["original_effect"], "unknown")
+        self.assertFalse(receipt["original_run_restored"])
+        self.assertFalse(receipt["lease_released"])
+
+    def test_completed_quit_wrong_correspondence_or_unreaped_child_refuses(self):
+        for target, mutation in (
+            ("decision", lambda v: v.update(action=["hotkey", "--key", "CmdOrCtrl+S"])),
+            ("decision", lambda v: v.update(request_sha256="0" * 64)),
+            ("request", lambda v: v.update(stage="action")),
+            ("request", lambda v: v.update(job="other-job")),
+            ("response", lambda v: v["result"]["snapshot"]["app"].update(pid=99)),
+            ("response", lambda v: v["result"]["action"].update(targetWindowId=99)),
+            ("response", lambda v: v["_meta"].update(runtimeId="other-runtime")),
+            ("response", lambda v: v.update(ok=False)),
+            ("exited", lambda v: v.update(reaped=False)),
+            ("exited", lambda v: v.update(owned_wait_returncode=1)),
+        ):
+            with self.subTest(target=target):
+                self.completed_quit()
+                row = self.plan["completion"][target]
+                value = decode(read_plain(row["path"]))
+                mutation(value)
+                self.plan["completion"][target] = dump(Path(row["path"]), value)
+                if target == "response":
+                    self.plan["completion"]["expected_response"] = value
+                self.seal()
+                self.assert_refuses("completed")
+
     def test_transaction_restores_exact_return_preferences_keeps_diagnostic_and_unknown(self):
         original = read_plain(self.root / "outcome.json")
         result = self.operation().run()

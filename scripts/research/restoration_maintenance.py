@@ -144,7 +144,7 @@ def validate_completion(plan):
     """Consume positive complete-response evidence, never infer click success.
 
     The independently reviewed plan pins the exact response and matching native
-    single-click synchronous branch. Timing omitted by the old owner stays absent.
+    synchronous click or quit-hotkey branch. Timing omitted by the old owner stays absent.
     This predicate only settles provider emission for filesystem maintenance.
     """
     evidence = plan["completion"]
@@ -153,13 +153,43 @@ def validate_completion(plan):
     exited = decode(pinned(evidence["exited"]))
     require(
         response == evidence["expected_response"]
-        and response["ok"] is False
-        and response["error"]["code"] == "window_not_focused"
-        and "; 1 press(es) may already have been delivered;" in response["error"]["message"]
         and response["_meta"] == {"runtimeId": plan["provider_runtime_id"]}
         and created["mutable"] is True
         and created["pid"] == exited["pid"] == evidence["input_pid"]
-        and exited["reaped"] is True
+        and exited["reaped"] is True,
+        "Exact completed provider child required",
+    )
+    if evidence.get("kind") == "completed_quit_hotkey":
+        request_raw = pinned(evidence["request"])
+        request = decode(request_raw)
+        decision = decode(pinned(evidence["decision"]))
+        result = response.get("result", {})
+        action = result.get("action", {})
+        snapshot = result.get("snapshot", {})
+        stopped = decode(pinned(plan["positive_exits"]))
+        require(
+            response["ok"] is True
+            and exited["owned_wait_returncode"] == 0
+            and request["job"] == decode(pinned(plan["original_job"]))["job"]
+            and request["stage"] == "finished"
+            and decision["request_sha256"] == sha(request_raw)
+            and decision["choice"] == "action"
+            and decision["receiver"] == "owned_window"
+            and decision["action"] == ["hotkey", "--key", "CmdOrCtrl+Q"]
+            and action.get("path") == "synthetic"
+            and action.get("actionName") == "hotkey"
+            and action.get("targetWindowId") == request["frame"]["window"]["id"]
+            and snapshot.get("window", {}).get("id") == action["targetWindowId"]
+            and snapshot.get("app", {}).get("pid") == request["process"]["pid"]
+            and [r["pid"] for r in stopped["children"] if r["role"] == "game"]
+            == [request["process"]["pid"]],
+            "Positive completed exact quit-hotkey response required",
+        )
+        return
+    require(
+        response["ok"] is False
+        and response["error"]["code"] == "window_not_focused"
+        and "; 1 press(es) may already have been delivered;" in response["error"]["message"]
         and exited["owned_wait_returncode"] == 1,
         "Positive completed single-click response required",
     )
