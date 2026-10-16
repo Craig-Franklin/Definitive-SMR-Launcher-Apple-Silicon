@@ -222,15 +222,13 @@ class PackagedService:
         )
         require(not commit or not self.commit_sent, "One packaged Play commit maximum")
         raw = canonical(dict(id=ident, method=method, params=params)) + b"\n"
-        require(
-            len(raw) <= os.fpathconf(self.child.stdin.fileno(), "PC_PIPE_BUF"),
-            "Atomic packaged request bound",
-        )
+        require(len(raw) <= 4096, "Bounded packaged request required")
         with self.owner.mutation_guard():
             self.owner.control._poll_locked()
             require(not self.owner.control.cancelled, "Cancelled before packaged request")
             require(time.monotonic() < self.owner.launch_deadline, "Packaged launch cutoff expired")
-            # Record uncertainty before the atomic write, never retry a failed write.
+            # This private pipe has one writer. Record uncertainty before its
+            # single nonblocking write; an incomplete write is never replayed.
             self.pending = ident
             if commit:
                 self.commit_sent = True

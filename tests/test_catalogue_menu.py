@@ -204,7 +204,6 @@ class PackagedBoundaryTests(unittest.TestCase):
             return len(raw)
 
         with (
-            patch.object(menu.os, "fpathconf", return_value=4096),
             patch.object(menu.os, "write", side_effect=write),
         ):
             service.send("play-commit", "maptools.play_commit", {"confirmed": True}, commit=True)
@@ -224,22 +223,37 @@ class PackagedBoundaryTests(unittest.TestCase):
             if cause == "deadline":
                 service.owner.launch_deadline = time.monotonic() - 1
             with (
-                patch.object(menu.os, "fpathconf", return_value=5 if cause == "size" else 4096),
                 patch.object(menu.os, "write") as write,
             ):
                 with self.assertRaises(ControlRefused):
-                    service.send("play-commit", "maptools.play_commit", {}, commit=True)
+                    service.send(
+                        "play-commit",
+                        "maptools.play_commit",
+                        {"oversized": "x" * 4096} if cause == "size" else {},
+                        commit=True,
+                    )
                 write.assert_not_called()
             self.assertFalse(service.commit_sent)
 
     def test_unknown_write_is_not_replayed(self):
         service = self.service()
         with (
-            patch.object(menu.os, "fpathconf", return_value=4096),
             patch.object(menu.os, "write", side_effect=BrokenPipeError),
         ):
             with self.assertRaises(BrokenPipeError):
                 service.send("play-commit", "maptools.play_commit", {}, commit=True)
+        self.assertTrue(service.commit_sent)
+        self.assertEqual(service.pending, "play-commit")
+        self.assertTrue(service.owner.open_attempted)
+
+    def test_partial_nonblocking_write_stays_unknown_and_cannot_replay(self):
+        service = self.service()
+        with patch.object(menu.os, "write", side_effect=lambda fd, raw: len(raw) - 1) as write:
+            with self.assertRaisesRegex(ControlRefused, "Incomplete packaged"):
+                service.send("play-commit", "maptools.play_commit", {}, commit=True)
+            with self.assertRaisesRegex(ControlRefused, "pending"):
+                service.send("play-commit", "maptools.play_commit", {}, commit=True)
+            self.assertEqual(write.call_count, 1)
         self.assertTrue(service.commit_sent)
         self.assertEqual(service.pending, "play-commit")
         self.assertTrue(service.owner.open_attempted)
@@ -315,7 +329,20 @@ class ServiceLifetimeTests(unittest.TestCase):
                 try:
                     service.receive(event="ready", deadline=time.monotonic() + 3)
                     service.send(
-                        "play-commit", "maptools.play_commit", dict(confirmed=True), commit=True
+                        "play-commit",
+                        "maptools.play_commit",
+                        dict(
+                            confirmed=True,
+                            profile_id="map-" + "a" * 64,
+                            archive_sha256="b" * 64,
+                            variant_id="c" * 64,
+                            game_executable_sha256="d" * 64,
+                            prepare_compatibility=False,
+                            launch_deadline=owner.launch_deadline,
+                            ticket="e" * 64,
+                            fingerprint="f" * 64,
+                        ),
+                        commit=True,
                     )
                     response = service.receive(deadline=time.monotonic() + 3)
                     self.assertTrue(response["ok"])
