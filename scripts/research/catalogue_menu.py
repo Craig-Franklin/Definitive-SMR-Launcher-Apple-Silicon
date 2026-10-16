@@ -26,6 +26,7 @@ from unique_save_file import signature
 
 PURPOSE = "ONE_AGENT_PACKAGED_CATALOGUE_MENU_V1"
 CACHED_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_MENU_V1"
+LOAD_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_LOAD_V1"
 
 
 class MenuIncomplete(ValueError):
@@ -105,8 +106,24 @@ def verify_sibling_saves(owner):
 def verify_config(job):
     config = job["catalogue_menu"]
     target = config["target"]
-    require(job["purpose"] in (PURPOSE, CACHED_PURPOSE), "Closed catalogue menu purpose required")
-    cached = job["purpose"] == CACHED_PURPOSE
+    require(
+        job["purpose"] in (PURPOSE, CACHED_PURPOSE, LOAD_PURPOSE),
+        "Closed catalogue purpose required",
+    )
+    cached = job["purpose"] in (CACHED_PURPOSE, LOAD_PURPOSE)
+    if job["purpose"] == LOAD_PURPOSE:
+        title = config.get("scenario_title")
+        require(
+            type(title) is str
+            and 0 < len(title) <= 256
+            and title.strip() == title
+            and all(ord(c) >= 32 and ord(c) != 127 for c in title),
+            "Exact reviewed rendered scenario title required",
+        )
+        require(
+            not any(name.startswith("Saves/") for name in config["preservation"]["target_files"]),
+            "First scenario load requires a target without pre-existing saves",
+        )
     require(
         set(target) == {"profile_id", "archive_sha256", "variant_id", "scenarios", "assets_sha256"},
         "Exact catalogue target fields required",
@@ -845,22 +862,34 @@ def pilot_class(common, agent_class):
         def observe(self):
             observations = {}
             partial = None
+            loading = self.job["purpose"] == LOAD_PURPOSE
+            instructions = (
+                (
+                    "launcher",
+                    "Wait for the Feral Play control. Activate only its fresh unique AX Play once; observe the game main menu.",
+                ),
+                (
+                    "menu",
+                    "From the current game main menu open visible Credits or Options once. No Single Player, Load, scenario, settings changes or save actions. Observe that reversible submenu.",
+                ),
+                (
+                    "returned",
+                    "Return once using visible Back or Escape; observe the main menu. No gameplay, settings changes, loading or saves.",
+                ),
+            )
+            if loading:
+                instructions = (
+                    instructions[0],
+                    (
+                        "world",
+                        "Use visible Single Player and verify the selected scenario title is exactly "
+                        + repr(self.config["scenario_title"])
+                        + " before starting once. Observe its playable world, HUD funds/year and actual city; pause using the visible control. No construction, purchases, Load, saves or settings changes. If the exact scenario cannot be verified or loading cannot finish promptly, return partial with no input; normal quit follows.",
+                    ),
+                )
             self.menu_work_active = True
             try:
-                for stage, instruction in (
-                    (
-                        "launcher",
-                        "Wait for the Feral Play control. Activate only its fresh unique AX Play once; observe the game main menu.",
-                    ),
-                    (
-                        "menu",
-                        "From the current game main menu open visible Credits or Options once. No Single Player, Load, scenario, settings changes or save actions. Observe that reversible submenu.",
-                    ),
-                    (
-                        "returned",
-                        "Return once using visible Back or Escape; observe the main menu. No gameplay, settings changes, loading or saves.",
-                    ),
-                ):
+                for stage, instruction in instructions:
                     if time.monotonic() >= self.anchor + 390:
                         raise MenuIncomplete("Menu discovery cutoff reached")
                     observations[stage] = self.decisions.stage(stage, instruction)
@@ -871,8 +900,12 @@ def pilot_class(common, agent_class):
             self.normal_quit("finished", None)
             return dict(
                 status="safety_stop",
-                cause="packaged_catalogue_menu_requires_review",
-                world_loaded="unknown",
+                cause=(
+                    "packaged_cached_scenario_load_requires_review"
+                    if loading
+                    else "packaged_catalogue_menu_requires_review"
+                ),
+                world_loaded="agent_observed" if "world" in observations else "unknown",
                 gameplay_credit=False,
                 save_reopen_credit=False,
                 evidence_kind="agent_visual_observations",

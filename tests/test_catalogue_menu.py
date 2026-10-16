@@ -401,6 +401,7 @@ class ServiceLifetimeTests(unittest.TestCase):
         events = []
         cls = menu.pilot_class(SimpleNamespace(), object)
         owner = cls.__new__(cls)
+        owner.job = dict(purpose=menu.PURPOSE)
         owner.anchor = time.monotonic() - 391
         owner.decisions = SimpleNamespace(stage=lambda *args: events.append("stage"))
         owner.normal_quit = lambda *args: events.append("normal-quit")
@@ -412,6 +413,80 @@ class ServiceLifetimeTests(unittest.TestCase):
 
 
 class CatalogueCompositionTests(unittest.TestCase):
+    def test_load_owner_observes_only_exact_world_then_existing_quit(self):
+        cls = menu.pilot_class(SimpleNamespace(), object)
+        owner = cls.__new__(cls)
+        owner.job = dict(purpose=menu.LOAD_PURPOSE)
+        owner.config = dict(scenario_title="Synthetic Canyon")
+        owner.anchor = time.monotonic()
+        calls = []
+
+        def stage(name, instruction):
+            calls.append((name, instruction))
+            self.assertTrue(owner.menu_work_active)
+            if name == "world":
+                self.assertIn("'Synthetic Canyon' before starting once", instruction)
+            return dict(stage=name, observation="Synthetic observed scene")
+
+        def quit_once(*args):
+            self.assertFalse(owner.menu_work_active)
+            calls.append(("quit", args))
+
+        owner.decisions = SimpleNamespace(stage=stage)
+        owner.normal_quit = quit_once
+        result = owner.observe()
+        self.assertEqual([c[0] for c in calls], ["launcher", "world", "quit"])
+        self.assertEqual(result["world_loaded"], "agent_observed")
+        self.assertFalse(result["gameplay_credit"] or result["save_reopen_credit"])
+        self.assertIsNone(result["partial_reason"])
+
+    def test_load_prerequisite_or_cutoff_keeps_existing_normal_quit(self):
+        cls = menu.pilot_class(SimpleNamespace(), object)
+        for cause in ("wrong-title", "cutoff"):
+            owner = cls.__new__(cls)
+            owner.job = dict(purpose=menu.LOAD_PURPOSE)
+            owner.config = dict(scenario_title="Synthetic Canyon")
+            owner.anchor = 0.0
+            calls = []
+
+            def stage(name, instruction):
+                calls.append(name)
+                if name == "world":
+                    raise menu.MenuIncomplete("Exact title unavailable")
+                return dict(stage=name)
+
+            owner.decisions = SimpleNamespace(stage=stage)
+            owner.normal_quit = lambda *args: calls.append("quit")
+            with patch.object(
+                menu.time, "monotonic", return_value=390.0 if cause == "cutoff" else 100.0
+            ):
+                result = owner.observe()
+            self.assertEqual(calls[-1], "quit")
+            self.assertNotIn("world", result)
+            self.assertEqual(result["world_loaded"], "unknown")
+            self.assertIsNotNone(result["partial_reason"])
+            self.assertFalse(owner.menu_work_active)
+
+    def test_load_requires_bounded_exact_reviewed_title(self):
+        for title in (None, "", "wrong\nline", " padded", "x" * 257):
+            job = dict(
+                purpose=menu.LOAD_PURPOSE, catalogue_menu=dict(target={}, scenario_title=title)
+            )
+            with self.assertRaisesRegex(ControlRefused, "rendered scenario title"):
+                menu.verify_config(job)
+
+    def test_first_load_refuses_existing_target_saves_before_any_launch(self):
+        job = dict(
+            purpose=menu.LOAD_PURPOSE,
+            catalogue_menu=dict(
+                target={},
+                scenario_title="Synthetic Canyon",
+                preservation=dict(target_files={"Saves/Auto0.SMRailroadsSavedGame": {}}),
+            ),
+        )
+        with self.assertRaisesRegex(ControlRefused, "without pre-existing saves"):
+            menu.verify_config(job)
+
     def exercise(self, response, *, cached=False, wrong_review=False):
         events = []
 

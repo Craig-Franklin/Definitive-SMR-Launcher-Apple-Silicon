@@ -627,6 +627,65 @@ class AgentRouteTests(unittest.TestCase):
     def test_partial_cannot_finish_save_cycle_early(self):
         self.assert_partial_refused(driver.PURPOSE, [])
 
+    def test_cached_load_partial_has_no_input_and_existing_normal_quit_remains_available(self):
+        import catalogue_menu
+
+        self.owner.launch()
+        self.owner.job["purpose"] = driver.CACHED_LOAD_PURPOSE
+        self.reply_transform = lambda value: dict(
+            value, choice="partial", action=[], observation="Exact scenario title not visible"
+        )
+        with self.assertRaisesRegex(catalogue_menu.MenuIncomplete, "title not visible"):
+            self.owner.decisions.stage("world", "Synthetic exact scenario")
+        self.assertEqual(self.actions, [])
+        self.reply_transform = lambda value: value
+        self.owner.normal_quit("finished", None)
+        self.assertEqual(self.actions, [["hotkey", "--key", "CmdOrCtrl+Q"]])
+        self.assertFalse(self.owner.running)
+
+    def test_cached_load_partial_with_input_refuses(self):
+        self.owner.launch()
+        self.owner.job["purpose"] = driver.CACHED_LOAD_PURPOSE
+        self.reply_transform = lambda value: dict(value, choice="partial")
+        with self.assertRaisesRegex(ControlRefused, "Partial load cannot carry input"):
+            self.owner.decisions.stage("world", "Synthetic exact scenario")
+        self.assertEqual(self.actions, [])
+
+    def test_cached_load_decision_cap_hands_back_without_seventeenth_input(self):
+        import catalogue_menu
+
+        self.owner.launch()
+        self.owner.job["purpose"] = driver.CACHED_LOAD_PURPOSE
+        self.reply_transform = lambda value: dict(value, choice="wait", action=[])
+        with self.assertRaisesRegex(catalogue_menu.MenuIncomplete, "decision budget exhausted"):
+            self.owner.decisions.stage("world", "Synthetic exact scenario")
+        self.assertEqual(self.stage_indexes["world"], 16)
+        self.assertEqual(self.actions, [])
+        self.reply_transform = lambda value: value
+        self.owner.normal_quit("finished", None)
+        self.assertFalse(self.owner.running)
+
+    def test_cached_load_purpose_remains_separate_and_cannot_save_or_construct(self):
+        self.assertEqual(
+            driver.admission_decisions(driver.CACHED_LOAD_PURPOSE),
+            ("ADMIT_ONE_AGENT_PACKAGED_CACHED_LOAD", "GO_ONE_AGENT_PACKAGED_CACHED_LOAD"),
+        )
+        frame = {"window": {"width": 200, "height": 100}}
+        for action in (
+            ["hotkey", "--key", "CmdOrCtrl+S"],
+            ["type-text", "--text", "SyntheticToken12345"],
+            ["drag", "--from-x", "10", "--from-y", "20", "--to-x", "30", "--to-y", "40"],
+        ):
+            with self.assertRaises(ControlRefused):
+                driver.validate_action(
+                    "world",
+                    action,
+                    frame,
+                    "SyntheticToken12345",
+                    "owned_window",
+                    purpose=driver.CACHED_LOAD_PURPOSE,
+                )
+
     def test_transport_stage_budget_ends_with_normal_quit_without_seventeenth_input(self):
         self.owner.job["purpose"] = driver.TRANSPORT_PURPOSE
         self.reply_transform = lambda value: (

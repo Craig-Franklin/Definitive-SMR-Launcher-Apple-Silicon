@@ -37,6 +37,7 @@ WINDOW_PURPOSE = "ONE_AGENT_WINDOW_MENU_PILOT_V1"
 TRANSPORT_PURPOSE = "ONE_AGENT_UK_TRANSPORT_ACTION_V1"
 CATALOGUE_MENU_PURPOSE = "ONE_AGENT_PACKAGED_CATALOGUE_MENU_V1"
 CACHED_MENU_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_MENU_V1"
+CACHED_LOAD_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_LOAD_V1"
 TRANSPORT_WORK_SECONDS = 390
 STAGES = ("world", "action", "filename", "saved", "quit", "reopened", "continued", "finished")
 MENU_STAGES = ("launcher", "menu", "returned")
@@ -55,6 +56,7 @@ def admission_decisions(purpose):
         TRANSPORT_PURPOSE: "AGENT_UK_TRANSPORT_ACTION",
         CATALOGUE_MENU_PURPOSE: "AGENT_PACKAGED_CATALOGUE_MENU",
         CACHED_MENU_PURPOSE: "AGENT_PACKAGED_CACHED_MENU",
+        CACHED_LOAD_PURPOSE: "AGENT_PACKAGED_CACHED_LOAD",
     }
     require(purpose in names, "Fresh agent purpose required")
     return "ADMIT_ONE_" + names[purpose], "GO_ONE_" + names[purpose]
@@ -441,6 +443,11 @@ class AgentDecisions:
             require(time.monotonic() < reply_deadline, "Agent decision deadline expired")
             require(time.monotonic() < deadline, "Fixed agent stage deadline expired")
             if decision["choice"] == "partial":
+                if owner.job["purpose"] == CACHED_LOAD_PURPOSE and stage == "world":
+                    require(decision["action"] == [], "Partial load cannot carry input")
+                    from catalogue_menu import MenuIncomplete
+
+                    raise MenuIncomplete(decision["observation"])
                 require(
                     owner.job["purpose"] == TRANSPORT_PURPOSE
                     and stage in ("world", "action", "continued")
@@ -554,6 +561,10 @@ class AgentDecisions:
             owner, "transport_work_active", False
         ):
             raise TransportIncomplete("Finite transport stage action budget exhausted")
+        if owner.job["purpose"] == CACHED_LOAD_PURPOSE and stage == "world":
+            from catalogue_menu import MenuIncomplete
+
+            raise MenuIncomplete("Finite scenario-load decision budget exhausted")
         raise ValueError("Finite agent stage action budget exhausted")
 
 
@@ -1292,7 +1303,7 @@ def verify_entry(job, admission, job_sha):
         and config["filename"] == config["token"] + ".SMRailroadsSavedGame",
         "Exact new agent save contract required",
     )
-    if job["purpose"] in (CATALOGUE_MENU_PURPOSE, CACHED_MENU_PURPOSE):
+    if job["purpose"] in (CATALOGUE_MENU_PURPOSE, CACHED_MENU_PURPOSE, CACHED_LOAD_PURPOSE):
         from catalogue_menu import verify_config
 
         verify_config(job)
@@ -1344,7 +1355,7 @@ def verify_entry(job, admission, job_sha):
         )
     )
     needed.add(job["native_source"])
-    if job["purpose"] in (CATALOGUE_MENU_PURPOSE, CACHED_MENU_PURPOSE):
+    if job["purpose"] in (CATALOGUE_MENU_PURPOSE, CACHED_MENU_PURPOSE, CACHED_LOAD_PURPOSE):
         needed.add(str(Path(__file__).with_name("catalogue_menu.py").resolve()))
     require(needed.issubset(paths), "Actual imported source paths missing from closure")
     raw_review = read_plain(admission["review"]["path"])
@@ -1388,7 +1399,7 @@ def main():
     )
     queue.guard(lease)
     owner_class = pilot_class(common)
-    if job["purpose"] in (CATALOGUE_MENU_PURPOSE, CACHED_MENU_PURPOSE):
+    if job["purpose"] in (CATALOGUE_MENU_PURPOSE, CACHED_MENU_PURPOSE, CACHED_LOAD_PURPOSE):
         from catalogue_menu import pilot_class as catalogue_pilot_class
 
         owner_class = catalogue_pilot_class(common, owner_class)

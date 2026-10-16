@@ -259,3 +259,16 @@ it cannot compile, create an edition, start a scenario or load/save a game.
 Current input/output recipe receipts establish file correspondence, not effective
 engine resource precedence or gameplay compatibility. A new released package and
 fresh exact admission are required before testing this purpose live.
+
+`ONE_AGENT_PACKAGED_CACHED_LOAD_V1` separately permits loading that exact repaired
+scenario through the same packaged cached Play path. Its grant additionally
+binds the reviewed rendered scenario title. The visual actor must verify that
+title before starting once, then observe the playable world and HUD and pause
+using a visible control. This first pilot requires no pre-existing target saves,
+so automatic saving cannot rotate a user's save; every new file is retained.
+No construction, purchases, loading a save or saving is
+permitted. An unavailable title, incomplete load, 16-decision cap or original
+390-second work cutoff leads to the existing normal-quit path, without extending
+the 480/900-second bounds. An uncertain dispatched input still holds restoration.
+World observation, normal exit and preservation require independent review;
+they do not establish gameplay, repair completeness or save/reopen compatibility.
