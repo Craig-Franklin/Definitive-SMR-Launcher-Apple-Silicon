@@ -178,6 +178,7 @@ struct MapToolDraft {
         }
         var params = target.parameters
         params["prepare_compatibility"] = prepareCompatibility
+        if let deadline = model.playDeadline { params["launch_deadline"] = deadline }
         await model.request("maptools.play_preflight", params) { result in
             guard self.playIntent == intent, self.currentPlay(model, target),
                   target.matches(result.object("target")), !result.text("ticket").isEmpty,
@@ -206,6 +207,7 @@ struct MapToolDraft {
         var params = target.parameters
         params["ticket"] = review.ticket; params["fingerprint"] = review.fingerprint; params["confirmed"] = true
         params["prepare_compatibility"] = review.prepareCompatibility
+        if let deadline = model.playDeadline { params["launch_deadline"] = deadline }
         var received = false
         await model.request("maptools.play_commit", params) { result in
             received = true

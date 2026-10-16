@@ -43,6 +43,15 @@ The review binds the original selection, plan and actual cached profile; the
 commit revalidates all three. Ordinary nonfinite preparation retains its existing
 compilation behavior. This dispatch primitive does not supply game-test admission.
 
+The native Swift executable accepts `--play-deadline SECONDS` for a finite
+owner's UI test. Pass the same absolute monotonic deadline described above;
+the UI forwards it unchanged in both Play requests, including warning consent
+and Play Original. Missing, duplicate, nonnumeric or nonfinite values refuse
+before service startup. The backend remains responsible for expiry and the
+480-second bound. Ordinary UI launches omit this option. This option supplies
+neither a UI-test owner nor admission, observer, cancellation or restoration;
+those must be established separately before a game test.
+
 The service rechecks its owner and the fixed deadline at the application/profile
 exchange, settings update and actual `Popen` boundary. Finite launch refuses busy
 locks instead of waiting. Native input EOF/disconnection prevents a later

@@ -149,6 +149,8 @@ final class ScrollMemory { var point: NSPoint? }
     @Published var narrowDetail = false
     @Published var exitPrompt: [String: Any]?
     let fixture: Bool
+    let playDeadline: Double?
+    private let playDeadlineError: String?
     let gridScroll = ScrollMemory()
     var detailScroll: [String: ScrollMemory] = [:]
     private let backend: Backend
@@ -192,8 +194,18 @@ final class ScrollMemory { var point: NSPoint? }
         return visibleRows
     }
 
-    init(fixture: Bool, backend: Backend? = nil) {
+    init(fixture: Bool, backend: Backend? = nil, arguments: [String] = CommandLine.arguments) {
         self.fixture = fixture
+        let flags = arguments.indices.filter { arguments[$0] == "--play-deadline" }
+        if let index = flags.first {
+            if flags.count == 1, index + 1 < arguments.count,
+               let deadline = Double(arguments[index + 1]), deadline.isFinite, deadline > 0 {
+                playDeadline = deadline; playDeadlineError = nil
+            } else {
+                playDeadline = nil
+                playDeadlineError = "--play-deadline requires one finite positive monotonic deadline."
+            }
+        } else { playDeadline = nil; playDeadlineError = nil }
         self.backend = backend ?? Backend()
         self.backend.event = { [weak self] name, data in self?.event(name, data) }
         self.backend.stopped = { [weak self] message in
@@ -205,6 +217,7 @@ final class ScrollMemory { var point: NSPoint? }
     func start() async {
         guard !started else { return }
         started = true
+        if let playDeadlineError { error = playDeadlineError; loaded = true; return }
         if fixture {
             do { maps = try Self.fixtureMaps().map(MapItem.init) } catch { self.error = error.localizedDescription }
             loaded = true; available = true; enrolled = true; connected = true

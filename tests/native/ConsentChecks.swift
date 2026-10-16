@@ -170,6 +170,37 @@ import Foundation
         await tools.beginPlay(model, nil)
         require(try await count("play_commit") == 6, "Original Game uses the same native launch boundary")
         model.destination = "Map Library"
+        require((try await backend.call("fixture.last")).object("maptools.play_commit")["launch_deadline"] == nil, "Ordinary UI Play stays nonfinite")
+
+        // Exercise the real Swift model/consent/stdio composition. The Python
+        // service owns deadline validation; the UI forwards one fixed value.
+        let fixedDeadline = 123456.125
+        let finite = LauncherModel(fixture: false, backend: backend, arguments: ["launcher", "--play-deadline", String(fixedDeadline)])
+        finite.connected = true; finite.maps = [map]; finite.selection = map.id
+        finite.details[map.id] = model.details[map.id]
+        let finiteTools = NativeMapToolsState()
+        _ = try await backend.call("fixture.configure", ["warning": "Known synthetic issue"])
+        await finiteTools.beginPlay(finite, map)
+        var finiteLast = try await backend.call("fixture.last")
+        require(finiteLast.object("maptools.play_preflight")["launch_deadline"] as? Double == fixedDeadline)
+        let finiteReview = finiteTools.playReview
+        finite.busy = true
+        let queuedFinite = Task { await finiteTools.confirmPlay(finite, finiteReview) }
+        try await Task.sleep(nanoseconds: 30_000_000)
+        finite.busy = false
+        await queuedFinite.value
+        finiteLast = try await backend.call("fixture.last")
+        require(finiteLast.object("maptools.play_commit")["launch_deadline"] as? Double == fixedDeadline, "Consent/waiting cannot renew the owner deadline")
+        _ = try await backend.call("fixture.configure", ["preparation": true])
+        await finiteTools.beginPlay(finite, map)
+        await finiteTools.beginOriginalPlay(finite, finiteTools.playReview!)
+        finiteLast = try await backend.call("fixture.last")
+        require(finiteLast.object("maptools.play_commit")["launch_deadline"] as? Double == fixedDeadline && finiteLast.object("maptools.play_commit")["prepare_compatibility"] as? Bool == false, "Play Original retains the fixed gate")
+        for invalid in [["--play-deadline"], ["--play-deadline", "nan"], ["--play-deadline", "inf"], ["--play-deadline", "0"], ["--play-deadline", "-1"], ["--play-deadline", "bad"], ["--play-deadline", "1", "--play-deadline", "2"]] {
+            let refused = LauncherModel(fixture: false, arguments: ["launcher"] + invalid)
+            await refused.start()
+            require(!refused.connected && refused.loaded && refused.error.hasPrefix("--play-deadline requires"), "Malformed finite options cannot start an unbounded service")
+        }
         _ = try await backend.call("fixture.configure", ["reject": true, "error": "Map tool outcome needs inspection; do not repeat the action: History append failed; partial write needs inspection"])
         await tools.perform(model, map, build, "link_issue")
         await tools.perform(model, map, build, "link_issue")
