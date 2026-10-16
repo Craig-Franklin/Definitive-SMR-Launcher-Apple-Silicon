@@ -236,7 +236,7 @@ def verify_config(job):
         saves = {
             name for name in config["preservation"]["target_files"] if name.startswith("Saves/")
         }
-        if job["purpose"] == SAVE_PURPOSE:
+        if job["purpose"] == SAVE_PURPOSE and saves:
             require(
                 OWNED_AUTOSAVE in saves
                 and not saves.intersection(
@@ -245,6 +245,11 @@ def verify_config(job):
                 "Only the proven owned autosave may rotate; pretrial Auto1..4 refuse",
             )
             autosave_origin(job)
+        elif job["purpose"] == SAVE_PURPOSE:
+            require(
+                "owned_autosave" not in config,
+                "Empty target must not declare a prior autosave",
+            )
         else:
             require(not saves, "First scenario load requires a target without pre-existing saves")
     require(
@@ -793,7 +798,7 @@ def pilot_class(common, agent_class):
                 self.app, target["profile_id"], self.job["return_profile"]
             )
             paths = [self.app.catalogue_file, self.app.originals / (record.archive_sha256 + ".7z")]
-            if self.job["purpose"] == SAVE_PURPOSE:
+            if self.job["purpose"] == SAVE_PURPOSE and "owned_autosave" in self.config:
                 paths.append(Path(autosave_origin(self.job)["origin_readback"]))
             if self.config["prepare_compatibility"]:
                 selection = self.config["selection"]
@@ -825,7 +830,7 @@ def pilot_class(common, agent_class):
                 "Archive drift",
             )
             self.baseline = baseline
-            if self.job["purpose"] == SAVE_PURPOSE:
+            if self.job["purpose"] == SAVE_PURPOSE and "owned_autosave" in self.config:
                 self.autosave_preimage = preserve_owned_autosave(self, root)
                 target_files_unchanged(self, root)
             for role, path in (

@@ -291,7 +291,10 @@ retain separate service/observer receipts. The existing exact-file save-cycle
 helper revalidates the unique save immediately before every relaunch/reopen
 delivery. There is no source-backend fallback, construction or transport stage.
 
-The save pilot requires the exact owned `Auto0` from a previously settled trial,
+The save pilot accepts a target with no pre-existing saves, without declaring or
+copying a prior autosave. Its fresh complete preservation baseline must still
+match before launch. New named saves and autosave slots remain in that edition.
+Otherwise it requires the exact owned `Auto0` from a previously settled trial,
 with its original readback and current file facts bound in the job. A partial
 trial can supply that provenance only after its first normal exit, both services
 have settled, and root preservation and lease settlement passed. The second
@@ -299,11 +302,12 @@ service must either have sent no commit, or have launched the exact known target
 with its distinct owned game independently proved absent. An owned cleanup stop
 can establish that absence; it cannot earn normal-quit or full-cycle credit.
 This does not turn the failed invocation into reopen success.
-The pilot preserves that one file durably in private evidence before launch;
-the replacement autosave remains in the target edition. Restoration verifies the
+When that prior `Auto0` exists, the pilot preserves it durably in private evidence
+before launch; the replacement autosave remains in the target edition. Restoration verifies the
 old copy and never writes it over the newer file. Every other pre-existing save
 remains subject to strict unchanged-file checks, including named saves retained
-from an earlier attempt. Missing or unproven autosave provenance refuses admission.
+from an earlier attempt. A target with pre-existing saves and missing or unproven
+autosave provenance refuses admission.
 The named new save keeps its strict file identity through
 reopening. The already-preserved `Auto0` and scratch slots `Auto1..4` created within
 this invocation may rotate; pretrial `Auto1..4` still refuse admission. This is a

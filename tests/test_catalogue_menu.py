@@ -331,8 +331,19 @@ class CatalogueRestoreTests(unittest.TestCase):
                 with self.assertRaisesRegex(ControlRefused, "settled owned trial"):
                     menu.autosave_origin(self.owner.job)
 
-    def test_save_config_admits_strict_named_files_with_proven_autosave(self):
-        self.owned_autosave()
+    def save_config(self, *, empty=False):
+        if empty:
+            self.owner.job.update(purpose=menu.SAVE_PURPOSE, catalogue_menu=self.owner.config)
+            self.owner.config["preservation"] = self.owner.baseline
+            for path in (self.owner.profiles.live / "Saves").iterdir():
+                path.unlink()
+            self.owner.baseline["target_files"] = {
+                name: facts
+                for name, facts in self.owner.baseline["target_files"].items()
+                if not name.startswith("Saves/")
+            }
+        else:
+            self.owned_autosave()
         bundle = self.owner.directory / "Synthetic.app"
         helper = bundle / "Contents/MacOS/Definitive SMR Launcher Apple Silicon"
         helper.parent.mkdir(parents=True)
@@ -353,7 +364,7 @@ class CatalogueRestoreTests(unittest.TestCase):
             profile_id=self.target.profile_id,
             variant_id=self.target.profile_id[4:],
             archive_sha256="a" * 64,
-            assets_sha256="b" * 64,
+            assets_sha256=self.owner.profiles._asset_hash(self.owner.profiles.live),
             scenarios=["synthetic.xml"],
         )
         self.owner.config.update(
@@ -384,7 +395,32 @@ class CatalogueRestoreTests(unittest.TestCase):
             variant_id=target["variant_id"],
             scenario="synthetic.xml",
         )
-        self.assertIs(menu.verify_config(self.owner.job), self.owner.config)
+        return self.owner.job
+
+    def test_save_config_admits_strict_named_files_with_proven_autosave(self):
+        self.assertIs(menu.verify_config(self.save_config()), self.owner.config)
+
+    def test_empty_save_target_admits_without_origin_or_extra_backup_and_retains_new_files(self):
+        job = self.save_config(empty=True)
+        with patch.object(menu, "autosave_origin", side_effect=AssertionError("No prior autosave")):
+            self.assertIs(menu.verify_config(job), self.owner.config)
+            saves = self.owner.profiles.live / "Saves"
+            for name in ("Auto0.SMRailroadsSavedGame", "Auto1.SMRailroadsSavedGame", "new.sav"):
+                (saves / name).write_bytes(name.encode())
+            expected = menu.tree_files(saves)
+            self.assertTrue(menu.restore_catalogue(self.owner))
+        target = self.owner.profiles._profile_path(self.target.profile_id)
+        self.assertEqual(menu.tree_files(target / "Saves"), expected)
+        self.assertFalse(list(self.owner.directory.glob("owned-Auto*-preimage")))
+        self.assertEqual(
+            menu.tree_files(self.owner.profiles.live), self.owner.baseline["return_files"]
+        )
+
+    def test_empty_target_refuses_misleading_prior_autosave_evidence(self):
+        job = self.save_config(empty=True)
+        self.owner.config["owned_autosave"] = {}
+        with self.assertRaisesRegex(ControlRefused, "Empty target must not declare"):
+            menu.verify_config(job)
 
     def test_corrupt_owned_autosave_copy_or_origin_holds_before_switch(self):
         copy = self.owned_autosave()
