@@ -5,12 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from dataclasses import replace
 from datetime import datetime, timezone
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Callable, Iterator, Optional
 import fcntl
 import hashlib
 import json
+import math
 import os
 import shutil
 import stat
@@ -178,7 +179,9 @@ class LauncherApplication:
         return app
 
     @contextmanager
-    def _locked(self, *, observed_io=None, recover_removal=True) -> Iterator[None]:
+    def _locked(
+        self, *, observed_io=None, recover_removal=True, nonblocking=False
+    ) -> Iterator[None]:
         _assert_no_symlink_ancestor(self.library)
         self.library.mkdir(parents=True, exist_ok=True)
         call = (lambda name, fn, *args: fn(*args)) if observed_io is None else observed_io.call
@@ -199,7 +202,17 @@ class LauncherApplication:
             0o600,
         )
         try:
-            call("application.lock_acquire", fcntl.flock, fd, fcntl.LOCK_EX)
+            try:
+                call(
+                    "application.lock_acquire",
+                    fcntl.flock,
+                    fd,
+                    fcntl.LOCK_EX | (fcntl.LOCK_NB if nonblocking else 0),
+                )
+            except BlockingIOError as exc:
+                raise ApplicationError(
+                    "Launcher application is busy; guarded play refused"
+                ) from exc
             if observed_io is None and recover_removal:
                 removal.resume(self)
             elif pending.exists() or pending.is_symlink():
@@ -1485,19 +1498,75 @@ class LauncherApplication:
             self._authorize_profile(profile_id)
             return self.profiles.switch(profile_id)
 
-    def play(self, profile_id: str, launch: Optional[Callable[[], None]] = None) -> str:
-        with self._locked():
+    def play(
+        self,
+        profile_id: str,
+        launch: Optional[Callable[[], None]] = None,
+        *,
+        profile_copy: Optional[str] = None,
+        mutation_guard=None,
+        startup_seconds: float = 30.0,
+    ) -> str:
+        """Use the app launch path, optionally on a guarded isolated asset copy.
+
+        The catalogue profile remains the authorization source. A finite owner
+        may select a distinct registered copy with identical prepared assets;
+        settings and saves stay in that copy. Its supplied launch callback must
+        retain bounded child tracking and the final input/cancellation fence.
+        The CLI and UI retain their ordinary catalogue-only behavior.
+        """
+        if mutation_guard is not None and launch is None:
+            raise ApplicationError("Guarded play requires an owned launch callback")
+        if profile_copy is not None and (
+            mutation_guard is None or profile_id == ORIGINAL or profile_copy == profile_id
+        ):
+            raise ApplicationError("An isolated map copy requires a guarded launch owner")
+        if (
+            type(startup_seconds) not in (int, float)
+            or not math.isfinite(startup_seconds)
+            or not 0 < startup_seconds <= 30
+        ):
+            raise ApplicationError("Startup observation must be finite and at most 30 seconds")
+        target_id = profile_id if profile_copy is None else profile_copy
+        with self._locked(
+            recover_removal=mutation_guard is None, nonblocking=mutation_guard is not None
+        ):
             self._stopped()
-            self.profiles.recover()
+            if mutation_guard is None:
+                self.profiles.recover()
+            elif self.profiles.journal.exists() or self.profiles.journal.is_symlink():
+                raise ApplicationError("Guarded play refuses pending activation recovery")
             self._authorize_profile(profile_id)
             settings_before = settings_after = None
             if profile_id != ORIGINAL:
-                record = next(r for r in self.catalogue() if r.profile_id == profile_id)
+                records = self.catalogue()
+                if profile_copy is not None and any(r.profile_id == profile_copy for r in records):
+                    raise ApplicationError("An isolated copy cannot be a catalogue profile")
+                record = next(r for r in records if r.profile_id == profile_id)
                 root = (
                     self.profiles.live
-                    if self.profiles._state()["active"] == profile_id
-                    else self.profiles._profile_path(profile_id)
+                    if self.profiles._state()["active"] == target_id
+                    else self.profiles._profile_path(target_id)
                 )
+                if profile_copy is not None:
+                    marker = self.profiles._marker(root, target_id)
+                    source_root = (
+                        self.profiles.live
+                        if self.profiles._state()["active"] == profile_id
+                        else self.profiles._profile_path(profile_id)
+                    )
+                    source_marker = self.profiles._marker(source_root, profile_id)
+                    prepared = self.prepared / record.prepared_directory
+                    _assert_no_symlink_ancestor(prepared)
+                    _assert_regular_tree(prepared)
+                    if (
+                        marker.get("variant_id") != target_id[4:]
+                        or marker["assets_sha256"] != source_marker["assets_sha256"]
+                        or marker["assets_sha256"] != self.profiles._asset_hash(prepared)
+                    ):
+                        raise ApplicationError(
+                            "Isolated profile assets differ from the selected map"
+                        )
                 for scenario in record.scenarios:
                     candidate = root / scenario
                     _assert_no_symlink_ancestor(candidate)
@@ -1518,28 +1587,38 @@ class LauncherApplication:
             def configured_launch() -> None:
                 # Called under both locks, after the complete profile switch and
                 # stopped-game check. Frozen prepared inputs and saves stay intact.
-                if settings_after is not None and settings_after != settings_before:
-                    target = self.profiles.live / "Settings.ini"
-                    _assert_no_symlink_ancestor(target)
-                    if target.read_bytes() != settings_before:
-                        raise ApplicationError(
-                            "Map settings changed before launch; retry after inspection"
-                        )
-                    temporary = None
-                    try:
-                        with tempfile.NamedTemporaryFile(
-                            dir=target.parent, prefix=".launch-settings-", delete=False
-                        ) as stream:
-                            temporary = Path(stream.name)
-                            stream.write(settings_after)
-                            stream.flush()
-                            os.fsync(stream.fileno())
-                        os.chmod(temporary, target.stat().st_mode & 0o777)
-                        os.replace(temporary, target)
-                        _fsync_dir(target.parent)
-                    finally:
-                        if temporary is not None and temporary.exists():
-                            temporary.unlink()
+                with mutation_guard() if mutation_guard is not None else nullcontext():
+                    if mutation_guard is not None:
+                        self._stopped()
+                    if settings_after is not None and settings_after != settings_before:
+                        target = self.profiles.live / "Settings.ini"
+                        _assert_no_symlink_ancestor(target)
+                        if target.read_bytes() != settings_before:
+                            raise ApplicationError(
+                                "Map settings changed before launch; retry after inspection"
+                            )
+                        temporary = None
+                        try:
+                            with tempfile.NamedTemporaryFile(
+                                dir=target.parent, prefix=".launch-settings-", delete=False
+                            ) as stream:
+                                temporary = Path(stream.name)
+                                stream.write(settings_after)
+                                stream.flush()
+                                os.fsync(stream.fileno())
+                            os.chmod(temporary, target.stat().st_mode & 0o777)
+                            os.replace(temporary, target)
+                            _fsync_dir(target.parent)
+                        finally:
+                            if temporary is not None and temporary.exists():
+                                temporary.unlink()
+                # The finite callback owns its final dispatch fence. Do not hold
+                # STATE here across its blocking child wait or acquire it twice.
                 launch()
 
-            return self.profiles.play(profile_id, configured_launch)
+            return self.profiles.play(
+                target_id,
+                configured_launch,
+                startup_seconds=startup_seconds,
+                mutation_guard=mutation_guard,
+            )

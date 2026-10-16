@@ -51,6 +51,12 @@ provenance and comparison; this fork does not develop or release Windows softwar
 
 ## Use the game knowledge base
 
+For authorized AI game testing, use the repository skill
+[smr-game-driver](.agents/skills/smr-game-driver/SKILL.md) and its
+[command guide](docs/AI_GAME_TESTING.md). They use the maintained launcher service
+and finite visual driver. Verify current private admission and game availability;
+loading the skill does not authorize taking over a user-owned game.
+
 For the engine-dependent tasks below, load the repository skill
 [smr-game-knowledge](.agents/skills/smr-game-knowledge/SKILL.md). Codex discovers it
 from `.agents/skills`; agents without skill discovery should read that file directly.

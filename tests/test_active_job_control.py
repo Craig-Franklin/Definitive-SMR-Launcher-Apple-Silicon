@@ -147,6 +147,31 @@ class Fixture(unittest.TestCase):
 
 
 class NativeControlTests(Fixture):
+    def test_large_native_image_record_does_not_hide_following_handback(self):
+        self.append(
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call_output",
+                    "output": "synthetic image data " + "x" * (2 * 1024 * 1024),
+                },
+            }
+        )
+        self.control.poll()
+        self.assertFalse(self.control.cancelled)
+        self.assertEqual(self.read()["active_job_control"]["cursor"], self.rollout.stat().st_size)
+        self.append(user("I'm playing"))
+        with self.assertRaises(control.UserCancelled):
+            self.control.poll()
+        self.assertTrue(self.read()["active_job_control"]["cancelled"])
+
+    def test_oversized_authoritative_control_record_still_refuses(self):
+        row = user("I'm playing")
+        row["padding"] = "x" * (2 * 1024 * 1024)
+        self.append(row)
+        with self.assertRaisesRegex(control.ControlRefused, "Native control record size bound"):
+            self.control.poll()
+
     def test_standalone_commands_and_only_documented_surface(self):
         for text in ("I'm playing", "I want to play.", "I’M PLAYING!"):
             self.assertEqual(control.command(user(text))[0], "PLAYING")

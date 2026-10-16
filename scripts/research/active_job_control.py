@@ -391,7 +391,11 @@ class ActiveJobControl:
         state = decode(before)
         active, availability = self.validate(state)
         verify_run_owner(self.job)
-        data = read_plain(self.binding["rollout"], identity=self.binding["stream_identity"])
+        data = read_plain(
+            self.binding["rollout"],
+            maximum=256 * 1024 * 1024,
+            identity=self.binding["stream_identity"],
+        )
         start = self.binding["start_offset"]
         cursor = active["cursor"]
         require(
@@ -414,8 +418,11 @@ class ActiveJobControl:
         active["cancelled"] |= availability["status"] == "PLAYING"
         end = data.rfind(b"\n") + 1
         for line in data[cursor:end].splitlines():
-            require(0 < len(line) <= 1024 * 1024, "Native record size bound")
+            # The complete stream is already bounded by read_plain. Native
+            # image/tool records can exceed 1 MiB without carrying authority.
+            require(len(line) > 0, "Empty native record")
             parsed = command(decode(line))
+            require(parsed is None or len(line) <= 1024 * 1024, "Native control record size bound")
             cursor += len(line) + 1
             if parsed is None:
                 continue

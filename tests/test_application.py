@@ -3,7 +3,10 @@
 from io import BytesIO
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+import fcntl
 import hashlib
+import os
 import sys
 import tarfile
 import tempfile
@@ -612,6 +615,254 @@ class ApplicationTests(unittest.TestCase):
             (self.installation.profile_root / "Settings.ini").read_bytes(), original_settings
         )
         self.assertEqual((map_profile / "Settings.ini").read_bytes(), map_settings)
+
+    def isolated_copy(self):
+        (self.installation.profile_root / "Settings.ini").write_text(
+            "[User Settings]\nLastScenarioName = RRT_Scenario_User_Stock.xml\n"
+            "SkipOpeningMovies = 0\nQuickstart = 1\nLogging = 0\n"
+        )
+        self.application.setup()
+        record = self.application.import_archive(self.archive)
+        variant = hashlib.sha256(b"synthetic isolated launch").hexdigest()
+        copied = self.application.profiles.register_variant(
+            variant, self.application.prepared / record.prepared_directory
+        )
+        return record, copied
+
+    @contextmanager
+    def finite_guard(self):
+        self.guard_depth = getattr(self, "guard_depth", 0) + 1
+        try:
+            yield
+        finally:
+            self.guard_depth -= 1
+
+    def test_guarded_copy_uses_app_settings_path_and_preserves_source_saves(self):
+        record, copied = self.isolated_copy()
+        source = self.application.profiles._profile_path(record.profile_id)
+        (source / "Saves/kept.sav").write_bytes(b"source save")
+        before = self.snapshot_files(source)
+        frozen = self.snapshot_files(self.application.prepared / record.prepared_directory)
+        target = self.application.profiles._profile_path(copied)
+        settings = target / "Settings.ini"
+        settings.write_text(settings.read_text().replace("Logging = 0", "Logging = 1"))
+        (target / "Saves/copy.sav").write_bytes(b"isolated save")
+        calls = []
+
+        def launch():
+            self.assertEqual(self.guard_depth, 0)
+            self.assertEqual(self.application.profiles._state()["active"], copied)
+            text = (self.installation.profile_root / "Settings.ini").read_text()
+            self.assertIn("Logging = 1", text)
+            self.assertIn("SkipOpeningMovies = 1", text)
+            self.assertIn("Quickstart = 0", text)
+            self.assertIn("LastScenarioName = rrt_scenario_user_example.xml", text)
+            self.assertEqual(
+                (self.installation.profile_root / "Saves/copy.sav").read_bytes(),
+                b"isolated save",
+            )
+            calls.append(True)
+            self.installation.running = True
+
+        self.assertEqual(
+            self.application.play(
+                record.profile_id,
+                launch,
+                profile_copy=copied,
+                mutation_guard=self.finite_guard,
+                startup_seconds=1,
+            ),
+            copied,
+        )
+        self.assertEqual(calls, [True])
+        self.assertEqual(self.snapshot_files(source), before)
+        self.assertEqual(
+            self.snapshot_files(self.application.prepared / record.prepared_directory), frozen
+        )
+        self.installation.running = False
+        self.application.activate(ORIGINAL)
+        self.assertEqual(
+            (self.installation.profile_root / "Saves/stock.sav").read_text(), "stock save"
+        )
+        self.assertEqual((target / "Saves/copy.sav").read_bytes(), b"isolated save")
+
+    def test_isolated_copy_requires_guard_callback_and_catalogue_authorization(self):
+        record, copied = self.isolated_copy()
+        before = self.snapshot_files(self.installation.profile_root)
+        launched = []
+        for source, callback, guard in (
+            (record.profile_id, lambda: launched.append(True), None),
+            (record.profile_id, None, self.finite_guard),
+            (copied, lambda: launched.append(True), self.finite_guard),
+            (ORIGINAL, lambda: launched.append(True), self.finite_guard),
+        ):
+            with self.assertRaises(ApplicationError):
+                self.application.play(source, callback, profile_copy=copied, mutation_guard=guard)
+        self.assertEqual(launched, [])
+        self.assertEqual(self.snapshot_files(self.installation.profile_root), before)
+
+    def test_guarded_copy_refuses_valid_but_different_registered_assets(self):
+        record, _ = self.isolated_copy()
+        other = self.root / "other"
+        (other / "CustomAssets").mkdir(parents=True)
+        (other / "UserMaps").mkdir()
+        (other / "CustomAssets/different.txt").write_bytes(b"different map")
+        copied = self.application.profiles.register_variant("f" * 64, other)
+        before = self.snapshot_files(self.installation.profile_root)
+        launched = []
+        with self.assertRaisesRegex(ApplicationError, "assets differ"):
+            self.application.play(
+                record.profile_id,
+                lambda: launched.append(True),
+                profile_copy=copied,
+                mutation_guard=self.finite_guard,
+            )
+        self.assertEqual(launched, [])
+        self.assertEqual(self.snapshot_files(self.installation.profile_root), before)
+
+    def test_isolated_copy_refuses_another_catalogue_profile_with_identical_assets(self):
+        record, _ = self.isolated_copy()
+        archive = self.root / "SameAssets.tar"
+        with tarfile.open(archive, "w") as stream:
+            for name, data in (
+                ("UserMaps/Example/RRT_Scenario_User_Example.xml", b"<Scenario/>"),
+                ("CustomAssets/Example.txt", b"map asset"),
+            ):
+                entry = tarfile.TarInfo(name)
+                entry.size = len(data)
+                entry.mtime = 1
+                stream.addfile(entry, BytesIO(data))
+        other = self.application.import_archive(archive)
+        self.assertNotEqual(record.profile_id, other.profile_id)
+        source = self.application.profiles._profile_path(record.profile_id)
+        target = self.application.profiles._profile_path(other.profile_id)
+        self.assertEqual(
+            self.application.profiles._asset_hash(source),
+            self.application.profiles._asset_hash(target),
+        )
+        (source / "Saves/source.sav").write_bytes(b"source save")
+        (target / "Saves/user.sav").write_bytes(b"other user save")
+        before = self.snapshot_files(self.application.library)
+        live_before = self.snapshot_files(self.installation.profile_root)
+        with self.assertRaisesRegex(ApplicationError, "cannot be a catalogue profile"):
+            self.application.play(
+                record.profile_id,
+                lambda: self.fail("Must not launch"),
+                profile_copy=other.profile_id,
+                mutation_guard=self.finite_guard,
+                startup_seconds=1,
+            )
+        self.assertEqual(self.snapshot_files(self.application.library), before)
+        self.assertEqual(self.snapshot_files(self.installation.profile_root), live_before)
+
+    def test_guarded_play_refuses_busy_application_lock_without_waiting(self):
+        record, copied = self.isolated_copy()
+        fd = os.open(self.application.library / ".application.lock", os.O_RDWR)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with self.assertRaisesRegex(ApplicationError, "busy"):
+                self.application.play(
+                    record.profile_id,
+                    lambda: self.fail("Must not launch"),
+                    profile_copy=copied,
+                    mutation_guard=self.finite_guard,
+                )
+        finally:
+            os.close(fd)
+        self.assertEqual(self.application.profiles._state()["active"], ORIGINAL)
+
+    def test_guarded_play_retains_pending_activation_and_removal_without_recovery(self):
+        record, copied = self.isolated_copy()
+        for path in (
+            self.application.profiles.journal,
+            self.application.library / "removal.json",
+        ):
+            path.write_bytes(b"preserved incomplete operation")
+            try:
+                with self.assertRaisesRegex(ApplicationError, "(recovery|removal)"):
+                    self.application.play(
+                        record.profile_id,
+                        lambda: self.fail("Must not launch"),
+                        profile_copy=copied,
+                        mutation_guard=self.finite_guard,
+                    )
+                self.assertEqual(path.read_bytes(), b"preserved incomplete operation")
+                self.assertEqual(self.application.profiles._state()["active"], ORIGINAL)
+            finally:
+                path.unlink()
+
+    def test_cancel_after_switch_prevents_settings_write_and_launch(self):
+        record, copied = self.isolated_copy()
+        before = (self.application.profiles._profile_path(copied) / "Settings.ini").read_bytes()
+        entered = []
+
+        @contextmanager
+        def cancelled():
+            entered.append(True)
+            if len(entered) == 2:
+                raise RuntimeError("Synthetic owner cancelled")
+            yield
+
+        with self.assertRaisesRegex(RuntimeError, "owner cancelled"):
+            self.application.play(
+                record.profile_id,
+                lambda: self.fail("Must not launch"),
+                profile_copy=copied,
+                mutation_guard=cancelled,
+            )
+        self.assertEqual(self.application.profiles._state()["active"], copied)
+        self.assertFalse(self.application.profiles.journal.exists())
+        self.assertEqual((self.installation.profile_root / "Settings.ini").read_bytes(), before)
+        # The finite caller still owns restoration after an action refusal.
+        self.application.profiles.switch(ORIGINAL)
+
+    def test_guarded_copy_refuses_running_or_unknown_game_and_invalid_startup_limit(self):
+        record, copied = self.isolated_copy()
+        before = self.snapshot_files(self.installation.profile_root)
+        for running in (True, None):
+            self.installation.running = running
+            with self.assertRaises(ApplicationError):
+                self.application.play(
+                    record.profile_id,
+                    lambda: self.fail("Must not launch"),
+                    profile_copy=copied,
+                    mutation_guard=self.finite_guard,
+                )
+        self.installation.running = False
+        for seconds in (0, True, float("nan"), float("inf"), 31):
+            with self.assertRaises(ApplicationError):
+                self.application.play(
+                    record.profile_id,
+                    lambda: self.fail("Must not launch"),
+                    profile_copy=copied,
+                    mutation_guard=self.finite_guard,
+                    startup_seconds=seconds,
+                )
+        self.assertEqual(self.snapshot_files(self.installation.profile_root), before)
+
+    def test_game_appearing_during_settings_guard_prevents_write_and_launch(self):
+        record, copied = self.isolated_copy()
+        before = (self.application.profiles._profile_path(copied) / "Settings.ini").read_bytes()
+        entered = []
+
+        @contextmanager
+        def external_start():
+            entered.append(True)
+            if len(entered) == 2:
+                self.installation.running = True
+            yield
+
+        with self.assertRaises(ApplicationError):
+            self.application.play(
+                record.profile_id,
+                lambda: self.fail("Must not launch"),
+                profile_copy=copied,
+                mutation_guard=external_start,
+            )
+        self.assertEqual((self.installation.profile_root / "Settings.ini").read_bytes(), before)
+        self.assertEqual(self.application.profiles._state()["active"], copied)
+        # Foreign use is retained; no automatic stop or restoration is attempted.
+        self.assertTrue(self.installation.running)
 
 
 if __name__ == "__main__":

@@ -50,6 +50,40 @@ See the [native implementation boundary and verification](ui-workflow/IMPLEMENTA
 for the subprocess protocol, update-safe lifecycle and staged advanced-tool migration.
 
 
+## Command launch and finite research owners
+
+The existing command bridge provides JSON status and catalogue-profile launch:
+
+```sh
+PYTHONPATH=src python -m smr_launcher.cli status
+PYTHONPATH=src python -m smr_launcher.cli play PROFILE_ID
+```
+
+CLI `play` and both app interfaces call `LauncherApplication.play`. A successful
+command reports observed process startup; it does not establish a ready game
+menu, gameplay, or save/reopen acceptance. The CLI does not own a research
+admission, observer, restoration deadline, or subsequent input session.
+
+A finite research owner uses that same application service in process, with an
+explicit launch callback and mutation guard. It may supply a distinct registered
+`profile_copy` only when it is absent from the catalogue and its assets match
+both the authorized catalogue profile and that map's prepared assets. Launch
+settings and saves belong to the copy;
+the source catalogue record is not replaced or fabricated. Guarded play refuses
+pending removal/activation recovery and takes application/profile locks without
+waiting. The guard covers profile exchange and launch-settings writes; the launch
+callback retains the owner's final cancellation fence, bounded child tracking,
+and cleanup. It runs outside the mutation guard, under the application/profile
+locks, so a blocking child wait does not hold or reacquire the owner's state lock.
+These hooks do not grant runtime admission or substitute for fresh ownership and
+preservation checks. Ordinary CLI/UI calls retain catalogue-only behavior.
+The private agent entry also pins the reviewed calibration source and maintained
+application module path before queue or owner construction. Re-pinning an older
+low-level launch composition cannot select it for a successor.
+
+See [AI game testing](AI_GAME_TESTING.md) for the finite visual execution and
+exact-save/reopen procedure, including its current empirical verification limits.
+
 ## Offline recipe batch planning
 
 `LauncherApplication.plan_recipe_batch(requests)` accepts 1–32 explicit dictionaries

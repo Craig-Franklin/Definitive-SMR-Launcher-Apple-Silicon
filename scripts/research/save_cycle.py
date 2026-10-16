@@ -22,7 +22,9 @@ from unique_save_file import (
 )
 
 
-def observe_save_cycle(owner, scope, intent, *, minimum_stable_seconds, deadline):
+def observe_save_cycle(
+    owner, scope, intent, *, minimum_stable_seconds, deadline, scratch_autosaves=()
+):
     """Connect actual filesystem facts to one save and exact guarded reopen.
 
     owner.guard must authenticate current job/profile/process/availability,
@@ -80,20 +82,29 @@ def observe_save_cycle(owner, scope, intent, *, minimum_stable_seconds, deadline
     need(owner.stop_for_relaunch() is True, "Exact stop before relaunch refused")
     current_scope, mapping = owner.owned_reopen_location(bound)
 
+    def verify_bound():
+        return verify_reopen(
+            bound,
+            current_scope,
+            deadline=deadline,
+            mapping=mapping,
+            scratch_autosaves=scratch_autosaves,
+        )
+
     def validate_bound_delivery(phase):
-        checked = verify_reopen(bound, current_scope, deadline=deadline, mapping=mapping)
+        checked = verify_bound()
         owner.guard(phase, current_scope, checked)
         # Authenticate the same binding again after a potentially blocking guard.
         # No receipt write follows this read before entering the delivery hook.
-        return verify_reopen(bound, current_scope, deadline=deadline, mapping=mapping)
+        return verify_bound()
 
-    checked = verify_reopen(bound, current_scope, deadline=deadline, mapping=mapping)
+    checked = verify_bound()
     owner.write("save-after-stop-identity.json", checked)
     validate_bound_delivery("relaunch")
     owner.relaunch_once(
         validate_delivery=lambda: validate_bound_delivery("relaunch"), deadline=deadline
     )
-    checked = verify_reopen(bound, current_scope, deadline=deadline, mapping=mapping)
+    checked = verify_bound()
     owner.write("save-before-reopen-identity.json", checked)
     checked = validate_bound_delivery("reopen")
     owner.reopen_once(
@@ -106,7 +117,7 @@ def observe_save_cycle(owner, scope, intent, *, minimum_stable_seconds, deadline
     owner.write("save-cycle-observations.json", observations)
     owner.write(
         "save-after-reopen-identity.json",
-        verify_reopen(bound, current_scope, deadline=deadline, mapping=mapping),
+        verify_bound(),
     )
     return dict(
         status="safety_stop",

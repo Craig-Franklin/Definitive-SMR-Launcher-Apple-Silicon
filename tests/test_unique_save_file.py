@@ -62,6 +62,53 @@ class SaveFixture(unittest.TestCase):
 
 
 class UniqueSaveFileTests(SaveFixture):
+    def test_explicit_scratch_autosave_rotation_keeps_exact_target_and_other_files_strict(self):
+        auto = self.directory / "Auto0.SMRailroadsSavedGame"
+        auto.write_bytes(b"prior scratch autosave")
+        bound = self.bound()
+        auto.unlink()
+        auto.write_bytes(b"new scratch autosave on load")
+        with self.assertRaises(save.SaveFileRefused):
+            save.verify_reopen(bound, self.scope, deadline=110)
+        checked = save.verify_reopen(
+            bound, self.scope, deadline=110, scratch_autosaves=(auto.name,)
+        )
+        self.assertEqual(
+            checked["exact_target"]["sha256"], hashlib.sha256(self.target.read_bytes()).hexdigest()
+        )
+        self.keep.write_bytes(b"changed unrelated original")
+        with self.assertRaises(save.SaveFileRefused):
+            save.verify_reopen(bound, self.scope, deadline=110, scratch_autosaves=(auto.name,))
+
+    def test_scratch_exception_cannot_ignore_target_replacement_or_arbitrary_names(self):
+        auto = self.directory / "Auto0.SMRailroadsSavedGame"
+        auto.write_bytes(b"scratch")
+        bound = self.bound()
+        for names in ((self.target.name,), (self.keep.name,), (auto.name, auto.name)):
+            with self.assertRaises(save.SaveFileRefused):
+                save.verify_reopen(bound, self.scope, deadline=110, scratch_autosaves=names)
+        data = self.target.read_bytes()
+        self.target.rename(self.root / "retained-target")
+        self.target.write_bytes(data)
+        with self.assertRaises(save.SaveFileRefused):
+            save.verify_reopen(bound, self.scope, deadline=110, scratch_autosaves=(auto.name,))
+
+    def test_scratch_exception_refuses_additions_deletions_and_linked_autosaves(self):
+        auto = self.directory / "Auto0.SMRailroadsSavedGame"
+        auto.write_bytes(b"scratch")
+        bound = self.bound()
+        auto.unlink()
+        with self.assertRaises(save.SaveFileRefused):
+            save.verify_reopen(bound, self.scope, deadline=110, scratch_autosaves=(auto.name,))
+        auto.symlink_to(self.keep)
+        with self.assertRaises(REFUSALS):
+            save.verify_reopen(bound, self.scope, deadline=110, scratch_autosaves=(auto.name,))
+        auto.unlink()
+        auto.write_bytes(b"scratch")
+        (self.directory / "unknown").write_bytes(b"extra")
+        with self.assertRaises(save.SaveFileRefused):
+            save.verify_reopen(bound, self.scope, deadline=110, scratch_autosaves=(auto.name,))
+
     def test_exact_new_file_binds_actual_inode_size_digest_and_preserves_existing(self):
         bound = self.bound()
         reopened = save.verify_reopen(bound, self.scope, deadline=110)
@@ -382,10 +429,15 @@ class FiniteSaveCycleTests(SaveFixture):
         receipt_effect=None,
         guard_effect=None,
         hook_effect=None,
+        scratch_autosaves=(),
+        rotate_autosave=False,
     ):
         source, lifecycle = self.modules
         events, receipts = [], {}
         available, injected = [True], set()
+        auto = self.directory / "Auto0.SMRailroadsSavedGame"
+        if rotate_autosave:
+            auto.write_bytes(b"prior diagnostic autosave")
 
         def inject(boundary, requested, actual):
             if requested is None or requested[0] != actual or boundary in injected:
@@ -448,6 +500,12 @@ class FiniteSaveCycleTests(SaveFixture):
                 replacement.write_bytes(self.target.read_bytes())
                 os.replace(replacement, self.target)
 
+        def reopen(receipt):
+            events.append("exact_reopen_once")
+            if rotate_autosave:
+                auto.unlink()
+                auto.write_bytes(b"diagnostic autosave rotated while loading")
+
         owner = SimpleNamespace(
             prepare=lambda: events.append("prepare"),
             launch=lambda: events.append("launch"),
@@ -460,7 +518,7 @@ class FiniteSaveCycleTests(SaveFixture):
             ),
             owned_reopen_location=lambda bound: (self.scope, None),
             relaunch_once=delivery_hook("relaunch", relaunch),
-            reopen_once=delivery_hook("reopen", lambda receipt: events.append("exact_reopen_once")),
+            reopen_once=delivery_hook("reopen", reopen),
             observe_reopened_world_and_continued_action=delivery_hook(
                 "continued-action",
                 lambda: events.append("continued_action") or {"source": "synthetic_unverified"},
@@ -471,10 +529,28 @@ class FiniteSaveCycleTests(SaveFixture):
             finish=lambda *args: events.append("terminal_index"),
         )
         owner.observe = lambda: source.observe_save_cycle(
-            owner, self.scope, self.intent, minimum_stable_seconds=0.5, deadline=110
+            owner,
+            self.scope,
+            self.intent,
+            minimum_stable_seconds=0.5,
+            deadline=110,
+            scratch_autosaves=scratch_autosaves,
         )
         result = lifecycle.run_calibration(owner)
         return result, events, receipts
+
+    def test_explicit_scratch_rotation_flows_through_reopen_and_continued_checks(self):
+        result, events, receipts = self.run_cycle(
+            scratch_autosaves=("Auto0.SMRailroadsSavedGame",), rotate_autosave=True
+        )
+        self.assertEqual(result["errors"], [])
+        self.assertTrue(result["terminal_finished"])
+        self.assertIn("continued_action", events)
+        self.assertEqual(self.keep.read_bytes(), self.original)
+        self.assertEqual(
+            receipts["save-after-reopen-identity.json"]["exact_target"]["sha256"],
+            hashlib.sha256(self.target.read_bytes()).hexdigest(),
+        )
 
     def test_connected_success_is_filesystem_only_and_uses_existing_terminal_order(self):
         result, events, receipts = self.run_cycle()

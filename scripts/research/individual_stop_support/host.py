@@ -2,7 +2,7 @@
 
 Only a private root admission and the fixed local reviewed modules are consumed.
 The root verifies every imported byte before this process starts. No scanning,
-game launch, GUI, save, restoration, batch, recovery or retry is implemented.
+game launch, GUI, save, restoration, batch or recovery is implemented.
 """
 import os
 import sys
@@ -10,7 +10,28 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 from wrapper import Wrapper, RootAdmission, bounded, publish, parent_stamp
-from frozen_mac_processes import MacProcesses
+from frozen_mac_processes import MacProcesses, SafetyError
+
+
+class ExitSettlingProcesses(MacProcesses):
+    """One read-side recheck for libproc metadata lost during process exit.
+
+    No absence is inferred from an error. The unchanged backend must return an
+    actual identity or independently confirm PID absence on the second read.
+    Persistent/unknown errors still propagate. No signal or game input repeats.
+    """
+    def inspect(self, pid):
+        try:
+            return super().inspect(pid)
+        except SafetyError as error:
+            if str(error) not in {
+                'Cannot identify a live process',
+                'Cannot read process birth identity',
+                'Cannot read process physical footprint',
+            }:
+                raise
+            time.sleep(0.05)
+            return super().inspect(pid)
 
 
 def main(packet):
@@ -24,7 +45,7 @@ def main(packet):
     # The existing root interpreter supplies this same clock before watchdog
     # arming. Root independently compares both clocks, not these strings alone.
     wrapper = Wrapper(admission, packet, raw['approval'], raw['source_acceptance'],
-                      MacProcesses, time.monotonic, time.sleep)
+                      ExitSettlingProcesses, time.monotonic, time.sleep)
     own = MacProcesses(sys.executable).inspect(os.getpid())
     if own is None:
         raise ValueError('helper own identity unavailable')

@@ -322,11 +322,13 @@ class OwnedPathMapping:
         sha(self.observation_sha256)
 
 
-def verify_reopen(bound, scope, *, deadline, mapping=None):
+def verify_reopen(bound, scope, *, deadline, mapping=None, scratch_autosaves=()):
     """Verify the same bound inode and bytes immediately before guarded reopen.
 
     Explicit owned directory relocation may change the path. Copies, including
     byte-identical copies, cannot become this job's exact-file authority.
+    An authenticated diagnostic-copy owner may explicitly allow its five known
+    scratch autosave slots to rotate. The target and every other file stay strict.
     """
     need(
         finite(deadline) and deadline == bound.deadline,
@@ -350,15 +352,28 @@ def verify_reopen(bound, scope, *, deadline, mapping=None):
         directory = mapping.to_save_directory
     current = inventory(directory, original.limits)
     expected = bound.second.inventory
+    need(
+        type(scratch_autosaves) is tuple
+        and all(type(name) is str for name in scratch_autosaves)
+        and len(set(scratch_autosaves)) == len(scratch_autosaves)
+        and set(scratch_autosaves).issubset({f"Auto{i}.SMRailroadsSavedGame" for i in range(5)})
+        and original.intent.filename not in scratch_autosaves,
+        "Only explicit diagnostic scratch autosave slots may rotate",
+    )
+    previous, now = ({row.name: row for row in sample.files} for sample in (expected, current))
     need(current.complete < deadline, "Original save-cycle deadline expired during read")
     need(
         directory_identity(current.root) == directory_identity(expected.root)
-        and current.files == expected.files,
+        and set(now) == set(previous)
+        and all(
+            now[name] == row for name, row in previous.items() if name not in scratch_autosaves
+        ),
         "Bound save or preserved files replaced/changed; reopen refused",
     )
     if mapping is None:
         need(
-            current.ancestors == expected.ancestors and current.root == expected.root,
+            current.ancestors == expected.ancestors
+            and (bool(scratch_autosaves) or current.root == expected.root),
             "Save path/directory drift; reopen refused",
         )
     return dict(
