@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "src"), str(ROOT / "scripts/research")]
-from test_agent_driver import Process
+from test_agent_driver import ChildFailed, Completion, Process
 import catalogue_menu as menu
 import agent_driver as driver
 import test_application
@@ -1133,6 +1133,298 @@ class CatalogueCompositionTests(unittest.TestCase):
         self.assertIn("service-settled", events)
         self.assertNotIn("observer-cleanup", events)
         self.assertNotIn("game-bound", events)
+
+
+class MissingWindowObservationTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        probe = self.directory / "WindowProbe"
+        source = self.directory / "WindowProbe.swift"
+        probe.write_bytes(b"synthetic executable, never launched")
+        probe.chmod(0o700)
+        source.write_bytes(b"synthetic read-only source")
+        binding = dict(
+            executable=str(probe),
+            executable_sha256=menu.sha(probe.read_bytes()),
+            source=str(source),
+            source_sha256=menu.sha(source.read_bytes()),
+        )
+        self.clock = 100.0
+        self.child_calls, self.native_calls, self.records = [], [], {}
+        self.spawn_calls, self.ingress_seconds = [], 0
+        self.metadata = dict(
+            window=501, pid=123, layer=0, bounds=dict(x=0, y=0, width=1200, height=800)
+        )
+        self.absent, self.recovery, self.child_seconds, self.native_seconds = False, False, 0.1, 0.1
+        self.current = Process(123, 456)
+
+        class Frozen:
+            def stop(owner):
+                owner.cleanup_events.append("owned-stop")
+                return True
+
+        common = SimpleNamespace(
+            UKCalibration=Frozen,
+            ChildFailed=ChildFailed,
+            bounded_child=self.child,
+            fresh_play_index=lambda *a, **k: None,
+        )
+        cls = menu.pilot_class(common, driver.pilot_class(common))
+        self.owner = cls.__new__(cls)
+        self.owner.job = dict(
+            purpose=menu.LOAD_PURPOSE,
+            catalogue_menu=dict(window_probe=binding),
+            closure=[
+                dict(path=str(p), bytes=p.stat().st_size, sha256=menu.sha(p.read_bytes()))
+                for p in (probe, source)
+            ],
+        )
+        self.owner.config = self.owner.job["catalogue_menu"]
+        self.owner.anchor, self.owner.last_agent_window = 0.0, 501
+        self.owner.menu_work_active = True
+        self.owner.game = self.current
+        self.owner.monitor = SimpleNamespace(inspect=lambda pid: self.current)
+        self.owner.directory = self.directory
+        self.owner.guard_running = lambda: None
+        self.owner.write = lambda name, value: self.records.__setitem__(name, value)
+        self.owner.native = self.native
+        self.enterContext(patch.object(menu.time, "monotonic", side_effect=lambda: self.clock))
+        self.enterContext(patch.object(menu.time, "sleep", side_effect=self.sleep))
+
+    def sleep(self, seconds):
+        self.clock += seconds
+
+    def child(self, argv, directory, label, tick, timeout, mutable, *, spawn):
+        tick()
+        self.child_calls.append((argv, timeout, mutable))
+        self.clock += self.ingress_seconds
+        with patch.object(
+            menu.subprocess, "Popen", side_effect=lambda *a, **k: self.spawn_calls.append(a)
+        ):
+            spawn(argv)
+        self.clock += self.child_seconds
+        tick()
+        if self.absent:
+            (directory / (label + ".stderr")).write_bytes(b"Exact window absent\n")
+            raise ChildFailed(
+                Completion(tuple(argv), 300, 3, b"", self.clock, self.clock + timeout, True)
+            )
+        return menu.canonical(self.metadata)
+
+    def native(self, label, action, window, deadline):
+        self.native_calls.append((label, action, window, deadline))
+        self.clock += self.native_seconds
+        return dict(
+            result=dict(app=dict(pid=123), windows=[self.window()] if self.recovery else [])
+        )
+
+    def window(self):
+        return dict(id=501, app=dict(pid=123), isOffscreen=False, isMinimized=False)
+
+    def observe(self, deadline=480):
+        return self.owner.observe_missing_window("Agent006", deadline)
+
+    def test_two_readonly_inspections_then_stop_without_visibility_or_crash_claim(self):
+        with self.assertRaisesRegex(ControlRefused, "bounded observation ended"):
+            self.observe()
+        self.assertEqual(len(self.child_calls), 2)
+        self.assertEqual(len(self.native_calls), 1)
+        self.assertLess(self.clock, 110)
+        for argv, timeout, mutable in self.child_calls:
+            self.assertEqual(argv[1:], ["inspect", "501"])
+            self.assertLessEqual(timeout, 2)
+            self.assertFalse(mutable)
+        for record in self.records.values():
+            self.assertEqual(record["process_before"], record["process_after"])
+            self.assertEqual(record["metadata"], self.metadata)
+            self.assertIn("visibility/alpha/sharing unknown", record["limit"])
+        with self.assertRaisesRegex(ControlRefused, "already observed"):
+            self.observe()
+        self.assertEqual(len(self.child_calls), 2)
+
+    def test_absent_old_id_stays_inconclusive_about_replacement_windows(self):
+        self.absent = True
+        with self.assertRaisesRegex(ControlRefused, "bounded observation ended"):
+            self.observe()
+        self.assertEqual(len(self.records), 2)
+        self.assertTrue(all(r["metadata"] is None for r in self.records.values()))
+        self.assertTrue(all("replacement windows" in r["limit"] for r in self.records.values()))
+
+    def test_natural_recovery_reaches_actual_inherited_fresh_frame_path(self):
+        self.recovery = True
+        ordinary_native = self.owner.native
+        initial = [True]
+
+        def native(label, action, window, deadline):
+            if initial[0]:
+                initial[0] = False
+                return dict(result=dict(app=dict(pid=123), windows=[]))
+            return ordinary_native(label, action, window, deadline)
+
+        self.owner.native = native
+        self.owner.retain_frame = lambda *args: {}
+        accepted = []
+        self.owner.scene_frame = lambda receipt, frame, window: accepted.append(window)
+        receipt, frame, window = self.owner.agent_frame("Agent006", 480)
+        self.assertEqual(accepted, [501])
+        self.assertEqual(len(self.child_calls), 1)
+        self.assertEqual(window, 501)
+        self.assertEqual(frame, dict(play_index=None))
+        self.assertEqual(self.native_calls[-1][1:3], (["get-app-state"], 501))
+        self.assertFalse(self.records["Agent006WindowRecovered.json"]["automatic_focus"])
+
+    def test_original_deadline_and_work_cutoff_never_extend_ten_second_cap(self):
+        self.child_seconds = 0.6
+        with self.assertRaisesRegex(ControlRefused, "cap expired"):
+            self.observe(100.5)
+        self.assertEqual(len(self.child_calls), 1)
+        self.assertEqual(self.native_calls, [])
+
+    def test_work_cutoff_refuses_before_any_probe(self):
+        self.clock = 390
+        with self.assertRaisesRegex(ControlRefused, "cap expired"):
+            self.observe()
+        self.assertEqual(self.child_calls, [])
+
+    def test_final_readonly_spawn_rechecks_cap_after_child_ingress(self):
+        self.ingress_seconds = 11
+        with self.assertRaisesRegex(ControlRefused, "cap expired"):
+            self.observe()
+        self.assertEqual(self.spawn_calls, [])
+        self.assertEqual(self.native_calls, [])
+
+    def test_late_native_followup_cannot_authorize_recovery(self):
+        self.recovery, self.native_seconds = True, 9
+        with self.assertRaisesRegex(ControlRefused, "cap expired"):
+            self.observe()
+        self.assertNotIn("Agent006WindowRecovered.json", self.records)
+
+    def test_wrong_process_or_metadata_refuses_without_followup(self):
+        self.current = Process(124, 999)
+        with self.assertRaisesRegex(ControlRefused, "process drift"):
+            self.observe()
+        self.assertEqual(self.child_calls, [])
+        self.owner.window_loss_observed = False
+        self.current = self.owner.game
+        self.metadata["pid"] = 999
+        with self.assertRaisesRegex(ControlRefused, "metadata required"):
+            self.observe()
+        self.assertEqual(self.native_calls, [])
+
+    def test_probe_purpose_and_closure_drift_refuse(self):
+        self.owner.job["purpose"] = menu.SAVE_PURPOSE
+        with self.assertRaisesRegex(ControlRefused, "load-only"):
+            self.observe()
+        self.owner.window_loss_observed = False
+        self.owner.job["purpose"] = menu.LOAD_PURPOSE
+        Path(self.owner.config["window_probe"]["source"]).write_bytes(b"changed")
+        with self.assertRaisesRegex(ControlRefused, "closure drift"):
+            self.observe()
+        self.assertEqual(self.child_calls, [])
+
+    def test_no_probe_no_prior_window_and_normal_quit_keep_existing_path(self):
+        self.owner.menu_work_active = False
+        self.assertIsNone(self.observe())
+        self.owner.menu_work_active = True
+        del self.owner.last_agent_window
+        self.assertIsNone(self.observe())
+        self.owner.config.clear()
+        self.assertIsNone(self.observe())
+        self.assertEqual(self.child_calls, [])
+
+    def complete_load(self, recovery):
+        fixture = CatalogueRestoreTests()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        owner = self.owner
+        for name in (
+            "app",
+            "profiles",
+            "preimages",
+            "baseline",
+            "control",
+            "journal",
+            "require_stopped",
+            "verify_cleanup_owner",
+            "require_settled_input",
+        ):
+            setattr(owner, name, getattr(fixture.owner, name))
+        owner.job["return_profile"] = fixture.owner.job["return_profile"]
+        owner.config.update(fixture.owner.config, scenario_title="Synthetic Canyon")
+        owner.service, owner.open_attempted, owner.dispatch_settled = None, True, True
+        owner.cleanup_events = []
+        owner.prepare = lambda: None
+        owner.launch = lambda: None
+        owner.persist_outcome = lambda outcome: owner.cleanup_events.append("persist")
+        owner.finish = lambda *args: owner.cleanup_events.append("terminal")
+        owner.normal_quit = lambda *args: owner.cleanup_events.append("normal-quit")
+        self.recovery = recovery
+        ordinary_native, first = owner.native, [True]
+
+        def native(label, action, window, deadline):
+            if first[0]:
+                first[0] = False
+                return dict(result=dict(app=dict(pid=123), windows=[]))
+            return ordinary_native(label, action, window, deadline)
+
+        owner.native = native
+        owner.retain_frame = lambda *args: {}
+        owner.scene_frame = lambda *args: None
+
+        def stage(name, instruction):
+            self.assertIn(name, ("launcher", "world"))
+            if name == "world":
+                owner.agent_frame("Agent006", 480)
+            return dict(stage=name, observation="Synthetic world, no runtime credit")
+
+        owner.decisions = SimpleNamespace(stage=stage)
+        result = driver.run_calibration(owner)
+        self.assertTrue(result["stopped"] and result["restored"] and result["terminal_finished"])
+        self.assertEqual(owner.profiles._state()["active"], owner.job["return_profile"])
+        self.assertEqual(menu.tree_files(owner.profiles.live), owner.baseline["return_files"])
+        target = owner.profiles._profile_path(owner.config["target"]["profile_id"])
+        self.assertEqual((target / "Saves/existing.sav").read_bytes(), b"existing target save")
+        self.assertEqual((target / "Saves/new.sav").read_bytes(), b"new save remains")
+        return result, owner.cleanup_events
+
+    def test_first_empty_list_flows_through_real_finite_cleanup_and_profile_restoration(self):
+        result, events = self.complete_load(False)
+        self.assertEqual(result["outcome"]["status"], "automation_failed")
+        self.assertIn("bounded observation ended", result["outcome"]["cause"])
+        self.assertEqual(events, ["persist", "owned-stop", "terminal"])
+        self.assertEqual(len(self.child_calls), 2)
+        self.assertEqual(len(self.native_calls), 1)
+
+    def test_first_empty_list_naturally_recovers_then_load_normal_quit_without_save(self):
+        result, events = self.complete_load(True)
+        self.assertEqual(events, ["normal-quit", "persist", "owned-stop", "terminal"])
+        self.assertFalse(result["outcome"]["save_reopen_credit"])
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(len(self.child_calls), 1)
+
+    def test_lost_window_helper_cutoff_does_not_reenter_normal_quit_polling(self):
+        self.clock, self.ingress_seconds = 389, 2
+
+        def guard():
+            if self.clock >= 390:
+                raise menu.MenuIncomplete("Menu discovery cutoff reached")
+
+        self.owner.guard_running = guard
+        result, events = self.complete_load(False)
+        self.assertEqual(events, ["persist", "owned-stop", "terminal"])
+        self.assertIn("Lost-window observation cap expired", result["outcome"]["cause"])
+        self.assertEqual(self.spawn_calls, [])
+
+    def test_lost_window_native_followup_cutoff_keeps_owned_cleanup_without_quit_retry(self):
+        def native(*args):
+            self.clock = 390
+            raise menu.MenuIncomplete("Menu discovery cutoff reached")
+
+        self.owner.native = native
+        result, events = self.complete_load(False)
+        self.assertEqual(events, ["persist", "owned-stop", "terminal"])
+        self.assertIn("Lost-window observation cap expired", result["outcome"]["cause"])
+        self.assertEqual(len(self.child_calls), 1)
 
 
 if __name__ == "__main__":

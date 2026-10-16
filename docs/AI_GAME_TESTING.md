@@ -282,6 +282,19 @@ the 480/900-second bounds. An uncertain dispatched input still holds restoration
 World observation, normal exit and preservation require independent review;
 they do not establish gameplay, repair completeness or save/reopen compatibility.
 
+An explicitly reviewed load-only job may bind the existing `WindowProbe inspect`
+helper for one lost-window observation. On the first empty provider window list
+after a known frame, it records that exact old window's metadata and current
+process identity, waits briefly, then makes one provider follow-up. If still
+empty, one final metadata read ends the observation through owned cleanup.
+The total cap is ten seconds, further bounded by the original work/action
+deadline. Natural window recovery resumes fresh frame validation and the LOAD
+normal-quit path; it never expands into saving or reopening. No activation,
+unhide, bundle open or focus retry is permitted. This helper addresses one
+window ID and omits visibility, alpha and sharing state. Missing old-window
+metadata is inconclusive about replacement windows, crashes or hangs. Owned
+cleanup stop is distinct from a normal quit and earns no normal-exit credit.
+
 `ONE_AGENT_PACKAGED_CACHED_SAVE_REOPEN_V1` is the distinct unique-save/exact-reopen
 integration purpose. It uses two recorded packaged Play transactions in the same
 480-second operation: first normal exit and exact stop must precede relaunch;

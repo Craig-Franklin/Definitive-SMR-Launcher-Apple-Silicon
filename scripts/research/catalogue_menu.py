@@ -8,6 +8,7 @@ Existing saves/assets remain exact; newly created files stay in their own editio
 from contextlib import contextmanager, nullcontext
 from dataclasses import asdict
 import os
+import math
 from pathlib import Path
 from queue import Empty, Queue
 import shutil
@@ -218,6 +219,8 @@ def verify_sibling_saves(owner):
 
 def verify_config(job):
     config = job["catalogue_menu"]
+    if "window_probe" in config:
+        verify_window_probe(job)
     target = config["target"]
     require(
         job["purpose"] in (PURPOSE, CACHED_PURPOSE, LOAD_PURPOSE, SAVE_PURPOSE),
@@ -310,6 +313,30 @@ def verify_config(job):
         "Exact packaged backend helper required",
     )
     return config
+
+
+def verify_window_probe(job):
+    """Only an exact existing read-only inspect helper in a load-only job."""
+    probe = job["catalogue_menu"]["window_probe"]
+    require(job["purpose"] == LOAD_PURPOSE, "Window observation is load-only")
+    require(
+        set(probe) == {"executable", "executable_sha256", "source", "source_sha256"},
+        "Exact window probe binding required",
+    )
+    for role, name in (("executable", "WindowProbe"), ("source", "WindowProbe.swift")):
+        path = Path(probe[role])
+        data = read_plain(path)
+        require(
+            path.name == name
+            and sha(data) == probe[role + "_sha256"]
+            and any(
+                row == dict(path=str(path), bytes=len(data), sha256=sha(data))
+                for row in job["closure"]
+            ),
+            "Window probe closure drift",
+        )
+    require(os.access(probe["executable"], os.X_OK), "Window probe is not executable")
+    return probe
 
 
 class PackagedService:
@@ -735,6 +762,127 @@ def pilot_class(common, agent_class):
             return super().spawn_input(
                 argv, deadline=deadline, before_spawn=final_menu_guard, **kwargs
             )
+
+        def observe_missing_window(self, label, deadline):
+            if not (
+                "window_probe" in self.config
+                and getattr(self, "menu_work_active", False)
+                and hasattr(self, "last_agent_window")
+            ):
+                return None
+            require(
+                not getattr(self, "window_loss_observed", False), "Window loss already observed"
+            )
+            self.window_loss_observed = True
+            limit = min(deadline, self.anchor + 390, time.monotonic() + 10)
+
+            def guard():
+                require(time.monotonic() < limit, "Lost-window observation cap expired")
+                try:
+                    self.guard_running()
+                except MenuIncomplete:
+                    require(False, "Lost-window observation cap expired")
+                process = self.monitor.inspect(self.game.pid)
+                require(self.game.same(process), "Probe process drift")
+                require(time.monotonic() < limit, "Lost-window observation cap expired")
+                return process
+
+            def spawn(argv, **kwargs):
+                guard()
+                return subprocess.Popen(argv, **kwargs)
+
+            for attempt in (1, 2):
+                probe = verify_window_probe(self.job)
+                before = asdict(guard())
+                child_label = label + f"LostWindowProbe{attempt}"
+                argv = [probe["executable"], "inspect", str(self.last_agent_window)]
+                try:
+                    raw = common.bounded_child(
+                        argv,
+                        self.directory,
+                        child_label,
+                        guard,
+                        min(2, limit - time.monotonic()),
+                        False,
+                        spawn=spawn,
+                    )
+                except common.ChildFailed as failure:
+                    done = failure.completion
+                    require(
+                        done.argv == tuple(argv)
+                        and done.returncode == 3
+                        and done.reaped
+                        and done.stdout == b""
+                        and done.completed_at <= limit
+                        and read_plain(self.directory / (child_label + ".stderr"), maximum=4096)
+                        == b"Exact window absent\n",
+                        "Unresolved window probe completion",
+                    )
+                    metadata = None
+                else:
+                    metadata = decode(raw)
+                    require(
+                        type(metadata) is dict
+                        and set(metadata) == {"window", "pid", "bounds", "layer"}
+                        and type(metadata["window"]) is int
+                        and type(metadata["pid"]) is int
+                        and metadata["window"] == self.last_agent_window
+                        and metadata["pid"] == self.game.pid
+                        and type(metadata["layer"]) is int
+                        and type(metadata["bounds"]) is dict
+                        and set(metadata["bounds"]) == {"x", "y", "width", "height"}
+                        and all(
+                            type(v) in (int, float) and math.isfinite(v)
+                            for v in metadata["bounds"].values()
+                        ),
+                        "Exact window probe metadata required",
+                    )
+                after = asdict(guard())
+                self.write(
+                    child_label + "Observation.json",
+                    dict(
+                        process_before=before,
+                        process_after=after,
+                        last_window=self.last_agent_window,
+                        metadata=metadata,
+                        elapsed=time.monotonic() - self.anchor,
+                        cutoff=limit,
+                        limit="One old window only; replacement windows and visibility/alpha/sharing unknown",
+                    ),
+                )
+                if attempt == 2:
+                    break
+                followup = min(limit, time.monotonic() + 2)
+                while time.monotonic() < followup:
+                    guard()
+                    time.sleep(0.05)
+                guard()
+                try:
+                    result = self.native(
+                        label + f"LostWindowFollowup{attempt}", ["list-windows"], None, limit
+                    )["result"]
+                except MenuIncomplete:
+                    require(False, "Lost-window observation cap expired")
+                guard()
+                require(
+                    type(result.get("app", {}).get("pid")) is int
+                    and result["app"]["pid"] == self.game.pid
+                    and type(result.get("windows")) is list
+                    and all(type(row) is dict for row in result["windows"]),
+                    "Lost-window followup correspondence",
+                )
+                if result["windows"]:
+                    self.write(
+                        label + "WindowRecovered.json",
+                        dict(
+                            elapsed=time.monotonic() - self.anchor,
+                            cutoff=limit,
+                            automatic_focus=False,
+                            expanded_scope=False,
+                        ),
+                    )
+                    return result["windows"]
+            require(False, "Lost game window unresolved; bounded observation ended")
 
         def prepare(self):
             from agent_actor_binding import collect_actor

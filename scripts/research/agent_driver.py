@@ -956,6 +956,8 @@ def pilot_class(common):
                     type(windows) is list and all(type(w) is dict for w in windows),
                     "Window enumeration shape",
                 )
+                if not windows and hasattr(self, "observe_missing_window"):
+                    windows = self.observe_missing_window(label, deadline) or []
                 if windows:
                     break
                 self.guard_running()
@@ -982,6 +984,7 @@ def pilot_class(common):
                 receipt, self.game.pid, allow_missing=True
             )
             self.scene_frame(receipt, frame, window)
+            self.last_agent_window = window
             return receipt, frame, window
 
         def agent_input(
