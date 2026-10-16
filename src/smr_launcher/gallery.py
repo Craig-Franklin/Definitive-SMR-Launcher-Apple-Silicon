@@ -8,6 +8,7 @@ import stat
 import struct
 
 from .map_metadata import MapMetadata
+from .map_issues import MapIssueStore
 from .play_history import IDENTITIES, PlayHistoryStore, context, summarize
 
 # Prepared icons are at most 360px. Oversized/invalid art and icons beyond
@@ -69,7 +70,7 @@ def _read_art(path, maximum=MAX_ART_BYTES):
             os.close(parent)
 
 
-def gallery_snapshot(app, cancelled, progress=None, *, history_error=""):
+def gallery_snapshot(app, cancelled, progress=None, *, history_error="", deferred=False):
     """Re-read secure metadata and contextual verification for this presentation."""
     result = []
     try:
@@ -81,6 +82,15 @@ def gallery_snapshot(app, cancelled, progress=None, *, history_error=""):
     history_by_map = {}
     for event in history:
         history_by_map.setdefault(tuple(event[k] for k in IDENTITIES), []).append(event)
+    issues, issue_error = set(), ""
+    if deferred:
+        try:
+            issues = {
+                (row["archive_sha256"], row["variant_id"], row["game_executable_sha256"])
+                for row in MapIssueStore(app.library).records()
+            }
+        except (OSError, ValueError) as exc:
+            issue_error = "Map issue history needs inspection: " + str(exc)
     remaining_art = MAX_SNAPSHOT_ART_BYTES
     records = app.catalogue()
     if progress:
@@ -89,16 +99,30 @@ def gallery_snapshot(app, cancelled, progress=None, *, history_error=""):
         if cancelled.is_set():
             return ()
         metadata = app.map_metadata(record)
-        notice = ""
+        notice = issue_error
         try:
-            verification = app.verification_for(record)
-            label = verification.status if verification else "Not verified"
+            verification = None if deferred else app.verification_for(record)
+            label = (
+                "Checks pending"
+                if deferred
+                else verification.status
+                if verification
+                else "Not verified"
+            )
+            if (
+                deferred
+                and (record.archive_sha256, record.variant_id, app.installation.executable_sha256)
+                in issues
+            ):
+                label = "Known issue"
+            if issue_error:
+                label = "Needs inspection"
         except Exception as exc:
             label = "Needs inspection"
             notice = "Gameplay record needs inspection: " + str(exc)
         art = (
             _read_art(app.map_icon(record), min(MAX_ART_BYTES, remaining_art))
-            if remaining_art
+            if remaining_art and not deferred
             else b""
         )
         remaining_art -= len(art)
