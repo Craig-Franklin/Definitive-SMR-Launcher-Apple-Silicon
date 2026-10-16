@@ -713,6 +713,27 @@ class LauncherApplication:
                 record, rules, label=recipe_id, recipe_binding=binding
             )
 
+    def inspect_bank_candidate(
+        self, profile_id: str, *, scenario_path: str, industry_path: str, model_path: str
+    ):
+        """Inspect one original's source bytes without repair or profile recovery."""
+        from .recipe_service import inspect_bank_candidate
+
+        with self._locked(recover_removal=False, nonblocking=True):
+            self._stopped()
+            if self.profiles.journal.exists() or self.profiles.journal.is_symlink():
+                raise ApplicationError("Pending activation requires its owner; inspection refused")
+            matches = [r for r in self.catalogue() if r.profile_id == profile_id]
+            if len(matches) != 1 or not self._is_original_variant(matches[0]):
+                raise ApplicationError("Bank inspection requires a unique current original map")
+            return inspect_bank_candidate(
+                self,
+                matches[0],
+                scenario_path=scenario_path,
+                industry_path=industry_path,
+                model_path=model_path,
+            )
+
     def plan_recipe_batch(self, requests: list[dict]) -> dict:
         """Return a bounded compilation snapshot, never an execution ticket.
 

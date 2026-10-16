@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from pathlib import Path
 import argparse
 import json
@@ -63,6 +64,10 @@ def run(argv: list[str] | None = None) -> dict:
     import_action.add_argument("archive")
     play = actions.add_parser("play")
     play.add_argument("profile_id")
+    bank = actions.add_parser("inspect-bank", help="Read-only bank source applicability")
+    bank.add_argument("profile_id")
+    for name in ("scenario", "industry", "model"):
+        bank.add_argument("--" + name, required=True)
     choice = actions.add_parser("choose-library")
     choice.add_argument("steamapps")
     for action in ("plan-recipes", "prepare-recipes"):
@@ -79,6 +84,15 @@ def run(argv: list[str] | None = None) -> dict:
         app = LauncherApplication.choose_steam_library(Path(args.steamapps))
         return _status(app)
     app = LauncherApplication.discover()
+    if args.action == "inspect-bank":
+        return asdict(
+            app.inspect_bank_candidate(
+                args.profile_id,
+                scenario_path=args.scenario,
+                industry_path=args.industry,
+                model_path=args.model,
+            )
+        )
     if args.action in ("plan-recipes", "prepare-recipes"):
         operation = (
             app.plan_recipe_batch if args.action == "plan-recipes" else app.prepare_recipe_batch

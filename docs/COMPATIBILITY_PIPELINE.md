@@ -401,6 +401,24 @@ the declared archive and executable, binds complete map and stock file contexts,
 and checks an exact scenario, industry reference and sealed bank input. Changed
 bytes/builds and unsupported references refuse or exclude the candidate;
 ambiguous loose providers, packed providers and case differences retain unknowns.
+The maintained application entry point is
+`LauncherApplication.inspect_bank_candidate(profile_id, scenario_path=..., industry_path=..., model_path=...)`.
+It requires a unique current original catalogue edition and a stopped game, and
+refuses pending activation/removal instead of recovering either operation.
+The existing JSON CLI exposes the same service without a catalogue status scan:
+
+```sh
+PYTHONPATH=src python -m smr_launcher.cli inspect-bank PROFILE_ID \
+  --scenario UserMaps/Example/RRT_Scenario.xml \
+  --industry UserMaps/Example/RRT_Industries.xml \
+  --model UserMaps/Example/bank.nif
+```
+
+Use actual relative paths from the selected imported original. Successful command
+execution returns `ok: true` and the assessment's `status`, `exclusions`, `unknowns`
+and binding digest. `source-candidate`, `unknown` and `excluded` are assessment
+results, not errors or compatibility passes; operational refusals return `ok: false`
+and exit2. This command does not prepare, activate, launch or record gameplay.
 The assessment never offers a new recipe or grants preparation/runtime authority.
 Even a source candidate retains unresolved native provider selection, complete
 scenario/dependency semantics and rendering, collision, gameplay and save/reopen
