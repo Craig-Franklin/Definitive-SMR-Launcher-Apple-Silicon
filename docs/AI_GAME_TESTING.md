@@ -149,6 +149,22 @@ paired Save As shortcut. Goods offered, matching cars and actual delivery are
 separate observations. Movement or income alone cannot establish delivery.
 Raw cargo credit remains false until the owner reviews the actual evidence.
 
+Transport's `action` stage also admits one fixed coordinate zoom-out action:
+`["scroll", "--x", "X", "--y", "Y", "--direction", "down", "--pages", "0.1"]`.
+Use current rendered world coordinates converted by the frame's scale into
+window-relative points, as for clicks; the provider adds the actual window origin.
+The pinned native provider emits one downward wheel line for this fixed value.
+The owner permits at most two dispatched scroll attempts in the entire operation.
+Other stages, purposes, directions, page values and target/focus overrides refuse.
+Provider completion does not prove camera movement. Inspect the next image; if
+the first scroll has no visible zoom effect, end work with `partial` and quit.
+Do not import a checkpoint or relaunch to obtain a preferred starting city.
+Choose a nearby route from the actual current world: verify source supply and
+destination demand before construction. Bound discovery to at most four actions
+and 90 seconds after observing the playable world, leaving decisions and time for
+the short connection, second depot, actual train/car purchase, delivery and quit.
+No viable pair within that discovery bound means `partial`, not a terrain search.
+
 Transport work ends at 390 seconds from the original anchor, leaving time for
 the existing observed quit/confirmation and receipt path inside 480 seconds.
 The final input guard rejects new transport work at that cutoff. A dispatched

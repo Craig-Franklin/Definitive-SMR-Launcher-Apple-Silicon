@@ -143,6 +143,7 @@ class AgentRouteTests(unittest.TestCase):
         owner.frames = owner.launches = owner.seq = 0
         owner.first_stop_verified = owner.running = owner.cancelled = owner.uncertain_input = False
         owner.delivery_validation = None
+        owner.transport_zoom_attempts = 0
         owner.events, self.argv, self.actions = [], [], []
         owner.game = owner.observer = None
         owner.diagnostic = "synthetic-diagnostic"
@@ -475,6 +476,123 @@ class AgentRouteTests(unittest.TestCase):
 
     def test_transport_cutoff_during_final_ingress_preserves_quit_margin(self):
         self.assert_transport_cutoff(True)
+
+    def test_fixed_scroll_grammar_refuses_other_stages_targets_and_units(self):
+        frame = {"window": {"width": 800, "height": 600}}
+        action = ["scroll", "--x", "200", "--y", "100", "--direction", "down", "--pages", "0.1"]
+        self.assertEqual(
+            driver.validate_action(
+                "action", action, frame, "token", "owned_window", purpose=driver.TRANSPORT_PURPOSE
+            ),
+            action,
+        )
+        for stage, purpose, receiver, proposed in (
+            ("continued", driver.TRANSPORT_PURPOSE, "owned_window", action),
+            ("world", driver.TRANSPORT_PURPOSE, "owned_window", action),
+            ("finished", driver.TRANSPORT_PURPOSE, "owned_window", action),
+            ("action", driver.PURPOSE, "owned_window", action),
+            ("action", driver.WINDOW_PURPOSE, "owned_window", action),
+            ("action", driver.TRANSPORT_PURPOSE, "filename_field", action),
+            ("action", driver.TRANSPORT_PURPOSE, "owned_window", action[:-1] + ["1"]),
+            (
+                "action",
+                driver.TRANSPORT_PURPOSE,
+                "owned_window",
+                action[:-3] + ["up", "--pages", "0.1"],
+            ),
+            ("action", driver.TRANSPORT_PURPOSE, "owned_window", action + ["--restore-window"]),
+            ("action", driver.TRANSPORT_PURPOSE, "owned_window", action + ["--app", "pid:999"]),
+            (
+                "action",
+                driver.TRANSPORT_PURPOSE,
+                "owned_window",
+                ["scroll", "--element-index", "2", *action[-4:]],
+            ),
+            ("action", driver.TRANSPORT_PURPOSE, "owned_window", [*action[:2], "800", *action[3:]]),
+            ("action", driver.TRANSPORT_PURPOSE, "owned_window", [*action[:4], "NaN", *action[5:]]),
+        ):
+            with self.subTest(stage=stage, proposed=proposed), self.assertRaises(ControlRefused):
+                driver.validate_action(stage, proposed, frame, "token", receiver, purpose=purpose)
+
+    def test_scroll_emits_owned_window_relative_points_without_adding_origin_or_scale(self):
+        self.owner.job["purpose"] = driver.TRANSPORT_PURPOSE
+        self.owner.launch()
+        frame = {"window": {"x": 1000, "y": 2000, "width": 800, "height": 600}, "scale": 0.5}
+        # A displayed pixel100,50 is window-relative point200,100. The pinned
+        # provider coordinatePoint adds windowBounds.minX/minY, not the owner.
+        action = ["scroll", "--x", "200", "--y", "100", "--direction", "down", "--pages", "0.1"]
+        driver.validate_action(
+            "action", action, frame, "token", "owned_window", purpose=driver.TRANSPORT_PURPOSE
+        )
+        self.owner.agent_input("Zoom", action, 7, frame, 100, 110, None)
+        self.assertEqual(
+            self.argv,
+            [
+                [
+                    "/synthetic/orca",
+                    "computer",
+                    *action,
+                    "--app",
+                    "pid:91",
+                    "--json",
+                    "--session",
+                    "synthetic-root",
+                    "--window-id",
+                    "7",
+                    "--no-screenshot",
+                ]
+            ],
+        )
+        self.assertEqual(self.owner.transport_zoom_attempts, 1)
+
+    def test_third_scroll_never_spawns_and_enters_existing_normal_quit(self):
+        self.owner.job["purpose"] = driver.TRANSPORT_PURPOSE
+        zoom = ["scroll", "--x", "200", "--y", "100", "--direction", "down", "--pages", "0.1"]
+        self.reply_transform = lambda row: (
+            dict(row, choice="action", action=zoom)
+            if "action" in self.stage_indexes and "finished" not in self.stage_indexes
+            else row
+        )
+        result = self.run_trial()
+        self.assertEqual(self.owner.transport_zoom_attempts, 2)
+        self.assertEqual(self.actions.count(zoom), 2)
+        self.assertIn("Two zoom attempts exhausted", result["outcome"]["partial_reason"])
+        self.assertNotIn("continued", self.stage_indexes)
+        self.assertFalse(self.owner.uncertain_input)
+        self.assertTrue(result["restored"] and result["terminal_finished"])
+        self.assertEqual(self.actions[-1], ["hotkey", "--key", "CmdOrCtrl+Q"])
+
+    def test_scroll_stale_or_cancelled_final_ingress_does_not_consume_attempt(self):
+        self.owner.job["purpose"] = driver.TRANSPORT_PURPOSE
+        self.owner.launch()
+        action = ["scroll", "--x", "200", "--y", "100", "--direction", "down", "--pages", "0.1"]
+        frame = {"window": {"width": 800, "height": 600}}
+        self.before_poll = lambda: self.clock.__setitem__(0, 161)
+        with self.assertRaises(driver.StaleFrame):
+            self.owner.agent_input("StaleZoom", action, 7, frame, 100, 180, None)
+        self.before_poll = lambda: setattr(self.owner.control, "cancelled", True)
+        with self.assertRaises(UserCancelled):
+            self.owner.agent_input("CancelledZoom", action, 7, frame, 161, 180, None)
+        self.assertFalse(self.argv)
+        self.assertEqual(self.owner.transport_zoom_attempts, 0)
+        self.assertFalse(self.owner.uncertain_input)
+
+    def test_unknown_scroll_delivery_keeps_existing_restoration_hold(self):
+        self.owner.job["purpose"] = driver.TRANSPORT_PURPOSE
+        zoom = ["scroll", "--x", "200", "--y", "100", "--direction", "down", "--pages", "0.1"]
+
+        def fail_zoom(row):
+            if "action" in self.stage_indexes:
+                self.native_failure = TimeoutError("Unsettled synthetic scroll")
+                return dict(row, choice="action", action=zoom)
+            return row
+
+        self.reply_transform = fail_zoom
+        result = self.run_trial()
+        self.assertEqual(self.owner.transport_zoom_attempts, 1)
+        self.assertEqual(self.actions.count(zoom), 0)  # Fake fails after spawn, before response.
+        self.assertTrue(self.owner.uncertain_input and result["stopped"])
+        self.assertFalse(result["restored"] or result["terminal_finished"])
 
     def test_depot_shortcut_is_transport_only(self):
         frame = {"window": {"width": 800, "height": 600}}

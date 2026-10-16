@@ -258,8 +258,17 @@ def validate_action(stage, action, frame, token, receiver, *, purpose=None):
         )
         if stage == "filename" and action[2] == "CmdOrCtrl+A":
             require(receiver == "filename_field", "Agent-observed filename receiver required")
-    elif command in ("click", "drag"):
+    elif command in ("click", "drag", "scroll"):
         geometry = action
+        if command == "scroll":
+            require(
+                purpose == TRANSPORT_PURPOSE
+                and stage == "action"
+                and receiver == "owned_window"
+                and action[-4:] == ["--direction", "down", "--pages", "0.1"],
+                "Only fixed transport action-stage zoom-out is admitted",
+            )
+            geometry = action[:-4]
         if command == "click" and len(action) == 7:
             require(
                 (stage == "reopened" and action[-2:] == ["--click-count", "2"])
@@ -270,7 +279,7 @@ def validate_action(stage, action, frame, token, receiver, *, purpose=None):
             )
             geometry = action[:-2]
         flags = (
-            ["--x", "--y"] if command == "click" else ["--from-x", "--from-y", "--to-x", "--to-y"]
+            ["--from-x", "--from-y", "--to-x", "--to-y"] if command == "drag" else ["--x", "--y"]
         )
         require(command != "drag" or stage in ("action", "continued"), "Drag stage refused")
         require(
@@ -557,6 +566,7 @@ def pilot_class(common):
             self.first_stop_verified = False
             self.delivery_validation = None
             self.completed_input = None
+            self.transport_zoom_attempts = 0
             self.decisions = AgentDecisions(self)
 
         def write(self, name, value):
@@ -746,6 +756,12 @@ def pilot_class(common):
 
             def mark():
                 nonlocal attempted
+                if action[0] == "scroll":
+                    if self.transport_zoom_attempts >= 2:
+                        raise TransportIncomplete(
+                            "Two zoom attempts exhausted; quit without search"
+                        )
+                    self.transport_zoom_attempts += 1
                 attempted = True
 
             def poll_child():
