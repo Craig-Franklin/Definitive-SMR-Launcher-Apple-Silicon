@@ -448,14 +448,16 @@ struct LauncherView: View {
     private func evidence(_ map: MapItem) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(map.verification).font(.headline)
-            Text(model.details[map.id]?.text("verification_text", "Reading current evidence…") ?? "Reading current evidence…").textSelection(.enabled)
-            DisclosureGroup("Exact Identities & Provenance") {
+            GroupBox("Exact Identities & Provenance") {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Archive SHA-256: \(map.archive)")
                     Text("Variant: \(map.variant)")
-                    Text("Executable SHA-256: \(model.details[map.id]?.object("context").text("game_executable_sha256") ?? "Unknown")")
-                }.font(.caption.monospaced()).textSelection(.enabled).padding(.top, 8)
+                    let build = model.details[map.id]?.object("context").text("game_executable_sha256") ?? ""
+                    Text("Executable SHA-256: \(build.isEmpty ? "Unknown" : build)")
+                }.font(.caption.monospaced()).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
+            Text(model.details[map.id]?.text("verification_text", "Reading current evidence…") ?? "Reading current evidence…").textSelection(.enabled)
             DisclosureGroup("Static Import Checks") {
                 Text(model.details[map.id]?.text("checks_text", "No scan result available.") ?? "No scan result available.").textSelection(.enabled).padding(.top, 8)
                 Text("Static findings do not establish gameplay compatibility.").font(.caption)

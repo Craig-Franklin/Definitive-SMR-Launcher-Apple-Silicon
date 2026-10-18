@@ -128,6 +128,7 @@ private final class SyntheticImageDragView: NSView, NSDraggingSource {
                         if let map = model.selected {
                             switch LauncherModel.argument("--view") {
                             case "Overview": model.section = "Overview"
+                            case "Issues & Evidence": model.section = "Issues & Evidence"
                             case "Edit Details": model.edit(map)
                             default: model.record(map)
                             }

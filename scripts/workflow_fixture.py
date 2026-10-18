@@ -196,7 +196,15 @@ class WorkflowFixture:
                 scenarios=record.scenarios,
                 history=history,
                 summary=self.presentation(record)["summary"],
-                verification_text="Synthetic; gameplay unknown",
+                verification_text=(
+                    "\n\n".join(
+                        f"Synthetic unresolved issue {index}: gameplay remains unknown. "
+                        "Keep this complete evidence body below the selected edition identities."
+                        for index in range(1, 41)
+                    )
+                    if self.case == "long-issues"
+                    else "Synthetic; gameplay unknown"
+                ),
                 checks_text="No game asset scan ran",
             )
         if method == "annotations.save":
@@ -243,7 +251,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--case",
-        choices=("common", "ambiguous", "missing-scenario", "problem", "reject", "unknown"),
+        choices=(
+            "common",
+            "ambiguous",
+            "missing-scenario",
+            "problem",
+            "reject",
+            "unknown",
+            "long-issues",
+        ),
         default="common",
     )
     args = parser.parse_args()
