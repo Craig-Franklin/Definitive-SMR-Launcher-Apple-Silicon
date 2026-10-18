@@ -13,6 +13,23 @@ Verify the native session model, reasoning effort, terminal incarnation and
 workspace before admission. A fresh compact execution session avoids carrying a
 large project's entire conversation into time-sensitive visual decisions.
 
+## Before preparing a trial
+
+Name the one missing observable outcome and trace the complete operator path before
+creating a job: installed input/observation support, current-scene decision, result
+readback, normal quit and restoration. A placement plan requiring a noncommitting
+pointer preview is not ready if the installed provider offers only click/drag.
+Check the deployment route before implementing a missing control; local source,
+compiled helper and active host capability are separate evidence.
+
+Use the [short investigation bounds](../CONTRIBUTING.md#keep-investigations-and-preparation-short)
+for preparation, source fixes and review. Do not spend hours preparing an eight-minute
+test through successive helpers or renamed jobs. Reuse matching accepted source
+checks, while keeping current ownership, input freshness and preservation checks.
+A new scene or successful input dispatch alone does not resolve a previously
+intermittent observation failure. Report that trial's result without claiming a
+general repair or automatically repeating it.
+
 ## Launcher entry points
 
 The existing command bridge already provides structured status and launch:

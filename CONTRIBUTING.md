@@ -174,6 +174,52 @@ changed risks and required integration; avoid duplicate verification for ceremon
 Continue independent work while a genuine signing prompt or local blocker waits.
 Preserve permitted owned cleanup when new work stops.
 
+### Keep investigations and preparation short
+
+Before building a missing capability, trace its shortest usable path: installed
+support, editable source, available verification, deployment and the final user
+outcome. Check whether deployment needs another host, a restart, signing or human
+permissions. A tested patch that cannot be activated is a source deliverable, not
+an unblocked runtime path. Inspect build hooks before running them: a build can
+also install global links or change the environment.
+
+Use proportionate elapsed-time bounds for uncertain work. For a small blocker,
+start with up to 10 minutes for a capability/cause assessment and up to 30 minutes
+for a narrow implementation including focused verification and required review.
+These are planning defaults, not global Goal/token budgets or new runtime timers.
+Choose a different bound before starting when the known work warrants it. Record
+start, intended outcome and bound in the existing Task; do not create a new tracker.
+
+Report a material blocker as soon as it is known. At 15 minutes without an accepted
+outcome or a new fact that changes the next action, reassess the approach. At its
+bound, retain the candidate and report completed work, uncertainty and the exact
+next decision. Renaming preparation, adding a worker or starting another review
+does not reset the elapsed time. A justified next phase needs a changed, feasible
+plan; it must not hide an extension of the failed approach. Necessary owned cleanup
+continues within its existing authority and bounds.
+
+Stop the failing approach, not independent authorized work. Distinguish a user's
+restriction from an agent's one-trial plan: “no new control in this trial” is not a
+permanent ban on a separately scoped repair of a demonstrated gap. Such a repair
+does not reopen a consumed job or grant deployment/runtime authority. Present a
+concrete supported option when a material decision is needed; do not repeatedly
+ask for “continue” or produce unchanged blocked summaries. If an authorized
+scheduled monitor has only an unchanged external blocker to report, suspend its
+repeated checks and state how it will resume; do not create monitoring by default.
+
+Reuse unchanged checks and review; validate the actual changed consumer boundary.
+If a test framework is unavailable, a small assertion executable against the real
+production code can provide explicitly limited supplemental evidence. Retain the
+original tests and missing-suite result. Do not emulate a passing suite, weaken
+assertions or install a large toolchain merely to keep the slice moving.
+
+In the 18 October 2026 move-only control investigation, capability assessment took
+107 seconds, implementation and independent source review finished within 30 minutes,
+and activation assessment took under two minutes. Focused native assertions avoided
+an Xcode-install detour. However, activation still required a host transition:
+deployment feasibility should have been checked before coding. This is evidence of
+a bounded source delivery, not a measured project-wide speedup or gameplay success.
+
 ### Evaluate progress
 
 At session start, preserve a baseline of current acceptance, candidate revision,

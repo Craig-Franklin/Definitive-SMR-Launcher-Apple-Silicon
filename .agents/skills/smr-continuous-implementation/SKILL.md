@@ -14,6 +14,19 @@ Choose the next observable outcome and its discriminating check. Deliver a usefu
 slice through integration and acceptance; a review, commit or handoff is an
 intermediate result when required work remains.
 
+Before implementing missing tooling, check the installed capability and the path
+from source through verification and deployment to the intended outcome. Surface
+host restarts, unavailable toolchains and human permission requirements before
+coding; inspect build hooks for side effects. Do not equate a reviewed patch with
+an operational capability.
+
+Apply the contract's [short investigation bounds](../../../CONTRIBUTING.md#keep-investigations-and-preparation-short):
+normally 10 minutes for a small capability assessment and 30 minutes for its narrow
+source slice, including checks/review. Keep the original elapsed interval across
+renamed subtasks. Escalate an exact material blocker immediately; after 15 minutes
+without an outcome or decision-changing fact, change the approach. These are
+planning defaults, not mechanical enforcement or replacements for runtime limits.
+
 Before recommending or handing off a runtime pilot, inspect the concrete path to
 its complete outcome. An interface, passing synthetic tests or available hooks do
 not establish an implemented operator. Identify missing save/reopen/cleanup steps
@@ -40,6 +53,12 @@ attempt, identify what acceptance advanced or uncertainty was resolved and wheth
 the next task reaches the missing outcome. If only supporting machinery expands,
 stop that approach and reassess the shortest complete path. A narrow diagnostic or
 pilot does not authorize unrelated work or an implementation chain.
+
+Do not turn an agent-imposed one-trial restriction into a permanent project ban.
+A separately scoped repair with a changed, supported hypothesis may be ready work;
+it cannot reuse a consumed grant. Give the coordinator a concrete next decision,
+not repeated “blocked” summaries. Do not require routine user confirmation within
+existing authority or invent work merely to keep the Goal active.
 
 A diagnostic whose intended positive control fails is inconclusive. Do not use
 its empty result as evidence that the target scene or behavior is absent. Preserve

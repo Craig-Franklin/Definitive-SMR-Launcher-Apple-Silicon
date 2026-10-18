@@ -11,6 +11,12 @@ the owner's `.handoff/START_HERE.md`; it supplies the current Run, source closur
 queue/start helper and return-state evidence. A skill invocation does not resume
 a pause or supply missing runtime admission.
 
+Before preparing a job, check the [complete operator path](../../../docs/AI_GAME_TESTING.md#before-preparing-a-trial),
+including installed input capabilities, observation, final quit and restoration.
+Include preparation and review in the existing Task's elapsed-time assessment;
+the game clock alone does not bound time spent trying to arrange a test. A missing
+capability needs a bounded source/deployment decision, not another game launch.
+
 Before launch, verify actual native provenance and the existing owner. Use the
 supported process/queue checks. An unowned game belongs to Craig: do not send it
 input, stop it or switch its profile. If busy, continue independent source/docs.
