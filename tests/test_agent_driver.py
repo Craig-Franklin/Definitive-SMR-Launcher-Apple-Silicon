@@ -766,6 +766,61 @@ class AgentRouteTests(unittest.TestCase):
         self.assertEqual(self.actions.count(["hotkey", "--key", "CmdOrCtrl+Q"]), 2)
         self.assertFalse(any(action[0] == "drag" for action in self.actions))
 
+    def test_save_lost_owned_window_enters_cleanup_without_quit_polling_or_save(self):
+        self.cached_save_owner()
+        original = self.owner.agent_frame
+
+        def frame(label, deadline):
+            result = original(label, deadline)
+            self.window_responses = [[]]
+            return result
+
+        self.owner.agent_frame = frame
+        result = self.run_trial()
+        self.assertIn("Previously observed SAVE window unavailable", result["outcome"]["cause"])
+        self.assertTrue(result["stopped"] and result["restored"] and result["terminal_finished"])
+        self.assertEqual(self.stage_indexes, {"world": 1})
+        self.assertNotIn(["hotkey", "--key", "CmdOrCtrl+Q"], self.actions)
+        self.assertEqual(self.keep.read_bytes(), b"preserved original synthetic save")
+        self.assertFalse((self.keep.parent / self.owner.job["agent_save"]["filename"]).exists())
+
+    def test_save_window_history_is_bound_to_receiver_not_previous_launch(self):
+        self.owner.job["purpose"] = driver.CACHED_SAVE_PURPOSE
+        self.owner.menu_work_active = True
+        self.owner.launch()
+        self.owner.agent_frame("First", 120)
+        first = self.owner.game
+        self.window_responses = [[]]
+        with self.assertRaisesRegex(ControlRefused, "Previously observed SAVE window unavailable"):
+            self.owner.agent_frame("Lost", 120)
+        self.owner.game = Process(first.pid + 1, first.birth_us + 1)
+        self.window_responses = [[], [self.valid_window()]]
+        self.owner.agent_frame("SecondStartup", 120)
+        self.assertEqual(self.owner.last_agent_window_process, self.owner.game)
+        self.assertEqual(self.actions, [])
+
+    def test_save_startup_options_and_normal_quit_keep_existing_window_wait(self):
+        self.owner.job["purpose"] = driver.CACHED_SAVE_PURPOSE
+        self.owner.menu_work_active = True
+        self.owner.launch()
+        original = self.owner.retain_frame
+
+        def startup(receipt, label):
+            frame = original(receipt, label)
+            frame["window"]["title"] = "Sid Meier's Railroads! Options"
+            return frame
+
+        self.owner.retain_frame = startup
+        self.owner.agent_frame("Options", 120)
+        self.owner.retain_frame = original
+        self.window_responses = [[], [self.valid_window()]]
+        self.owner.agent_frame("MainMenu", 120)
+        self.assertFalse(self.owner.last_agent_window_startup)
+        self.owner.menu_work_active = False
+        self.window_responses = [[], [self.valid_window()]]
+        self.owner.agent_frame("QuitConfirmation", 120)
+        self.assertEqual(self.actions, [])
+
     def test_catalogue_save_unknown_first_normal_exit_never_relaunches(self):
         self.cached_save_owner()
         self.corrupt_exit = True

@@ -1037,6 +1037,18 @@ def pilot_class(common):
                     type(windows) is list and all(type(w) is dict for w in windows),
                     "Window enumeration shape",
                 )
+                previous = getattr(self, "last_agent_window_process", None)
+                # SAVE work cannot rediscover a lost game window indefinitely.
+                # Options, new receivers and normal Quit keep their startup/exit paths.
+                require(
+                    windows
+                    or self.job["purpose"] != CACHED_SAVE_PURPOSE
+                    or not getattr(self, "menu_work_active", False)
+                    or getattr(self, "last_agent_window_startup", False)
+                    or previous is None
+                    or not previous.same(self.native_receiver()),
+                    "Previously observed SAVE window unavailable; owned cleanup required",
+                )
                 if not windows and hasattr(self, "observe_missing_window"):
                     windows = self.observe_missing_window(label, deadline) or []
                 if windows:
@@ -1066,6 +1078,10 @@ def pilot_class(common):
             )
             self.scene_frame(receipt, frame, window)
             self.last_agent_window = window
+            self.last_agent_window_process = self.native_receiver()
+            self.last_agent_window_startup = frame.get("window", {}).get("title") == (
+                "Sid Meier's Railroads! Options"
+            )
             return receipt, frame, window
 
         def agent_input(
