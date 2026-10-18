@@ -359,6 +359,7 @@ def download_all_maps(
     *,
     importer: Optional[Callable[[RemoteMap, Path], object]] = None,
     max_workers: int = 4,
+    downloader: Optional[Callable[..., Path]] = None,
 ) -> tuple[int, int, int]:
     """Download in a bounded pool; import verified archives serially if asked."""
     if not 1 <= max_workers <= 4:
@@ -371,13 +372,14 @@ def download_all_maps(
             return "canceled", None
         progress(record, "Downloading", 0, record.size, "")
         try:
-            path = download_map(
-                record,
-                private_directory,
-                progress=lambda count, total: progress(record, "Downloading", count, total, ""),
-                cancelled=cancelled.is_set,
-            )
-        except CollectionError as exc:
+            report = lambda count, total: progress(record, "Downloading", count, total, "")
+            if downloader is None:
+                path = download_map(
+                    record, private_directory, progress=report, cancelled=cancelled.is_set
+                )
+            else:
+                path = downloader(record, progress=report, cancelled=cancelled.is_set)
+        except (CollectionError, RuntimeError) as exc:
             if cancelled.is_set() and str(exc) == "Download canceled":
                 progress(record, "Canceled", 0, record.size, "")
                 return "canceled", None

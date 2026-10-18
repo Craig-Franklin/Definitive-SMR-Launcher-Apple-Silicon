@@ -21,6 +21,7 @@ def owner(directory):
         profiles=SimpleNamespace(state_file=Mock(exists=Mock(return_value=True))),
         _stopped=Mock(),
         import_archive=Mock(),
+        download_archive=Mock(),
         setup=Mock(),
     )
     result = SimpleNamespace(
@@ -122,7 +123,8 @@ class NativeToolsTests(unittest.TestCase):
         self.owner.native_library.remote_records = records
         selection = [dict(name=r.name, size=r.size, sha1=r.sha1) for r in records]
 
-        def download(selected, directory, progress, cancelled, *, importer):
+        def download(selected, directory, progress, cancelled, *, importer, downloader):
+            self.assertIs(downloader, self.owner.app.download_archive)
             self.assertTrue(self.owner.app._stopped.called)
             progress(records[0], "Imported", 5, 5, "")
             progress(records[1], "Failed", 0, 6, "/private/raw-token-crash.ips")
