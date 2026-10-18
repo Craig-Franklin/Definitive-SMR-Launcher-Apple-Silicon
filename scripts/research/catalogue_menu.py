@@ -627,15 +627,24 @@ def verify_config(job):
     )
     package = config["package"]
     receipt = decode(read_plain(package["receipt_path"]))
-    require(
-        sha(read_plain(package["receipt_path"])) == package["receipt_sha256"]
-        and receipt["source_commit"] == package["source_commit"]
-        and receipt["tag"] == package["tag"]
-        and receipt["zip_sha256"] == package["zip_sha256"]
-        and receipt["codesign_verified"] is True
-        and receipt["gatekeeper_accepted"] is True,
-        "Exact released artifact required",
-    )
+    if package.get("artifact_mode") == "local-development":
+        from native_gui_menu import verify_local_artifact
+
+        verify_local_artifact(job, receipt)
+    else:
+        require(
+            "artifact_mode" not in package and "artifact_mode" not in receipt,
+            "Artifact mode refused",
+        )
+        require(
+            sha(read_plain(package["receipt_path"])) == package["receipt_sha256"]
+            and receipt["source_commit"] == package["source_commit"]
+            and receipt["tag"] == package["tag"]
+            and receipt["zip_sha256"] == package["zip_sha256"]
+            and receipt["codesign_verified"] is True
+            and receipt["gatekeeper_accepted"] is True,
+            "Exact released artifact required",
+        )
     bundle = Path(package["bundle"])
     helper = bundle / "Contents/MacOS/Definitive SMR Launcher Apple Silicon"
     require(
@@ -1239,18 +1248,25 @@ def pilot_class(common, agent_class):
             # Verify their maintained signature rather than treating the bundle
             # as a plain mutable profile tree.
             bundle = self.config["package"]["bundle"]
+            if self.config["package"].get("artifact_mode") == "local-development":
+                verify_config(self.job)
             subprocess.run(
                 ["/usr/bin/codesign", "--verify", "--deep", "--strict", bundle],
                 check=True,
                 capture_output=True,
                 timeout=10,
             )
-            subprocess.run(
-                ["/usr/sbin/spctl", "--assess", "--type", "execute", bundle],
-                check=True,
-                capture_output=True,
-                timeout=10,
-            )
+            if self.config["package"].get("artifact_mode") == "local-development":
+                from native_gui_menu import verify_adhoc_signature
+
+                verify_adhoc_signature(bundle)
+            else:
+                subprocess.run(
+                    ["/usr/sbin/spctl", "--assess", "--type", "execute", bundle],
+                    check=True,
+                    capture_output=True,
+                    timeout=10,
+                )
             p = self.profiles
             require(
                 not p.journal.exists() and not p.journal.is_symlink(), "Activation journal hold"

@@ -9,6 +9,7 @@ import fcntl
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import time
 from types import SimpleNamespace
@@ -19,6 +20,144 @@ import catalogue_menu as catalogue
 PURPOSE = catalogue.GUI_PURPOSE
 SUCCESS = "Railroads launched. Quit it before changing maps."
 STAGES = ("gui_select", "gui_play", "gui_original", "gui_confirm", "gui_success", "gui_quit")
+LOCAL_BASE = "5419a74340034388de4b4355dd4dac8380c5378c"
+SOURCE_ROOT = Path(__file__).resolve().parents[2]
+
+
+def local_source_snapshot(root):
+    """Bind the actual working tree, including nonignored new build inputs."""
+    root = Path(root)
+    base = subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], text=True, timeout=5
+    ).strip()
+    names = (
+        subprocess.check_output(
+            [
+                "git",
+                "-C",
+                str(root),
+                "ls-files",
+                "-z",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+            ],
+            timeout=5,
+        )
+        .decode()
+        .split("\0")
+    )
+    files = {}
+    for name in sorted(set(names) - {""}):
+        path = root / name
+        require(path.is_relative_to(root) and ".." not in Path(name).parts, "Source path refused")
+        facts = catalogue.file_facts(path)
+        files[name] = {key: facts[key] for key in ("sha256", "bytes", "mode")}
+    require(files and len(files) <= 4096, "Bounded complete local source required")
+    return dict(base=base, files=files)
+
+
+def local_bundle_digest(bundle):
+    """Hash bundle contents and internal link topology, including its signature."""
+    bundle = Path(bundle)
+    require(bundle.is_absolute() and not bundle.is_symlink(), "Plain local bundle required")
+    rows = {}
+    for path in sorted(bundle.rglob("*")):
+        name = path.relative_to(bundle).as_posix()
+        mode = stat.S_IMODE(path.lstat().st_mode)
+        if path.is_symlink():
+            require(path.resolve().is_relative_to(bundle), "External bundle link refused")
+            rows[name] = dict(link=os.readlink(path), mode=mode)
+        elif path.is_dir():
+            rows[name] = dict(directory=True, mode=mode)
+        else:
+            facts = catalogue.file_facts(path)
+            rows[name] = {key: facts[key] for key in ("sha256", "bytes", "mode")}
+        require(len(rows) <= 25000, "Bounded local bundle required")
+    require(rows, "Complete local bundle required")
+    return sha(catalogue.canonical(rows))
+
+
+def verify_local_artifact(job, receipt):
+    """One explicit development artifact; never a failed-release fallback."""
+    package = job["catalogue_menu"]["package"]
+    require(job["purpose"] == PURPOSE, "Local development is native GUI menu-only")
+    require(
+        set(package)
+        == {
+            "artifact_mode",
+            "bundle",
+            "executable",
+            "executable_sha256",
+            "receipt_path",
+            "receipt_sha256",
+        }
+        and set(receipt)
+        == {
+            "artifact_mode",
+            "source_root",
+            "source_snapshot",
+            "build",
+            "bundle_sha256",
+            "frontend_sha256",
+            "executable_sha256",
+        }
+        and receipt["artifact_mode"] == package["artifact_mode"] == "local-development"
+        and sha(read_plain(package["receipt_path"])) == package["receipt_sha256"],
+        "Exact unmixed local build receipt required",
+    )
+    require(
+        receipt["source_root"] == str(SOURCE_ROOT)
+        and receipt["source_snapshot"]["base"] == LOCAL_BASE
+        and local_source_snapshot(SOURCE_ROOT) == receipt["source_snapshot"],
+        "Frozen local working-tree source drift",
+    )
+    build = receipt["build"]
+    require(
+        build["command"] == ["./scripts/build_macos.sh"]
+        and type(build["returncode"]) is int
+        and build["returncode"] == 0
+        and build["signing"] == "ad-hoc"
+        and build["dependencies"]
+        == dict(
+            line.split("==")
+            for line in (SOURCE_ROOT / "requirements-build.txt").read_text().splitlines()
+            if line
+        ),
+        "Maintained ad-hoc build inputs required",
+    )
+    bundle = SOURCE_ROOT / ".local/native-gui-development/Definitive SMR Launcher Apple Silicon.app"
+    require(
+        package["bundle"] == str(bundle)
+        and build["dist_root"] == str(bundle.parent)
+        and local_bundle_digest(bundle) == receipt["bundle_sha256"]
+        and receipt["frontend_sha256"] == job["catalogue_menu"]["native_gui"]["frontend_sha256"]
+        and receipt["executable_sha256"] == package["executable_sha256"],
+        "Exact local bundle/build correspondence required",
+    )
+
+
+def verify_adhoc_signature(bundle):
+    """After deep strict verification, require the real local signing identity."""
+    bundle = Path(bundle)
+    for path in (
+        bundle,
+        bundle / "Contents/MacOS/SMRLauncher",
+        bundle / "Contents/MacOS/Definitive SMR Launcher Apple Silicon",
+    ):
+        result = subprocess.run(
+            ["/usr/bin/codesign", "-dv", "--verbose=4", str(path)],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        output = result.stdout + result.stderr
+        require(
+            re.search(r"^Signature=adhoc$", output, re.M)
+            and re.search(r"^TeamIdentifier=not set$", output, re.M),
+            "Verified ad-hoc identity required",
+        )
 
 
 def verify_gui_config(job):
@@ -390,6 +529,10 @@ def pilot_class(common, catalogue_class):
                 "GUI receiver refused",
             )
             if action and action[0] == "perform-secondary-action":
+                require(
+                    self.config.get("package", {}).get("artifact_mode") != "local-development",
+                    "Local GUI uses direct section buttons without scrolling",
+                )
                 require(
                     stage == "gui_select"
                     and receiver == "provenance_control"
@@ -808,7 +951,11 @@ def pilot_class(common, catalogue_class):
             )
             self.decisions.stage(
                 "gui_select",
-                "Select the exact original card by current image. Search may return multiple cards. Click the current search field once, require fresh focused-field evidence, type the exact name and press Return to commit. Identify the fresh exact original card visually. Open Issues & Evidence / Exact Identities & Provenance. Observe the exact title/archive/variant/build. If provenance is below the current Issues & Evidence viewport, use only its fresh scroll area advertised perform-secondary-action scroll down, receiver provenance_control, at most twice. Inspect a fresh viewport after each action. Stop if it did not move down; a second action is allowed only if the first visibly advanced and metadata remains below. This is actor visual judgment, not machine scene proof. Never click Play here.",
+                (
+                    "Select the exact original card by current image. Search may return multiple cards. Click the current search field once, require fresh focused-field evidence, type the exact name and press Return to commit. Identify the fresh exact original card visually. Use the visible Issues & Evidence direct section button, receiver provenance_control and current image coordinates. Require a fresh image showing that section and the full expanded exact title/archive/variant/build above the warning body. Native button labels may not appear in provider treeText; image recognition remains mandatory. No popup navigation, scroll, restore-window or activation fallback. Never click Play here."
+                    if self.config["package"].get("artifact_mode") == "local-development"
+                    else "Select the exact original card by current image. Search may return multiple cards. Click the current search field once, require fresh focused-field evidence, type the exact name and press Return to commit. Identify the fresh exact original card visually. Open Issues & Evidence / Exact Identities & Provenance. Observe the exact title/archive/variant/build. If provenance is below the current Issues & Evidence viewport, use only its fresh scroll area advertised perform-secondary-action scroll down, receiver provenance_control, at most twice. Inspect a fresh viewport after each action. Stop if it did not move down; a second action is allowed only if the first visibly advanced and metadata remains below. This is actor visual judgment, not machine scene proof. Never click Play here."
+                ),
             )
             self.decisions.stage(
                 "gui_play",

@@ -344,6 +344,30 @@ package, preservation and mutable-preimage fields remain required. The final
 no-preparation warning is `catalogue_menu.warning`; it must not be substituted
 with the initial compatibility warning. No cached preparation descriptor applies.
 
+Released artifact verification remains the default, with no fallback on refusal.
+Only this native GUI purpose also supports explicit package `artifact_mode:
+"local-development"`. Its exact private build receipt binds base `5419a743`,
+the complete tracked/nonignored working-tree source and modes, the maintained
+`./scripts/build_macos.sh` invocation and pinned build dependencies, and the actual
+output bundle digest including internal symlinks and signature files. The frontend
+and bundled helper have separate exact digests. The closed output directory is
+`.local/native-gui-development`; never install this build over `/Applications`.
+Live deep strict codesign verification remains required, followed by actual ad-hoc
+identity checks on the bundle, frontend and helper. A local receipt contains no
+release tag, ZIP or Gatekeeper claims. Mixed fields, another purpose, source drift,
+missing/changed bundle contents and non-ad-hoc signatures refuse before launch.
+The source snapshot includes all accumulated local changes, rather than treating
+HEAD as the built source. Preserve the actual builder/toolchain receipt privately.
+
+Local GUI selection uses the visible direct Issues & Evidence section button and
+fresh full expanded archive/variant/build identity above the complete warning.
+It has no popup or scrolling fallback. Provider treeText may omit native button
+labels, so current rendered recognition remains required. Local app testing is
+separate from released-app acceptance and still needs a fresh reviewed finite job,
+current ownership/availability, platform permissions and runtime admission. All
+dispatch, observer, normal quit, restoration and save-preservation rules below
+remain unchanged.
+
 One exact LaunchServices frontend receives the immutable anchor+390 deadline.
 The owner binds its native lease and its Swift-owned backend's PID, birth and
 executable. Fresh visual decisions select the exact original card; substring

@@ -111,6 +111,184 @@ class GUIControls(unittest.TestCase):
     def decision(self, action=(), receiver="owned_window"):
         return dict(action=list(action), receiver=receiver)
 
+    def local_config(self):
+        job, admission = self.fixture.entry_contract(gui.PURPOSE)
+        config = job["catalogue_menu"]
+        config.pop("selection")
+        config.pop("preparation")
+        config["prepare_compatibility"] = False
+        config["warning"] = "Final synthetic warning"
+        root = self.fixture.owner.directory / "development-source"
+        root.mkdir()
+        (root / "requirements-build.txt").write_text("SyntheticBuildTool==1.0\n")
+        self.enterContext(patch.object(gui, "SOURCE_ROOT", root))
+        snapshot = dict(base=gui.LOCAL_BASE, files={"synthetic": {"sha256": "a" * 64}})
+        self.snapshot = self.enterContext(
+            patch.object(gui, "local_source_snapshot", return_value=snapshot)
+        )
+        bundle = root / ".local/native-gui-development/Definitive SMR Launcher Apple Silicon.app"
+        front = bundle / "Contents/MacOS/SMRLauncher"
+        helper = front.with_name("Definitive SMR Launcher Apple Silicon")
+        front.parent.mkdir(parents=True)
+        front.write_bytes(b"synthetic frontend; never executed")
+        helper.write_bytes(b"synthetic backend; never executed")
+        self.local_receipt = dict(
+            artifact_mode="local-development",
+            source_root=str(root),
+            source_snapshot=snapshot,
+            build=dict(
+                command=["./scripts/build_macos.sh"],
+                returncode=0,
+                signing="ad-hoc",
+                dist_root=str(bundle.parent),
+                dependencies={"SyntheticBuildTool": "1.0"},
+            ),
+            bundle_sha256=gui.local_bundle_digest(bundle),
+            frontend_sha256=gui.sha(front.read_bytes()),
+            executable_sha256=gui.sha(helper.read_bytes()),
+        )
+        self.local_receipt_path = root / "build-receipt.json"
+        config["package"] = dict(
+            artifact_mode="local-development",
+            bundle=str(bundle),
+            executable=str(helper),
+            executable_sha256=gui.sha(helper.read_bytes()),
+            receipt_path=str(self.local_receipt_path),
+        )
+        config["native_gui"] = dict(
+            display_name="Synthetic Canyon",
+            initial_warning="Initial synthetic warning",
+            frontend_sha256=gui.sha(front.read_bytes()),
+            launcher_files={},
+        )
+        self.save_local_receipt(config)
+        job["agent_save"] = dict(
+            token="SyntheticToken12345", filename="SyntheticToken12345.SMRailroadsSavedGame"
+        )
+        simulated_229(self, job)
+        return job, admission
+
+    def save_local_receipt(self, config):
+        self.local_receipt_path.write_bytes(catalogue.canonical(self.local_receipt))
+        config["package"]["receipt_sha256"] = gui.sha(self.local_receipt_path.read_bytes())
+
+    def test_local_artifact_actual_entry_and_wrong_purpose_refusal(self):
+        job, admission = self.local_config()
+        driver.verify_entry(job, admission, "a" * 64)
+        job["purpose"] = catalogue.DIRECT_LOAD_PURPOSE
+        with self.assertRaisesRegex(ControlRefused, "native GUI menu-only"):
+            gui.verify_local_artifact(job, self.local_receipt)
+
+    def test_local_artifact_rejects_mixed_release_mode_snapshot_and_build_drift(self):
+        import copy
+
+        job, _ = self.local_config()
+        original = copy.deepcopy(self.local_receipt)
+        for field, value in (
+            ("tag", "v0.28.3"),
+            ("zip_sha256", "b" * 64),
+            ("gatekeeper_accepted", True),
+        ):
+            with self.subTest(field=field):
+                self.local_receipt = dict(original, **{field: value})
+                self.save_local_receipt(job["catalogue_menu"])
+                with self.assertRaisesRegex(ControlRefused, "unmixed"):
+                    catalogue.verify_config(job)
+        self.local_receipt = original
+        self.local_receipt["source_snapshot"] = dict(base="f" * 40, files={})
+        self.save_local_receipt(job["catalogue_menu"])
+        with self.assertRaisesRegex(ControlRefused, "source drift"):
+            catalogue.verify_config(job)
+        self.local_receipt["source_snapshot"] = self.snapshot.return_value
+        self.local_receipt["build"]["returncode"] = 1
+        self.save_local_receipt(job["catalogue_menu"])
+        with self.assertRaisesRegex(ControlRefused, "build inputs"):
+            catalogue.verify_config(job)
+        self.local_receipt["build"]["returncode"] = 0
+        self.save_local_receipt(job["catalogue_menu"])
+        job["catalogue_menu"]["package"]["artifact_mode"] = "released"
+        with self.assertRaisesRegex(ControlRefused, "Artifact mode refused"):
+            catalogue.verify_config(job)
+
+    def test_local_artifact_rejects_changed_missing_and_external_bundle_content(self):
+        job, _ = self.local_config()
+        package = job["catalogue_menu"]["package"]
+        helper = Path(package["executable"])
+        original = helper.read_bytes()
+        helper.write_bytes(original + b"changed")
+        with self.assertRaisesRegex(ControlRefused, "bundle/build"):
+            catalogue.verify_config(job)
+        helper.unlink()
+        with self.assertRaisesRegex(ControlRefused, "bundle/build"):
+            catalogue.verify_config(job)
+        helper.write_bytes(original)
+        (helper.parent / "outside").symlink_to(self.local_receipt_path)
+        with self.assertRaisesRegex(ControlRefused, "External bundle link"):
+            catalogue.verify_config(job)
+
+    def test_released_artifact_checks_remain_default_and_never_fall_back(self):
+        job = self.fixture.save_config(empty=True)
+        self.assertIs(catalogue.verify_config(job), job["catalogue_menu"])
+        path = Path(job["catalogue_menu"]["package"]["receipt_path"])
+        receipt = catalogue.decode(path.read_bytes())
+        receipt["gatekeeper_accepted"] = False
+        path.write_bytes(catalogue.canonical(receipt))
+        job["catalogue_menu"]["package"]["receipt_sha256"] = gui.sha(path.read_bytes())
+        with patch.object(gui, "verify_local_artifact") as local:
+            with self.assertRaisesRegex(ControlRefused, "released artifact"):
+                catalogue.verify_config(job)
+        local.assert_not_called()
+
+    def test_local_bundle_internal_links_are_bound_and_adhoc_identity_is_real(self):
+        job, _ = self.local_config()
+        bundle = Path(job["catalogue_menu"]["package"]["bundle"])
+        (bundle / "frontend-link").symlink_to("Contents/MacOS/SMRLauncher")
+        digest = gui.local_bundle_digest(bundle)
+        self.assertNotEqual(digest, self.local_receipt["bundle_sha256"])
+        with patch.object(
+            gui.subprocess,
+            "run",
+            return_value=SimpleNamespace(
+                stdout="", stderr="Signature=adhoc\nTeamIdentifier=not set\n"
+            ),
+        ) as sign:
+            gui.verify_adhoc_signature(bundle)
+            self.assertEqual(sign.call_count, 3)
+            sign.return_value.stderr = "Signature=Developer ID\nTeamIdentifier=ABCDEFGHIJ\n"
+            with self.assertRaisesRegex(ControlRefused, "ad-hoc identity"):
+                gui.verify_adhoc_signature(bundle)
+
+    def test_local_gui_direct_selection_and_no_scroll_fallback(self):
+        owner = self.owner
+        owner.job["agent_save"] = dict(token="SyntheticToken12345")
+        owner.config["package"] = dict(artifact_mode="local-development")
+        frame = self.selected()
+        self.assertEqual(
+            owner.validate_gui_action(
+                "gui_select",
+                self.decision(["click", "--x", "400", "--y", "200"], "provenance_control"),
+                frame,
+            ),
+            ["click", "--x", "400", "--y", "200"],
+        )
+        owner.validate_gui_observation("gui_select", frame, self.decision())
+        frame["treeText"] = scroll_detail_tree("Synthetic Canyon")
+        with self.assertRaisesRegex(ControlRefused, "without scrolling"):
+            owner.validate_gui_action(
+                "gui_select",
+                self.decision(
+                    [
+                        "perform-secondary-action",
+                        "--element-index",
+                        "30",
+                        "--action",
+                        "scroll down",
+                    ],
+                    "provenance_control",
+                ),
+                frame,
+            )
+
     def test_initial_and_final_reviews_never_substitute_for_each_other(self):
         owner = self.owner
         owner.gui_play_sent = True
