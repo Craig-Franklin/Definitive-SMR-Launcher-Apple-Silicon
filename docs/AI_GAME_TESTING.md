@@ -102,6 +102,14 @@ each threatened test-autosave preimage using the existing fsynced copy path,
 checks every copy before restoration, preserves all named saves, and retains
 new files. It does not import a checkpoint or register another profile.
 
+After an independently settled owned gameplay run rotates those test slots, an
+optional exact autosave-origin receipt binds the current facts separately. It
+requires the matching packaged commit, settled service, exact observed normal
+game exit and positive owned process absences, unchanged retained named save,
+restoration and released lease. Both origin receipts remain immutable inputs;
+the original two-launch save proof is still mandatory. Unknown or stopped-only
+runs cannot supply this continuation proof. No history is rewritten.
+
 A runtime grant still needs a concrete short gameplay plan based on observed
 supply, demand and geometry, with bounded discovery. The actor must freshly
 recognize the reopened world and pause before that useful gameplay. Current

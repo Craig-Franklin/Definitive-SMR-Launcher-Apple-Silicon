@@ -221,7 +221,18 @@ def gameplay_origin(job):
     proof = config["resume_save"]
     require(
         set(proof)
-        == {"token", "filename", "facts", "autosaves", "origin_readback", "origin_sha256"}
+        in (
+            {"token", "filename", "facts", "autosaves", "origin_readback", "origin_sha256"},
+            {
+                "token",
+                "filename",
+                "facts",
+                "autosaves",
+                "origin_readback",
+                "origin_sha256",
+                "autosave_origin",
+            },
+        )
         and type(proof["token"]) is str
         and re.fullmatch(r"[A-Za-z0-9]{19}", proof["token"])
         and proof["filename"] == proof["token"] + ".SMRailroadsSavedGame",
@@ -305,12 +316,79 @@ def gameplay_origin(job):
         and {name for name in slots if "Saves/" + name in old} == set(proof["autosaves"]),
         "Every pre-existing test autosave needs exact owned origin",
     )
-    for name, facts in proof["autosaves"].items():
-        observed = (
-            origin["current_test_autosave"]
-            if name == "Auto0.SMRailroadsSavedGame"
-            else origin["new_target_files_retained"].get("Saves/" + name)
+    observed_autosaves = {
+        name: origin["current_test_autosave"]
+        if name == "Auto0.SMRailroadsSavedGame"
+        else origin["new_target_files_retained"].get("Saves/" + name)
+        for name in slots
+    }
+    if "autosave_origin" in proof:
+        # A later owned gameplay run may rotate test slots. Keep the original
+        # two-launch named-save proof above; bind the current slots separately.
+        reference = proof["autosave_origin"]
+        require(
+            type(reference) is dict and set(reference) == {"path", "sha256"},
+            "Exact gameplay autosave origin required",
         )
+        raw = read_plain(reference["path"])
+        require(
+            sha(raw) == reference["sha256"]
+            and config["preservation"]["immutable"].get(reference["path"])
+            == file_facts(reference["path"]),
+            "Gameplay autosave origin changed or missing from immutable baseline",
+        )
+        recent = decode(raw)
+        service, exited = recent["service_settled"], recent["exact_normal_exit"]
+        process = exited["process"]
+        require(
+            recent["job"] != origin["job"]
+            and recent["invocation"]["returncode"] == 0
+            and all(
+                recent[key] is True
+                for key in (
+                    "lease_released",
+                    "preservation_verified",
+                    "terminal_finished",
+                    "game_absent",
+                    "normal_exit",
+                )
+            )
+            and recent["exact_retained_named_save"] == proof["facts"]
+            and service["commit_sent"] is True
+            and service["eof_closed"] is True
+            and service["reaped"] is True
+            and service["returncode"] == 0
+            and service["pending"] is None
+            and service["commit_response"]["ok"] is True
+            and service["commit_response"]["data"]["target"] == expected
+            and service["commit_response"]["data"]["launched_profile_id"]
+            == config["target"]["profile_id"]
+            and type(process["pid"]) is int
+            and process["pid"] > 0
+            and type(process["birth"]) is str
+            and process["birth"].isdigit()
+            and process["executable"] == exits[0]["process"]["executable"]
+            and exited["job"] == recent["job"]
+            and exited["result"]["state"] == "observed_exited"
+            and exited["result"]["terminal"] is True
+            and exited["result"]["stop_requested"] is False
+            and all(
+                any(
+                    row["pid"] == pid and row["role"] == role and row["positive_absence"] is True
+                    for row in recent["owned_absences"]
+                )
+                for pid, role in ((process["pid"], "game"), (service["pid"], "packaged_service"))
+            ),
+            "Test autosaves require a settled exact owned gameplay normal exit",
+        )
+        observed_autosaves = {
+            name: recent["current_test_autosaves"].get(
+                name, recent["new_target_files_retained"].get("Saves/" + name)
+            )
+            for name in slots
+        }
+    for name, facts in proof["autosaves"].items():
+        observed = observed_autosaves[name]
         require(
             facts == observed == old.get("Saves/" + name) and 0 < facts["bytes"] <= 512 * 1024**2,
             "Test autosave was not retained from the exact settled trial",
@@ -1088,7 +1166,10 @@ def pilot_class(common, agent_class):
             )
             paths = [self.app.catalogue_file, self.app.originals / (record.archive_sha256 + ".7z")]
             if self.job["purpose"] == GAMEPLAY_PURPOSE:
-                paths.append(Path(gameplay_origin(self.job)["origin_readback"]))
+                proof = gameplay_origin(self.job)
+                paths.append(Path(proof["origin_readback"]))
+                if "autosave_origin" in proof:
+                    paths.append(Path(proof["autosave_origin"]["path"]))
             if self.job["purpose"] == SAVE_PURPOSE and "owned_autosave" in self.config:
                 paths.append(Path(autosave_origin(self.job)["origin_readback"]))
             if self.config["prepare_compatibility"]:

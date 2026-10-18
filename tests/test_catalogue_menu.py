@@ -548,6 +548,233 @@ class CatalogueRestoreTests(unittest.TestCase):
         )
         return job
 
+    def gameplay_after_owned_trial(self, job):
+        proof = job["catalogue_menu"]["resume_save"]
+        original = menu.decode(Path(proof["origin_readback"]).read_bytes())
+        name = "Auto0.SMRailroadsSavedGame"
+        (self.owner.profiles.live / "Saves" / name).write_bytes(b"rotated by owned gameplay")
+        proof["autosaves"][name] = menu.file_facts(self.owner.profiles.live / "Saves" / name)
+        job["catalogue_menu"]["preservation"]["target_files"] = menu.tree_files(
+            self.owner.profiles.live
+        )
+        service = dict(original["service_settled"][0], pid=300)
+        exited = menu.decode(menu.canonical(original["exact_normal_exit"]))
+        exited["job"] = "later-owned-gameplay"
+        recent = dict(
+            job=exited["job"],
+            invocation=dict(returncode=0),
+            normal_exit=True,
+            lease_released=True,
+            preservation_verified=True,
+            terminal_finished=True,
+            game_absent=True,
+            service_settled=service,
+            exact_normal_exit=exited,
+            exact_retained_named_save=proof["facts"],
+            current_test_autosaves=proof["autosaves"],
+            new_target_files_retained={},
+            owned_absences=[
+                dict(pid=100, role="game", positive_absence=True),
+                dict(pid=300, role="packaged_service", positive_absence=True),
+            ],
+        )
+        path = self.owner.directory / "later-gameplay-root.json"
+        path.write_bytes(menu.canonical(recent))
+        proof["autosave_origin"] = dict(path=str(path), sha256=menu.sha(path.read_bytes()))
+        job["catalogue_menu"]["preservation"]["immutable"][str(path)] = menu.file_facts(path)
+        return path, recent
+
+    def test_actual_gameplay_prepare_keeps_both_origin_files_in_baseline(self):
+        # Real temporary application/profile preparation through the first copy.
+        # Only actor provenance, signature subprocesses and outer owner guards
+        # are synthetic; no installed application or data is used.
+        from smr_launcher import editions
+
+        app, profiles = self.owner.app, self.owner.profiles
+        original = next(
+            row for row in app.catalogue() if row.profile_id == self.owner.job["return_profile"]
+        )
+        returned = self.target.profile_id
+        with patch.object(editions, "SUPPORTED_GAME", app.installation.executable_sha256):
+            target = app.create_edition(original, editor=False, difficulty=True)
+        self.target = target
+        self.owner.job["return_profile"] = returned
+        app.activate(target.profile_id)
+        job = self.gameplay_config()
+        later, recent = self.gameplay_after_owned_trial(job)
+        profiles.switch(job["return_profile"])
+        root = profiles._profile_path(target.profile_id)
+        (root / "Logs").mkdir(exist_ok=True)
+        config = job["catalogue_menu"]
+        config["target"].update(
+            archive_sha256=target.archive_sha256,
+            variant_id=target.variant_id,
+            scenarios=list(target.scenarios),
+            assets_sha256=profiles._asset_hash(root),
+        )
+        config["selection"].update(
+            profile_id=original.profile_id,
+            archive_sha256=original.archive_sha256,
+            variant_id=original.variant_id,
+            scenarios=list(original.scenarios),
+        )
+        job["game_sha256"] = app.installation.executable_sha256
+        job["actor_binding"] = {}
+        expected = {
+            k: config["selection"][k] for k in ("profile_id", "archive_sha256", "variant_id")
+        }
+        expected["game_executable_sha256"] = job["game_sha256"]
+        proof = config["resume_save"]
+        first = Path(proof["origin_readback"])
+        origin = menu.decode(first.read_bytes())
+        for service in origin["service_settled"]:
+            service["commit_response"]["data"].update(
+                target=expected, launched_profile_id=target.profile_id
+            )
+        first.write_bytes(menu.canonical(origin))
+        proof["origin_sha256"] = menu.sha(first.read_bytes())
+        recent["service_settled"]["commit_response"]["data"].update(
+            target=expected, launched_profile_id=target.profile_id
+        )
+        later.write_bytes(menu.canonical(recent))
+        proof["autosave_origin"]["sha256"] = menu.sha(later.read_bytes())
+        immutable = [
+            app.catalogue_file,
+            app.originals / (target.archive_sha256 + ".7z"),
+            first,
+            later,
+        ]
+        for base in (
+            profiles._profile_path(original.profile_id),
+            app.prepared / original.prepared_directory,
+            app.imports / target.imported_directory,
+            app.prepared / target.prepared_directory,
+            profiles._profile_path("original-game"),
+        ):
+            immutable.extend(base / name for name in menu.tree_files(base))
+        config["preservation"] = dict(
+            return_files=menu.tree_files(profiles.live),
+            target_files=menu.tree_files(root),
+            sibling_saves=menu.sibling_saves(app, target.profile_id, job["return_profile"]),
+            immutable={str(path): menu.file_facts(path) for path in immutable},
+        )
+        job["source_original"] = dict(
+            archive_sha256=target.archive_sha256,
+            variant_id=target.variant_id,
+            scenario=target.scenarios[0],
+        )
+        menu.verify_config(job)
+        owner_type = menu.pilot_class(None, type("SyntheticOuterOwner", (), {}))
+        owner = owner_type.__new__(owner_type)
+        owner.__dict__.update(vars(self.owner))
+        owner.config, owner.job = config, job
+        owner.verify_available = lambda: None
+        owner.verify_code = lambda: None
+
+        class FirstCopyReached(Exception):
+            pass
+
+        with (
+            patch(
+                "agent_actor_binding.collect_actor",
+                return_value=dict(
+                    model="gpt-6.1-sol",
+                    effort="high",
+                    approval_policy="never",
+                    sandbox="danger-full-access",
+                ),
+            ),
+            patch.object(menu.subprocess, "run") as signature,
+            patch.object(menu, "preserve_autosave_preimage", side_effect=FirstCopyReached) as copy,
+        ):
+            with self.assertRaises(FirstCopyReached):
+                owner.prepare()
+        self.assertEqual(signature.call_count, 2)
+        self.assertEqual(copy.call_count, 1)
+        self.assertIn(str(first), owner.baseline["immutable"])
+        self.assertIn(str(later), owner.baseline["immutable"])
+        self.assertEqual(owner.baseline, config["preservation"])
+        self.assertEqual(profiles._state()["active"], job["return_profile"])
+
+    def test_gameplay_rotated_autosave_needs_separate_settled_origin(self):
+        job = self.gameplay_config()
+        self.gameplay_after_owned_trial(job)
+        self.assertIs(menu.verify_config(job), self.owner.config)
+        del job["catalogue_menu"]["resume_save"]["autosave_origin"]
+        with self.assertRaisesRegex(ControlRefused, "Test autosave was not retained"):
+            menu.gameplay_origin(job)
+
+    def test_gameplay_recent_origin_refuses_unknown_launch_exit_and_changed_files(self):
+        job = self.gameplay_config()
+        path, original = self.gameplay_after_owned_trial(job)
+        proof = job["catalogue_menu"]["resume_save"]
+        for cause in (
+            "pending",
+            "wrong-target",
+            "stopped",
+            "not-absent",
+            "wrong-executable",
+            "wrong-job",
+            "named",
+            "autosave",
+            "not-immutable",
+        ):
+            with self.subTest(cause=cause):
+                value = menu.decode(menu.canonical(original))
+                if cause == "pending":
+                    value["service_settled"]["pending"] = "unknown"
+                elif cause == "wrong-target":
+                    value["service_settled"]["commit_response"]["data"]["launched_profile_id"] = (
+                        "foreign"
+                    )
+                elif cause == "stopped":
+                    value["exact_normal_exit"]["result"]["stop_requested"] = True
+                elif cause == "not-absent":
+                    value["owned_absences"][1]["positive_absence"] = False
+                elif cause == "wrong-executable":
+                    value["exact_normal_exit"]["process"]["executable"] = "/foreign/game"
+                elif cause == "wrong-job":
+                    value["exact_normal_exit"]["job"] = "foreign"
+                elif cause == "named":
+                    value["exact_retained_named_save"]["inode"] += 1
+                elif cause == "autosave":
+                    value["current_test_autosaves"]["Auto0.SMRailroadsSavedGame"]["inode"] += 1
+                path.write_bytes(menu.canonical(value))
+                proof["autosave_origin"]["sha256"] = menu.sha(path.read_bytes())
+                job["catalogue_menu"]["preservation"]["immutable"][str(path)] = menu.file_facts(
+                    path
+                )
+                if cause == "not-immutable":
+                    del job["catalogue_menu"]["preservation"]["immutable"][str(path)]
+                with self.assertRaises(ControlRefused):
+                    menu.gameplay_origin(job)
+
+    def test_real_gameplay_entry_decisions_after_rotation_keep_original_named_proof(self):
+        job, admission, route = self.gameplay_route()
+        self.gameplay_after_owned_trial(job)
+        driver.verify_entry(job, admission, "a" * 64)
+        with (
+            patch.object(menu.time, "monotonic", side_effect=lambda: route.clock[0]),
+            patch.object(
+                driver, "NATIVE_SOURCE_SHA256", driver.sha(Path(job["native_source"]).read_bytes())
+            ),
+        ):
+            result = route.run_trial()
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(route.owner.launches, 1)
+        self.assertTrue(result["restored"] and result["terminal_finished"])
+        proof = job["catalogue_menu"]["resume_save"]
+        original = Path(proof["origin_readback"])
+        value = menu.decode(original.read_bytes())
+        value["final_normal_exit"] = False
+        original.write_bytes(menu.canonical(value))
+        proof["origin_sha256"] = menu.sha(original.read_bytes())
+        job["catalogue_menu"]["preservation"]["immutable"][str(original)] = menu.file_facts(
+            original
+        )
+        with self.assertRaisesRegex(ControlRefused, "both normal exits"):
+            menu.gameplay_origin(job)
+
     def test_gameplay_config_binds_named_save_and_every_owned_autosave(self):
         job = self.gameplay_config()
         self.assertIs(menu.verify_config(job), self.owner.config)
