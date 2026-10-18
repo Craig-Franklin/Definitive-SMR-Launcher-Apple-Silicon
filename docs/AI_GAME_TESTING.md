@@ -185,6 +185,23 @@ proposal requests another frame without input. Native mutable calls have their
 own bounded completion wait; successful dispatch freshness does not mean that
 the game must finish loading within the screenshot's freshness interval.
 
+## Direct catalogue scenario load
+
+`ONE_AGENT_PACKAGED_CATALOGUE_LOAD_V1` reuses the existing direct packaged Play
+and load lifecycle for one exact existing two-scenario edition with distinct
+selector basenames. It never prepares or selects a cached repair. The fresh job
+binds both retained scenario paths, the one requested scenario path and its exact
+rendered title/subtitle, edition/build/assets, complete warning and current return.
+The target must have no pre-existing saves. Save, Load Game, construction and
+purchases are excluded; original observer, input, quit and restoration bounds apply.
+
+Select the requested scenario from the current visible game list and verify its
+title/subtitle before one Start. A matching profile or main menu does not prove
+the selected scenario. Then observe its playable world/HUD and fresh paused state,
+quit normally and verify preservation. An absent or ambiguous title means a
+no-input partial followed by normal quit. Evidence for one scenario never verifies
+the other scenario or establishes gameplay, repair or save/reopen acceptance.
+
 ## Gameplay and exact save/reopen
 
 1. Observe the selected scenario and start it. Dismiss initial news, pause using

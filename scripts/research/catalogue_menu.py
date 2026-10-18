@@ -29,6 +29,7 @@ from unique_save_file import signature
 PURPOSE = "ONE_AGENT_PACKAGED_CATALOGUE_MENU_V1"
 CACHED_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_MENU_V1"
 LOAD_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_LOAD_V1"
+DIRECT_LOAD_PURPOSE = "ONE_AGENT_PACKAGED_CATALOGUE_LOAD_V1"
 SAVE_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_SAVE_REOPEN_V1"
 GAMEPLAY_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_GAMEPLAY_V1"
 GUI_PURPOSE = "ONE_AGENT_NATIVE_GUI_CATALOGUE_MENU_V1"
@@ -425,7 +426,15 @@ def verify_config(job):
     target = config["target"]
     require(
         job["purpose"]
-        in (PURPOSE, CACHED_PURPOSE, LOAD_PURPOSE, SAVE_PURPOSE, GAMEPLAY_PURPOSE, GUI_PURPOSE),
+        in (
+            PURPOSE,
+            CACHED_PURPOSE,
+            LOAD_PURPOSE,
+            DIRECT_LOAD_PURPOSE,
+            SAVE_PURPOSE,
+            GAMEPLAY_PURPOSE,
+            GUI_PURPOSE,
+        ),
         "Closed catalogue purpose required",
     )
     cached = job["purpose"] in (CACHED_PURPOSE, LOAD_PURPOSE, SAVE_PURPOSE, GAMEPLAY_PURPOSE)
@@ -435,7 +444,7 @@ def verify_config(job):
             "Gameplay resumes one retained save without new-save intent",
         )
         gameplay_origin(job)
-    if job["purpose"] in (LOAD_PURPOSE, SAVE_PURPOSE):
+    if job["purpose"] in (LOAD_PURPOSE, DIRECT_LOAD_PURPOSE, SAVE_PURPOSE):
         title = config.get("scenario_title")
         require(
             type(title) is str
@@ -463,6 +472,23 @@ def verify_config(job):
             )
         else:
             require(not saves, "First scenario load requires a target without pre-existing saves")
+    direct_load = job["purpose"] == DIRECT_LOAD_PURPOSE
+    if direct_load:
+        require(
+            "agent_save" not in job
+            and not {"selection", "preparation", "owned_autosave", "resume_save"}.intersection(
+                config
+            ),
+            "Direct catalogue load cannot prepare, resume or save",
+        )
+        subtitle = config.get("scenario_subtitle")
+        require(
+            type(subtitle) is str
+            and 0 < len(subtitle) <= 256
+            and subtitle.strip() == subtitle
+            and all(ord(c) >= 32 and ord(c) != 127 for c in subtitle),
+            "Exact reviewed scenario subtitle required",
+        )
     require(
         set(target) == {"profile_id", "archive_sha256", "variant_id", "scenarios", "assets_sha256"},
         "Exact catalogue target fields required",
@@ -470,8 +496,13 @@ def verify_config(job):
     require(
         target["profile_id"] == "map-" + target["variant_id"]
         and target["profile_id"] != job["return_profile"]
-        and len(target["scenarios"]) == 1,
-        "Distinct single-scenario edition required",
+        and (
+            len(target["scenarios"]) == 2
+            and len({Path(s).name.casefold() for s in target["scenarios"]}) == 2
+            if direct_load
+            else len(target["scenarios"]) == 1
+        ),
+        "Distinct edition with exact scenario selection required",
     )
     require(
         config["prepare_compatibility"] is cached
@@ -479,6 +510,8 @@ def verify_config(job):
         and (
             0 < len(config["warning"]) <= 16384
             if cached or job["purpose"] == GUI_PURPOSE
+            else len(config["warning"]) <= 16384
+            if direct_load
             else config["warning"] == ""
         ),
         "Exact direct or cached preparation/warning contract required",
@@ -503,7 +536,11 @@ def verify_config(job):
     require(
         source["archive_sha256"] == target["archive_sha256"]
         and source["variant_id"] == target["variant_id"]
-        and source["scenario"] == target["scenarios"][0],
+        and (
+            source["scenario"] in target["scenarios"]
+            if direct_load
+            else source["scenario"] == target["scenarios"][0]
+        ),
         "Journal target correspondence required",
     )
     package = config["package"]
@@ -1430,7 +1467,7 @@ def pilot_class(common, agent_class):
                 return self.observe_save_reopen()
             observations = {}
             partial = None
-            loading = self.job["purpose"] == LOAD_PURPOSE
+            loading = self.job["purpose"] in (LOAD_PURPOSE, DIRECT_LOAD_PURPOSE)
             instructions = (
                 (
                     "launcher",
@@ -1452,6 +1489,13 @@ def pilot_class(common, agent_class):
                         "world",
                         "Use visible Single Player and verify the selected scenario title is exactly "
                         + repr(self.config["scenario_title"])
+                        + (
+                            " and subtitle "
+                            + repr(self.config["scenario_subtitle"])
+                            + ". Select that scenario from this edition's visible list; do not assume its default selection matches"
+                            if self.job["purpose"] == DIRECT_LOAD_PURPOSE
+                            else ""
+                        )
                         + " before starting once. Observe its playable world, HUD funds/year and actual city; pause using the visible control. No construction, purchases, Load, saves or settings changes. If the exact scenario cannot be verified or loading cannot finish promptly, return partial with no input; normal quit follows.",
                     ),
                 )
@@ -1469,7 +1513,9 @@ def pilot_class(common, agent_class):
             return dict(
                 status="safety_stop",
                 cause=(
-                    "packaged_cached_scenario_load_requires_review"
+                    "packaged_direct_catalogue_scenario_load_requires_review"
+                    if self.job["purpose"] == DIRECT_LOAD_PURPOSE
+                    else "packaged_cached_scenario_load_requires_review"
                     if loading
                     else "packaged_catalogue_menu_requires_review"
                 ),

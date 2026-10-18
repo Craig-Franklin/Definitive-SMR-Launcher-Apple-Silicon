@@ -660,6 +660,37 @@ class AgentRouteTests(unittest.TestCase):
         )
         self.assertFalse(self.owner.running)
 
+    def test_direct_catalogue_load_has_load_only_decisions_without_save_intent(self):
+        self.owner.launch()
+        self.owner.job["purpose"] = driver.CATALOGUE_LOAD_PURPOSE
+        del self.owner.job["agent_save"]
+        self.assertEqual(
+            driver.admission_decisions(driver.CATALOGUE_LOAD_PURPOSE),
+            ("ADMIT_ONE_AGENT_PACKAGED_CATALOGUE_LOAD", "GO_ONE_AGENT_PACKAGED_CATALOGUE_LOAD"),
+        )
+        for stage in ("menu", "filename", "saved", "reopened", "action", "continued"):
+            with self.subTest(stage=stage), self.assertRaisesRegex(ControlRefused, "LOAD stage"):
+                self.owner.decisions.stage(stage, "Forbidden for direct load")
+        self.owner.decisions.stage("world", "Select exact reviewed Solo scenario")
+        self.quit_confirmation = True
+        self.owner.normal_quit("finished", None)
+        self.assertFalse(self.owner.running)
+        self.assertEqual(set(self.stage_indexes), {"world", "finished"})
+        frame = dict(window=dict(width=200, height=100))
+        for action in (
+            ["hotkey", "--key", "CmdOrCtrl+S"],
+            ["drag", "--from-x", "1", "--from-y", "2", "--to-x", "3", "--to-y", "4"],
+        ):
+            with self.assertRaises(ControlRefused):
+                driver.validate_action(
+                    "world",
+                    action,
+                    frame,
+                    None,
+                    "owned_window",
+                    purpose=driver.CATALOGUE_LOAD_PURPOSE,
+                )
+
     def test_load_without_save_intent_submits_semantic_play_once(self):
         self.owner.launch()
         self.owner.job["purpose"] = driver.CACHED_LOAD_PURPOSE

@@ -38,6 +38,8 @@ TRANSPORT_PURPOSE = "ONE_AGENT_UK_TRANSPORT_ACTION_V1"
 CATALOGUE_MENU_PURPOSE = "ONE_AGENT_PACKAGED_CATALOGUE_MENU_V1"
 CACHED_MENU_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_MENU_V1"
 CACHED_LOAD_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_LOAD_V1"
+CATALOGUE_LOAD_PURPOSE = "ONE_AGENT_PACKAGED_CATALOGUE_LOAD_V1"
+LOAD_PURPOSES = (CACHED_LOAD_PURPOSE, CATALOGUE_LOAD_PURPOSE)
 CACHED_SAVE_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_SAVE_REOPEN_V1"
 CACHED_GAMEPLAY_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_GAMEPLAY_V1"
 GUI_MENU_PURPOSE = "ONE_AGENT_NATIVE_GUI_CATALOGUE_MENU_V1"
@@ -104,6 +106,7 @@ def admission_decisions(purpose):
         CATALOGUE_MENU_PURPOSE: "AGENT_PACKAGED_CATALOGUE_MENU",
         CACHED_MENU_PURPOSE: "AGENT_PACKAGED_CACHED_MENU",
         CACHED_LOAD_PURPOSE: "AGENT_PACKAGED_CACHED_LOAD",
+        CATALOGUE_LOAD_PURPOSE: "AGENT_PACKAGED_CATALOGUE_LOAD",
         CACHED_SAVE_PURPOSE: "AGENT_PACKAGED_CACHED_SAVE_REOPEN",
         CACHED_GAMEPLAY_PURPOSE: "AGENT_PACKAGED_CACHED_GAMEPLAY",
         GUI_MENU_PURPOSE: "AGENT_NATIVE_GUI_CATALOGUE_MENU",
@@ -259,7 +262,7 @@ class AgentJobControl(ActiveJobControl):
 def validate_action(stage, action, frame, token, receiver, *, purpose=None):
     """Closed native input grammar; target selectors and focus recovery refuse."""
     require(
-        purpose != CACHED_LOAD_PURPOSE or stage in ("launcher", "world", "finished"),
+        purpose not in LOAD_PURPOSES or stage in ("launcher", "world", "finished"),
         "LOAD stage cannot save, reopen or construct",
     )
     require(
@@ -373,7 +376,7 @@ class AgentDecisions:
             stage in STAGES + MENU_STAGES + GUI_STAGES and stage not in self.used_stages,
             "Unknown or repeated agent stage",
         )
-        loading = owner.job["purpose"] == CACHED_LOAD_PURPOSE
+        loading = owner.job["purpose"] in LOAD_PURPOSES
         gameplay = owner.job["purpose"] == CACHED_GAMEPLAY_PURPOSE
         require(
             not loading or stage in ("launcher", "world", "finished"),
@@ -524,7 +527,7 @@ class AgentDecisions:
             require(time.monotonic() < deadline, "Fixed agent stage deadline expired")
             if decision["choice"] == "partial":
                 if (
-                    (owner.job["purpose"] == CACHED_LOAD_PURPOSE and stage == "world")
+                    (owner.job["purpose"] in LOAD_PURPOSES and stage == "world")
                     or (
                         owner.job["purpose"] == CACHED_SAVE_PURPOSE
                         and stage in ("world", "filename", "reopened")
@@ -696,7 +699,7 @@ class AgentDecisions:
         ):
             raise TransportIncomplete("Finite transport stage action budget exhausted")
         if (
-            (owner.job["purpose"] == CACHED_LOAD_PURPOSE and stage == "world")
+            (owner.job["purpose"] in LOAD_PURPOSES and stage == "world")
             or (owner.job["purpose"] == CACHED_SAVE_PURPOSE and stage in ("world", "filename"))
             or (gameplay and stage in ("reopened", "action", "continued"))
         ):
@@ -1541,6 +1544,7 @@ def verify_entry(job, admission, job_sha):
         CATALOGUE_MENU_PURPOSE,
         CACHED_MENU_PURPOSE,
         CACHED_LOAD_PURPOSE,
+        CATALOGUE_LOAD_PURPOSE,
         CACHED_SAVE_PURPOSE,
         CACHED_GAMEPLAY_PURPOSE,
         GUI_MENU_PURPOSE,
@@ -1605,6 +1609,7 @@ def verify_entry(job, admission, job_sha):
         CATALOGUE_MENU_PURPOSE,
         CACHED_MENU_PURPOSE,
         CACHED_LOAD_PURPOSE,
+        CATALOGUE_LOAD_PURPOSE,
         CACHED_SAVE_PURPOSE,
         CACHED_GAMEPLAY_PURPOSE,
         GUI_MENU_PURPOSE,
@@ -1658,6 +1663,7 @@ def main():
         CATALOGUE_MENU_PURPOSE,
         CACHED_MENU_PURPOSE,
         CACHED_LOAD_PURPOSE,
+        CATALOGUE_LOAD_PURPOSE,
         CACHED_SAVE_PURPOSE,
         CACHED_GAMEPLAY_PURPOSE,
         GUI_MENU_PURPOSE,

@@ -1111,6 +1111,115 @@ class CatalogueRestoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ControlRefused, "source closure drift"):
             driver.verify_entry(job, admission, "a" * 64)
 
+    def direct_load_entry(self):
+        job, admission = self.entry_contract(driver.CATALOGUE_LOAD_PURPOSE)
+        config = job["catalogue_menu"]
+        config.pop("selection")
+        config.pop("preparation")
+        config.update(
+            prepare_compatibility=False,
+            warning="Exact synthetic warning retained",
+            scenario_title="Synthetic Solo",
+            scenario_subtitle="Version 2",
+        )
+        config["target"]["scenarios"].append("UserMaps/Synthetic/RRT_Scenario_Solo.xml")
+        job["source_original"]["scenario"] = config["target"]["scenarios"][1]
+        return job, admission
+
+    def test_direct_catalogue_load_real_entry_decisions_world_and_normal_quit(self):
+        job, admission = self.direct_load_entry()
+        route = route_fixtures.AgentRouteTests()
+        route.setUp()
+        self.addCleanup(route.doCleanups)
+        owner = route.owner
+        route.cached_save_owner()  # Reuse the catalogue class and closed physical lifecycle.
+        job["job"] = "synthetic-direct-two-scenario-load"
+        job["game_sha256"] = owner.job["game_sha256"]
+        job["orca"] = "/synthetic/orca"
+        job["root"]["session"] = "synthetic-root"
+        job["actor_binding"]["provider_runtime_id"] = "synthetic-runtime"
+        owner.job, owner.config = job, job["catalogue_menu"]
+        owner.diagnostic = owner.config["target"]["profile_id"]
+        driver.verify_entry(job, admission, "a" * 64)
+        route.quit_confirmation = True
+        with patch.object(
+            driver, "NATIVE_SOURCE_SHA256", driver.sha(Path(job["native_source"]).read_bytes())
+        ):
+            result = route.run_trial()
+        self.assertEqual(result["errors"], [])
+        self.assertTrue(result["stopped"] and result["restored"] and result["terminal_finished"])
+        self.assertEqual(owner.launches, 1)
+        self.assertEqual(set(route.stage_indexes), {"launcher", "world", "finished"})
+        request = next(
+            menu.decode(p.read_bytes())
+            for p in route.directory.glob("*-request.json")
+            if menu.decode(p.read_bytes())["stage"] == "world"
+        )
+        self.assertIn("'Synthetic Solo' and subtitle 'Version 2'", request["instruction"])
+        self.assertIn("do not assume its default selection", request["instruction"])
+        self.assertEqual(len(owner.config["target"]["scenarios"]), 2)
+        self.assertEqual(result["outcome"]["world_loaded"], "agent_observed")
+        self.assertFalse(
+            result["outcome"]["gameplay_credit"] or result["outcome"]["save_reopen_credit"]
+        )
+        self.assertEqual(
+            route.actions[-2:],
+            [["hotkey", "--key", "CmdOrCtrl+Q"], ["press-key", "--key", "Return"]],
+        )
+        self.assertEqual(route.keep.read_bytes(), b"preserved original synthetic save")
+
+    def test_direct_catalogue_load_refuses_other_selection_preparation_and_old_grants(self):
+        job, admission = self.direct_load_entry()
+        driver.verify_entry(job, admission, "a" * 64)
+        config = job["catalogue_menu"]
+        original = menu.decode(menu.canonical(job))
+        for cause in (
+            "missing-scenario",
+            "duplicate-basename",
+            "one-scenario",
+            "prepare",
+            "save",
+            "resume",
+            "subtitle",
+            "saves",
+        ):
+            with self.subTest(cause=cause):
+                job = menu.decode(menu.canonical(original))
+                config = job["catalogue_menu"]
+                if cause == "missing-scenario":
+                    job["source_original"]["scenario"] = "UserMaps/Other.xml"
+                elif cause == "duplicate-basename":
+                    config["target"]["scenarios"][1] = "CustomAssets/synthetic.xml"
+                elif cause == "one-scenario":
+                    config["target"]["scenarios"].pop()
+                elif cause == "prepare":
+                    config["prepare_compatibility"] = True
+                elif cause == "save":
+                    job["agent_save"] = dict(
+                        token="SyntheticToken12345",
+                        filename="SyntheticToken12345.SMRailroadsSavedGame",
+                    )
+                elif cause == "resume":
+                    config["resume_save"] = {}
+                elif cause == "subtitle":
+                    config["scenario_subtitle"] = ""
+                else:
+                    config["preservation"]["target_files"]["Saves/personal.sav"] = {}
+                with self.assertRaises(ControlRefused):
+                    driver.verify_entry(job, admission, "a" * 64)
+        job = original
+        admission["decision"] = driver.admission_decisions(driver.CACHED_LOAD_PURPOSE)[0]
+        with self.assertRaisesRegex(ControlRefused, "Exact root grant"):
+            driver.verify_entry(job, admission, "a" * 64)
+        admission["decision"] = driver.admission_decisions(driver.CATALOGUE_LOAD_PURPOSE)[0]
+        path = Path(admission["review"]["path"])
+        review = menu.decode(path.read_bytes())
+        review["decision"] = driver.admission_decisions(driver.CACHED_LOAD_PURPOSE)[1]
+        path.write_bytes(menu.canonical(review))
+        admission["review"]["sha256"] = driver.sha(path.read_bytes())
+        with self.assertRaisesRegex(ControlRefused, "Exact agent composition review"):
+            driver.verify_entry(job, admission, "a" * 64)
+
     def test_real_load_entry_to_actual_decisions_and_catalogue_quit_without_save_intent(self):
         route = route_fixtures.AgentRouteTests()
         route.setUp()
@@ -1624,6 +1733,28 @@ class CatalogueCompositionTests(unittest.TestCase):
             self.assertEqual(result["world_loaded"], "unknown")
             self.assertIsNotNone(result["partial_reason"])
             self.assertFalse(owner.menu_work_active)
+
+    def test_direct_load_missing_selected_title_keeps_other_scenario_unproven_and_quits(self):
+        cls = menu.pilot_class(SimpleNamespace(), object)
+        owner = cls.__new__(cls)
+        owner.job = dict(purpose=menu.DIRECT_LOAD_PURPOSE)
+        owner.config = dict(scenario_title="Synthetic Solo", scenario_subtitle="Version 2")
+        owner.anchor = time.monotonic()
+        calls = []
+
+        def stage(name, instruction):
+            calls.append(name)
+            if name == "world":
+                raise menu.MenuIncomplete("Only the unselected AI title is visible")
+            return dict(stage=name)
+
+        owner.decisions = SimpleNamespace(stage=stage)
+        owner.normal_quit = lambda *args: calls.append("quit")
+        result = owner.observe()
+        self.assertEqual(calls, ["launcher", "world", "quit"])
+        self.assertEqual(result["world_loaded"], "unknown")
+        self.assertIn("unselected AI", result["partial_reason"])
+        self.assertFalse(result["gameplay_credit"] or result["save_reopen_credit"])
 
     def test_load_requires_bounded_exact_reviewed_title(self):
         for title in (None, "", "wrong\nline", " padded", "x" * 257):
