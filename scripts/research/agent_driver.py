@@ -1087,9 +1087,16 @@ def pilot_class(common):
             while True:
                 require(time.monotonic() < deadline, "Game window readiness deadline expired")
                 attempt += 1
+                enumeration_started = time.monotonic()
                 result = self.native(
                     label + f"Windows{attempt:02d}", ["list-windows"], None, deadline
                 )["result"]
+                self.last_window_enumeration = dict(
+                    started=enumeration_started,
+                    finished=time.monotonic(),
+                    receipt_label=label + f"Windows{attempt:02d}",
+                    pid=self.native_receiver().pid,
+                )
                 require(
                     type(result.get("app", {}).get("pid")) is int
                     and result["app"]["pid"] == self.native_receiver().pid,
@@ -1100,6 +1107,11 @@ def pilot_class(common):
                     type(windows) is list and all(type(w) is dict for w in windows),
                     "Window enumeration shape",
                 )
+                if not windows and not hasattr(self, "last_agent_window"):
+                    if not hasattr(self, "first_empty_window_enumeration"):
+                        self.first_empty_window_enumeration = dict(self.last_window_enumeration)
+                        self.empty_window_enumeration_count = 0
+                    self.empty_window_enumeration_count += 1
                 previous = getattr(self, "last_agent_window_process", None)
                 # SAVE work cannot rediscover a lost game window indefinitely.
                 # Options, new receivers and normal Quit keep their startup/exit paths.

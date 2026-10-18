@@ -11,7 +11,44 @@ func emit(_ value: Any) {
     let bytes = try! JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
     FileHandle.standardOutput.write(bytes + Data([10]))
 }
+// Keep this projection separate from the API call so privacy/error controls use
+// the exact production serializer without querying any desktop windows.
+func pidWindowMetadata(_ rows: [[String: Any]]?, pid: Int32, access: Bool,
+                       started: Double, finished: Double) -> [String: Any] {
+    func number(_ value: Any?, integer: Bool = false) -> Any {
+        guard let n = value as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(),
+              n.doubleValue.isFinite,
+              !integer || n.doubleValue.rounded() == n.doubleValue else { return NSNull() }
+        return n
+    }
+    let windows: Any = rows.map { rows in rows.compactMap { row -> [String: Any]? in
+        guard let owner = number(row[kCGWindowOwnerPID as String], integer: true) as? NSNumber,
+              owner.doubleValue == Double(pid) else { return nil }
+        var bounds: Any = NSNull()
+        if let b = row[kCGWindowBounds as String] as? [String: Any] {
+            bounds = ["x": number(b["X"]), "y": number(b["Y"]),
+                      "width": number(b["Width"]), "height": number(b["Height"])]
+        }
+        let onscreen = row[kCGWindowIsOnscreen as String] as? NSNumber
+        return ["window": number(row[kCGWindowNumber as String], integer: true), "pid": pid,
+                "bounds": bounds, "layer": number(row[kCGWindowLayer as String], integer: true),
+                "on_screen": onscreen.flatMap { CFGetTypeID($0) == CFBooleanGetTypeID() ? $0 : nil } as Any? ?? NSNull(),
+                "alpha": number(row[kCGWindowAlpha as String]),
+                "sharing": number(row[kCGWindowSharingState as String], integer: true)]
+    }} as Any? ?? NSNull()
+    return ["status": rows == nil ? "enumeration_error" : access ? "ok" : "permission_limited",
+            "pid": pid, "started_unix_seconds": started, "finished_unix_seconds": finished,
+            "screen_recording_authorized": access, "windows": windows]
+}
 let args = CommandLine.arguments
+if args.count == 3 && args[1] == "enumerate-pid", let pid = Int32(args[2]), pid > 0 {
+    let access = CGPreflightScreenCaptureAccess() // Check only; never request permission.
+    let started = Date().timeIntervalSince1970
+    let rows = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]]
+    emit(pidWindowMetadata(rows, pid: pid, access: access,
+                           started: started, finished: Date().timeIntervalSince1970))
+    exit(rows == nil ? 2 : 0)
+}
 if args.count == 3 && args[1] == "inspect", let id = UInt32(args[2]), id > 0 {
     guard let rows = CGWindowListCopyWindowInfo([.optionOnScreenAboveWindow,.optionIncludingWindow], id) as? [[String: Any]] else { fail("Window metadata unavailable") }
     let matches = rows.filter { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == id }
@@ -88,4 +125,4 @@ if args.count == 2 && args[1] == "fixture" {
     withExtendedLifetime(windows) { app.run() }
     exit(0)
 }
-fail("Usage: WindowProbe inspect ID | image PNG | fixture")
+fail("Usage: WindowProbe enumerate-pid PID | inspect ID | image PNG | fixture")

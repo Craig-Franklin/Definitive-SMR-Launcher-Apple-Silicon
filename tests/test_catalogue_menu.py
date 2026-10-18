@@ -2426,6 +2426,20 @@ class MissingWindowObservationTests(unittest.TestCase):
             raise ChildFailed(
                 Completion(tuple(argv), 300, 3, b"", self.clock, self.clock + timeout, True)
             )
+        if getattr(self, "enumeration_error", False):
+            raise ChildFailed(
+                Completion(
+                    tuple(argv),
+                    300,
+                    2,
+                    menu.canonical(self.metadata),
+                    self.clock,
+                    self.clock + timeout,
+                    True,
+                )
+            )
+        if hasattr(self, "process_after_child"):
+            self.current = self.process_after_child
         return menu.canonical(self.metadata)
 
     def native(self, label, action, window, deadline):
@@ -2529,6 +2543,10 @@ class MissingWindowObservationTests(unittest.TestCase):
         self.assertEqual(self.native_calls, [])
 
     def test_probe_purpose_and_closure_drift_refuse(self):
+        self.owner.job["purpose"] = menu.DIRECT_LOAD_PURPOSE
+        self.assertEqual(
+            menu.verify_window_probe(self.owner.job), self.owner.config["window_probe"]
+        )
         self.owner.job["purpose"] = menu.SAVE_PURPOSE
         with self.assertRaisesRegex(ControlRefused, "load-only"):
             self.observe()
@@ -2539,15 +2557,138 @@ class MissingWindowObservationTests(unittest.TestCase):
             self.observe()
         self.assertEqual(self.child_calls, [])
 
-    def test_no_probe_no_prior_window_and_normal_quit_keep_existing_path(self):
+    def test_no_probe_and_normal_quit_keep_existing_path(self):
         self.owner.menu_work_active = False
         self.assertIsNone(self.observe())
         self.owner.menu_work_active = True
         del self.owner.last_agent_window
-        self.assertIsNone(self.observe())
         self.owner.config.clear()
         self.assertIsNone(self.observe())
         self.assertEqual(self.child_calls, [])
+
+    def first_scene(self):
+        del self.owner.last_agent_window
+        self.owner.launch_deadline = 120
+        self.clock = 110
+        self.metadata = dict(
+            status="ok",
+            pid=123,
+            started_unix_seconds=10,
+            finished_unix_seconds=11,
+            screen_recording_authorized=True,
+            windows=[
+                dict(
+                    window=501,
+                    pid=123,
+                    bounds=None,
+                    layer=3,
+                    on_screen=False,
+                    alpha=0,
+                    sharing=None,
+                )
+            ],
+        )
+
+    def test_actual_first_empty_frame_records_one_sample_and_skew_then_refuses(self):
+        self.first_scene()
+        with self.assertRaisesRegex(ControlRefused, "metadata recorded; owned cleanup"):
+            self.owner.agent_frame("Agent001", 480)
+        self.assertEqual(len(self.child_calls), 1)
+        self.assertEqual(self.child_calls[0][0][1:], ["enumerate-pid", "123"])
+        self.assertEqual(len(self.native_calls), 1)
+        record = self.records["Agent001FirstWindowMetadataObservation.json"]
+        self.assertEqual(record["process_before"], record["process_after"])
+        self.assertFalse(record["concurrent"])
+        self.assertEqual(record["gap_after_provider_seconds"], 0)
+        self.assertAlmostEqual(record["total_observation_span_seconds"], 0.2)
+        self.assertEqual(record["metadata"], self.metadata)
+        self.assertNotIn("usable", record["metadata"])
+
+    def test_early_empty_recovers_before_trigger_without_metadata_query(self):
+        self.first_scene()
+        self.clock = 100
+        initial = [True]
+        original = self.owner.native
+
+        def native(label, action, window, deadline):
+            if initial[0]:
+                initial[0] = False
+                self.clock += 0.1
+                return dict(result=dict(app=dict(pid=123), windows=[]))
+            self.recovery = True
+            return original(label, action, window, deadline)
+
+        self.owner.native = native
+        self.owner.retain_frame = lambda *args: {}
+        self.owner.scene_frame = lambda *args: None
+        _, _, window = self.owner.agent_frame("Agent001", 480)
+        self.assertEqual(window, 501)
+        self.assertLess(self.clock, 110)
+        self.assertEqual(self.child_calls, [])
+        self.assertFalse(getattr(self.owner, "window_loss_observed", False))
+
+    def test_persistent_empty_waits_until_original_110_then_samples_only_once(self):
+        self.first_scene()
+        self.clock = 100
+        with self.assertRaisesRegex(ControlRefused, "metadata recorded; owned cleanup"):
+            self.owner.agent_frame("Agent001", 480)
+        self.assertEqual(len(self.child_calls), 1)
+        record = self.records["Agent001FirstWindowMetadataObservation.json"]
+        self.assertGreaterEqual(record["metadata_started"], 110)
+        self.assertLessEqual(record["metadata_finished"], 120)
+        self.assertEqual(record["cutoff"], 120)
+        self.assertGreaterEqual(record["observed_empty_interval_seconds"], 10)
+        self.assertEqual(record["empty_provider_reads"], len(self.native_calls))
+        self.assertGreater(record["empty_provider_reads"], 1)
+        self.assertEqual(record["provider"]["receipt_label"], self.native_calls[-1][0])
+
+    def test_first_scene_error_and_limited_empty_stay_distinct(self):
+        for error in (False, True):
+            with self.subTest(error=error):
+                if hasattr(self.owner, "last_agent_window"):
+                    self.first_scene()
+                self.owner.window_loss_observed = False
+                self.enumeration_error = error
+                self.metadata.update(
+                    status="enumeration_error" if error else "permission_limited",
+                    screen_recording_authorized=False,
+                    windows=None if error else [],
+                )
+                with self.assertRaisesRegex(ControlRefused, "metadata recorded; owned cleanup"):
+                    self.owner.agent_frame("Agent001", 480)
+                record = self.records["Agent001FirstWindowMetadataObservation.json"]
+                self.assertEqual(record["metadata"]["status"], self.metadata["status"])
+        self.assertEqual(len(self.child_calls), 2)  # One per independent synthetic subcase.
+
+    def test_first_scene_post_child_executable_drift_keeps_raw_result_unaccepted(self):
+        self.first_scene()
+        self.process_after_child = Process(123, 456, "/synthetic/replaced-game")
+        with self.assertRaisesRegex(ControlRefused, "process drift"):
+            self.owner.agent_frame("Agent001", 480)
+        self.assertEqual(len(self.child_calls), 1)
+        self.assertEqual(self.records, {})
+
+    def test_first_scene_foreign_row_is_refused_before_observation_acceptance(self):
+        self.first_scene()
+        self.metadata["windows"][0]["pid"] = 999
+        with self.assertRaisesRegex(ControlRefused, "row identity drift"):
+            self.owner.agent_frame("Agent001", 480)
+        self.assertEqual(len(self.child_calls), 1)
+        self.assertEqual(self.records, {})
+
+    def test_first_scene_pid_birth_drift_and_expired_ingress_never_accept_metadata(self):
+        self.first_scene()
+        self.current = Process(123, 999)  # Same PID, different birth.
+        with self.assertRaisesRegex(ControlRefused, "process drift"):
+            self.owner.agent_frame("Agent001", 480)
+        self.assertEqual(self.spawn_calls, [])
+        self.current = self.owner.game
+        self.owner.window_loss_observed = False
+        self.ingress_seconds = 11
+        with self.assertRaisesRegex(ControlRefused, "cap expired"):
+            self.owner.agent_frame("Agent002", 480)
+        self.assertEqual(self.spawn_calls, [])
+        self.assertEqual(self.records, {})
 
     def complete_load(self, recovery):
         fixture = CatalogueRestoreTests()

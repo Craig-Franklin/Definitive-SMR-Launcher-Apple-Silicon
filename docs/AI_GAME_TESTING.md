@@ -493,6 +493,31 @@ window ID and omits visibility, alpha and sharing state. Missing old-window
 metadata is inconclusive about replacement windows, crashes or hangs. Owned
 cleanup stop is distinct from a normal quit and earns no normal-exit credit.
 
+For a separately admitted first-scene diagnostic, the same pinned helper also
+supports `enumerate-pid PID`. It uses the native all-window metadata API, filters
+to that PID before serialization, and emits only ID/PID/bounds/layer/on-screen/
+alpha/sharing values. Missing values remain null; API failure and a missing
+screen-recording authorization are distinct from an empty successful result.
+The existing direct/cached load-only caller uses ordinary bounded first-scene
+waiting until a still-empty provider read at original anchor+110, reserving the
+observation budget inside original anchor+120. Early empty reads consume no
+metadata query. It checks exact process birth/executable before and after one
+bounded metadata read, records the observed empty-read span and final read skew,
+then requires owned cleanup without another poll, capture, focus action or input.
+An earlier valid scene means this condition was not reproduced. Only after the
+existing guarded Feral Play input and a fresh proven main menu may the actor send
+launcher observed/action=[], then fresh world partial/action=[] before scenario
+input, followed by existing normal quit/fresh confirmation. Direct main-menu
+arrival without that preceding startup input, or an unknown scene, requires
+stop/action=[] and existing owned cleanup; do not claim normal quit. No dummy
+input or scenario Start, save or gameplay is permitted. Consecutive observations
+are not concurrent.
+This API's returned windows do not establish complete OS/AX window absence or
+usability. A known provider exclusion can support a candidate explanation;
+matching known predicates plus an empty provider list is a discrepancy. Empty
+results or missing relevant fields remain inconclusive. No game admission follows
+from the helper's source/build or synthetic checks.
+
 `ONE_AGENT_PACKAGED_CACHED_SAVE_REOPEN_V1` is the distinct unique-save/exact-reopen
 integration purpose. It uses two recorded packaged Play transactions in the same
 480-second operation: first normal exit and exact stop must precede relaunch;

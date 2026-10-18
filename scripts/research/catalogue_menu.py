@@ -660,9 +660,11 @@ def verify_config(job):
 
 
 def verify_window_probe(job):
-    """Only an exact existing read-only inspect helper in a load-only job."""
+    """Only an exact read-only window metadata helper in a load-only job."""
     probe = job["catalogue_menu"]["window_probe"]
-    require(job["purpose"] == LOAD_PURPOSE, "Window observation is load-only")
+    require(
+        job["purpose"] in (LOAD_PURPOSE, DIRECT_LOAD_PURPOSE), "Window observation is load-only"
+    )
     require(
         set(probe) == {"executable", "executable_sha256", "source", "source_sha256"},
         "Exact window probe binding required",
@@ -1111,17 +1113,18 @@ def pilot_class(common, agent_class):
             )
 
         def observe_missing_window(self, label, deadline):
-            if not (
-                "window_probe" in self.config
-                and getattr(self, "menu_work_active", False)
-                and hasattr(self, "last_agent_window")
-            ):
+            if not ("window_probe" in self.config and getattr(self, "menu_work_active", False)):
+                return None
+            first_scene = not hasattr(self, "last_agent_window")
+            if first_scene and time.monotonic() < self.launch_deadline - 10:
                 return None
             require(
                 not getattr(self, "window_loss_observed", False), "Window loss already observed"
             )
             self.window_loss_observed = True
             limit = min(deadline, self.anchor + 390, time.monotonic() + 10)
+            if first_scene:
+                limit = min(limit, self.launch_deadline)
 
             def guard():
                 require(time.monotonic() < limit, "Lost-window observation cap expired")
@@ -1137,6 +1140,108 @@ def pilot_class(common, agent_class):
             def spawn(argv, **kwargs):
                 guard()
                 return subprocess.Popen(argv, **kwargs)
+
+            if first_scene:
+                # One persistent-empty sample inside the original launch interval.
+                probe = verify_window_probe(self.job)
+                provider = self.last_window_enumeration
+                before = asdict(guard())
+                require(provider["pid"] == self.game.pid, "Probe/provider receiver drift")
+                started = time.monotonic()
+                require(
+                    self.anchor <= provider["started"] <= provider["finished"] <= started,
+                    "Provider observation clock drift",
+                )
+                child_label = label + "FirstWindowMetadata"
+                argv = [probe["executable"], "enumerate-pid", str(self.game.pid)]
+                code = 0
+                try:
+                    raw = common.bounded_child(
+                        argv,
+                        self.directory,
+                        child_label,
+                        guard,
+                        min(2, limit - started),
+                        False,
+                        spawn=spawn,
+                    )
+                except common.ChildFailed as failure:
+                    done = failure.completion
+                    require(
+                        done.argv == tuple(argv)
+                        and done.returncode == 2
+                        and done.reaped
+                        and done.completed_at <= limit,
+                        "Unresolved first-window metadata completion",
+                    )
+                    raw, code = done.stdout, done.returncode
+                after = asdict(guard())
+                finished = time.monotonic()
+                metadata = decode(raw)
+                require(
+                    type(metadata) is dict
+                    and set(metadata)
+                    == {
+                        "status",
+                        "pid",
+                        "started_unix_seconds",
+                        "finished_unix_seconds",
+                        "screen_recording_authorized",
+                        "windows",
+                    }
+                    and type(metadata["pid"]) is int
+                    and metadata["pid"] == self.game.pid
+                    and type(metadata["screen_recording_authorized"]) is bool
+                    and all(
+                        type(metadata[k]) in (int, float) and math.isfinite(metadata[k])
+                        for k in ("started_unix_seconds", "finished_unix_seconds")
+                    ),
+                    "First-window metadata shape or identity drift",
+                )
+                if code == 2:
+                    require(
+                        metadata["status"] == "enumeration_error" and metadata["windows"] is None,
+                        "First-window enumeration error required",
+                    )
+                else:
+                    expected = (
+                        "ok" if metadata["screen_recording_authorized"] else "permission_limited"
+                    )
+                    require(
+                        metadata["status"] == expected and type(metadata["windows"]) is list,
+                        "First-window enumeration status drift",
+                    )
+                    for row in metadata["windows"]:
+                        require(
+                            type(row) is dict
+                            and set(row)
+                            == {"window", "pid", "bounds", "layer", "on_screen", "alpha", "sharing"}
+                            and type(row["pid"]) is int
+                            and row["pid"] == self.game.pid,
+                            "First-window metadata row identity drift",
+                        )
+                self.write(
+                    child_label + "Observation.json",
+                    dict(
+                        process_before=before,
+                        process_after=after,
+                        provider=provider,
+                        metadata_started=started,
+                        metadata_finished=finished,
+                        gap_after_provider_seconds=started - provider["finished"],
+                        total_observation_span_seconds=finished - provider["started"],
+                        first_empty_provider=self.first_empty_window_enumeration,
+                        empty_provider_reads=self.empty_window_enumeration_count,
+                        observed_empty_interval_seconds=(
+                            provider["finished"] - self.first_empty_window_enumeration["started"]
+                        ),
+                        concurrent=False,
+                        metadata=metadata,
+                        cutoff=limit,
+                        classification="uninterpreted; API metadata does not prove window usability or OS/AX absence",
+                    ),
+                )
+                require(False, "First-scene metadata recorded; owned cleanup required")
 
             for attempt in (1, 2):
                 probe = verify_window_probe(self.job)
