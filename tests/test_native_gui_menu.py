@@ -329,7 +329,6 @@ from runner_journal import RunJournal
 class ComposedGUIOwner(unittest.TestCase):
     def setUp(self):
         self.stack = ExitStack()
-        self.addCleanup(self.stack.close)
         self.catalogue_fixture = fixtures.CatalogueRestoreTests()
         self.catalogue_fixture.setUp()
         self.addCleanup(self.catalogue_fixture.doCleanups)
@@ -338,6 +337,7 @@ class ComposedGUIOwner(unittest.TestCase):
         c = control_fixtures.Fixture()
         c.setUp()
         self.addCleanup(c.doCleanups)
+        self.addCleanup(self.stack.close)
         self.control_fixture = c
         root = Path(os.environ["SMR_GUI_COMMON_ROOT"]).resolve()
         self.stack.enter_context(
