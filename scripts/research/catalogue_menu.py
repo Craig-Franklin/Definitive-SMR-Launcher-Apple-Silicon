@@ -1644,19 +1644,28 @@ def pilot_class(common, agent_class):
                 )
                 observations["action"] = self.decisions.stage(
                     "action",
-                    "Use only the current world and the granted concrete gameplay plan. Verify actual source "
-                    "supply and destination demand before construction. Build the short connection/required "
-                    "station, purchase an available engine and the matching relevant cars only when supported "
-                    "by current observations. Record actual purchase/route and rendered car appearance. "
-                    "Do not infer a route, goods or purchase from an unpurchased configuration. "
-                    "No searching beyond the grant's discovery bound; otherwise partial with no input.",
+                    "Use only the current paused world and the concrete granted acceptance task. For a "
+                    "station/annex construction-only task, require the actual selected location, visible owned "
+                    "track/endpoint and a valid placement/connection cue before building only the planned "
+                    "structure and necessary short rail. Stock is not a construction prerequisite. Distinguish "
+                    "the observed station from an industry annex; never claim one as the other. For transport "
+                    "tasks, verify actual source supply and destination demand before construction; build the "
+                    "short connection/required station, purchase an available engine and matching relevant "
+                    "cars only when current observations support them. Record actual purchase/route and "
+                    "rendered car appearance; an unpurchased configuration proves none of these. Never search "
+                    "for an alternative site or exceed the grant's discovery bound; partial with no input if "
+                    "a prerequisite fails.",
                     validate=self.verify_gameplay_save,
                 )
                 observations["continued"] = self.decisions.stage(
                     "continued",
-                    "Run the established route within the original bound. Observe matching cars loaded, "
-                    "arrival and unloading/delivery separately. Movement or income alone does not prove cargo. "
-                    "No saving, new route search or extended play; partial with no input if evidence is unavailable.",
+                    "Follow the same granted task within the original bound. For construction-only, verify "
+                    "the visibly committed new structure, its actual type and supported connection, plus a "
+                    "corroborating transaction/state change; preview, hover or funds alone are insufficient. "
+                    "Then finish without train purchase or delivery work; normal quit follows. For transport, "
+                    "run the established route and separately observe matching cars loaded, arrival and "
+                    "unloading/delivery. Movement or income alone does not prove cargo. No saving, alternative "
+                    "site/new route search or extended play; partial with no input if evidence is unavailable.",
                     validate=self.verify_gameplay_save,
                 )
             except MenuIncomplete as exc:

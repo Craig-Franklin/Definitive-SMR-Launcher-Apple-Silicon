@@ -110,9 +110,17 @@ restoration and released lease. Both origin receipts remain immutable inputs;
 the original two-launch save proof is still mandatory. Unknown or stopped-only
 runs cannot supply this continuation proof. No history is rewritten.
 
-A runtime grant still needs a concrete short gameplay plan based on observed
-supply, demand and geometry, with bounded discovery. The actor must freshly
-recognize the reopened world and pause before that useful gameplay. Current
+A runtime grant still needs one concrete short acceptance task with bounded
+discovery. Transport requires current supply, demand and geometry, actual train/car
+purchase and separate loading/delivery observations. A construction-only task may
+build only its planned station/annex and necessary short rail after fresh location,
+owned track/endpoint and valid placement/connection evidence. Stock is not a
+construction prerequisite. Verify the committed structure's actual type and
+connection plus a transaction/state change; preview, hover or funds alone cannot
+prove construction. An industry annex cannot earn station-construction credit.
+Its continued stage verifies that result and ends through normal quit, without
+forcing train or delivery work. No alternative-site search is permitted.
+The actor must freshly recognize the reopened world and pause before useful gameplay. Current
 input grammar, one-use admission, 16-decision stages, 390-second work cutoff,
 480-second action deadline and 900-second cleanup bound remain unchanged.
 A no-input partial takes the existing normal-quit path; unknown dispatch/input

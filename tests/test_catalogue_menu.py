@@ -1115,6 +1115,72 @@ class CatalogueRestoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ControlRefused, "Exact root grant"):
             driver.verify_entry(job, admission, "a" * 64)
 
+    def test_real_gameplay_construction_task_can_finish_without_train_or_delivery(self):
+        job, admission, route = self.gameplay_route()
+        exact = route.reply_transform
+        route.reply_transform = lambda value: dict(
+            exact(value),
+            observation="Synthetic granted station-only task: actual station committed, connected; transaction recorded. No train or cargo claimed.",
+        )
+        with patch.object(
+            driver, "NATIVE_SOURCE_SHA256", driver.sha(Path(job["native_source"]).read_bytes())
+        ):
+            result = route.run_trial()
+        self.assertEqual(result["errors"], [])
+        self.assertTrue(result["restored"] and result["terminal_finished"])
+        requests = [
+            menu.decode(p.read_bytes()) for p in route.owner.directory.glob("Agent*-request.json")
+        ]
+        work = {
+            r["stage"]: r["instruction"] for r in requests if r["stage"] in ("action", "continued")
+        }
+        self.assertIn("station/annex construction-only task", work["action"])
+        self.assertIn(
+            "valid placement/connection cue before building only the planned", work["action"]
+        )
+        self.assertIn("Stock is not a construction prerequisite", work["action"])
+        self.assertIn("never claim one as the other", work["action"])
+        self.assertIn("preview, hover or funds alone are insufficient", work["continued"])
+        self.assertIn(
+            "finish without train purchase or delivery work; normal quit follows", work["continued"]
+        )
+        self.assertEqual(set(route.stage_indexes), {"reopened", "action", "continued", "finished"})
+        self.assertEqual(route.actions.count(["hotkey", "--key", "CmdOrCtrl+Q"]), 1)
+        self.assertFalse(result["outcome"]["gameplay_credit"])
+        self.assertFalse(result["outcome"]["cargo_credit"])
+
+    def test_real_gameplay_transport_task_retains_supply_purchase_and_delivery_requirements(self):
+        job, admission, route = self.gameplay_route()
+        with patch.object(
+            driver, "NATIVE_SOURCE_SHA256", driver.sha(Path(job["native_source"]).read_bytes())
+        ):
+            result = route.run_trial()
+        self.assertEqual(result["errors"], [])
+        requests = [
+            menu.decode(p.read_bytes()) for p in route.owner.directory.glob("Agent*-request.json")
+        ]
+        work = {
+            r["stage"]: r["instruction"] for r in requests if r["stage"] in ("action", "continued")
+        }
+        self.assertIn(
+            "For transport tasks, verify actual source supply and destination demand before construction",
+            work["action"],
+        )
+        self.assertIn(
+            "purchase an available engine and matching relevant cars only when current observations support them",
+            work["action"],
+        )
+        self.assertIn("an unpurchased configuration proves none of these", work["action"])
+        self.assertIn("For transport, run the established route", work["continued"])
+        self.assertIn(
+            "separately observe matching cars loaded, arrival and unloading/delivery",
+            work["continued"],
+        )
+        self.assertIn("Movement or income alone does not prove cargo", work["continued"])
+        self.assertIn("Never search for an alternative site", work["action"])
+        self.assertIn("alternative site/new route search", work["continued"])
+        self.assertFalse(result["outcome"]["cargo_credit"])
+
     def test_gameplay_partial_takes_normal_quit_without_action(self):
         job, admission, route = self.gameplay_route()
         route.reply_transform = lambda value: dict(
