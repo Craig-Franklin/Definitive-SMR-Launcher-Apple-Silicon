@@ -334,7 +334,7 @@ def pilot_class(common, catalogue_class):
             self.gui_selection_bound = False
             self.gui_launch_started = False
             self.gui_frames = None
-            self.gui_play_action = None
+            self.gui_confirm_action = None
             self.gui_scroll_dispatches = 0
             self.gui_scroll_permit = None
 
@@ -351,7 +351,7 @@ def pilot_class(common, catalogue_class):
             # the raw enumeration and never apply this exception to the game.
             if len(windows) == 1 or label not in ("MachineOriginalReview", "MachineFinalReview"):
                 return windows
-            self.require_binding_window()
+            self.guard_running()
             require(
                 self.gui_phase
                 and self.gui_play_sent
@@ -504,7 +504,7 @@ def pilot_class(common, catalogue_class):
             if self.gui_bound:
                 require(active == self.config["target"]["profile_id"], "Bound game profile drift")
             games = self.monitor.games()
-            if not self.gui_confirm_sent:
+            if not self.gui_confirm_sent or not hasattr(self, "request"):
                 require(
                     not games and active == self.job["return_profile"],
                     "Unexpected pre-confirmation dispatch",
@@ -671,7 +671,6 @@ def pilot_class(common, catalogue_class):
                     "Fresh enabled Play required; actor must identify the visible control",
                 )
                 self.gui_play_sent = True
-                self.gui_play_action = tuple(action)
             elif stage == "gui_original":
                 require(
                     self.gui_play_sent and not self.gui_original_sent,
@@ -696,6 +695,7 @@ def pilot_class(common, catalogue_class):
                     "Exact final review confirmation required",
                 )
                 self.gui_confirm_sent = True
+                self.gui_confirm_action = tuple(action)
             return action
 
         def require_binding_window(self):
@@ -704,19 +704,23 @@ def pilot_class(common, catalogue_class):
                 "Original observer request+20 binding deadline expired",
             )
 
-        def arm_gui_play_observer(self):
-            # The actor's validated Play decision precedes the one original arm.
+        def arm_gui_confirmation_observer(self):
+            # Both preflight reviews precede the one original arm. The final sheet
+            # and its exact launch control have already been freshly validated.
             # Record before calling the maintained arm; failures cannot re-arm.
             require(
                 self.job["purpose"] == PURPOSE
                 and self.gui_phase
                 and self.gui_selection_bound
                 and self.gui_play_sent
+                and self.gui_original_sent
+                and self.gui_confirm_sent
+                and self.gui_confirm_action is not None
                 and not hasattr(self, "request")
                 and self.observer is None
                 and not hasattr(self, "gui_arm_started")
                 and not getattr(self, "inside_mutation", False),
-                "One observer arm after validated GUI Play, outside the input guard, required",
+                "One observer arm after validated final GUI confirmation, outside the input guard, required",
             )
             self.guard_running()
             require(
@@ -729,12 +733,12 @@ def pilot_class(common, catalogue_class):
 
         def publish_play_request(self):
             # Called inside the existing final input guard, after the actor's
-            # fresh Play decision and delivery validation. No nested guard.
+            # fresh final confirmation and delivery validation. No nested guard.
             require(not hasattr(self, "request"), "One original GUI request only")
             require(
                 time.monotonic() < min(self.gui_arm_started + 20, self.launch_deadline)
                 and self.observer.poll() is None,
-                "Original observer ready+20 request window expired before Play",
+                "Original observer ready+20 request window expired before final confirmation",
             )
             self.request = time.monotonic()
             self.request_wall_us = time.time_ns() // 1000
@@ -769,7 +773,7 @@ def pilot_class(common, catalogue_class):
                 ),
             )
             # The wrapper's actual one-second tick must consume the request
-            # before Play. A publication near ready+20 is not an acknowledgment.
+            # before final confirmation. Publication near ready+20 is not acknowledgment.
             from wrapper import bounded
 
             limit = min(self.gui_arm_started + 20, self.request + 20, self.launch_deadline)
@@ -778,7 +782,7 @@ def pilot_class(common, catalogue_class):
                 require(not self.control.cancelled, "Cancelled while awaiting request consumption")
                 require(
                     time.monotonic() < limit and self.observer.poll() is None,
-                    "Original observer request window expired before acknowledgment; no Play input",
+                    "Original observer request window expired before acknowledgment; no final confirmation input",
                 )
                 state = decode(bounded(self.helper_packet / "state.json"))
                 require(
@@ -815,12 +819,15 @@ def pilot_class(common, catalogue_class):
             self.verify_provider()
             self.verify_preinput_contract()
             self.control._poll_locked()
-            require(not self.control.cancelled, "Cancelled before acknowledged Play dispatch")
+            require(
+                not self.control.cancelled,
+                "Cancelled before acknowledged final confirmation dispatch",
+            )
             if self.delivery_validation:
                 self.delivery_validation()
             require(
                 time.monotonic() < limit and self.observer.poll() is None,
-                "Original observer request window expired after acknowledgment; no Play input",
+                "Original observer request window expired after acknowledgment; no final confirmation input",
             )
             self.open_attempted = True
 
@@ -850,13 +857,13 @@ def pilot_class(common, catalogue_class):
                     )
                     self.gui_scroll_dispatches += 1
                     self.gui_scroll_permit = None
-                if self.gui_phase and self.gui_play_sent and not hasattr(self, "request"):
+                if self.gui_phase and self.gui_confirm_sent and not hasattr(self, "request"):
                     require(
                         argv[:2] == [self.job["orca"], "computer"]
                         and "--app" in argv
-                        and tuple(argv[2 : argv.index("--app")]) == self.gui_play_action
+                        and tuple(argv[2 : argv.index("--app")]) == self.gui_confirm_action
                         and argv[argv.index("--app") + 1] == f"pid:{self.frontend.pid}",
-                        "Original request requires the validated actual GUI Play dispatch",
+                        "Original request requires the validated exact final GUI confirmation",
                     )
                     self.publish_play_request()
                 if before_spawn:
@@ -870,12 +877,12 @@ def pilot_class(common, catalogue_class):
             # No model round trips between Play and actual observer binding.
             # Each transition needs its own fresh exact body/control, never an
             # assumed dialogue advance or a fabricated visual actor decision.
-            deadline = min(self.request + 20, self.launch_deadline)
+            deadline = self.launch_deadline
             for stage, label, button in (
                 ("gui_original", "MachineOriginalReview", "Play Original Edition"),
                 ("gui_confirm", "MachineFinalReview", "Launch This Edition Anyway"),
             ):
-                self.require_binding_window()
+                self.guard_running()
                 receipt, frame, window = self.agent_frame(label, deadline)
                 captured = self.frame_started
                 action = ["click", "--element-index", button_index(frame, button)]
@@ -891,14 +898,18 @@ def pilot_class(common, catalogue_class):
                         image_sha256=frame["sha256"],
                         provider_receipt_sha256=sha(catalogue.canonical(receipt)),
                         action=action,
-                        request=self.request,
+                        request=None,
+                        observer_armed=False,
                         deadline=deadline,
                     ),
                 )
+                if stage == "gui_confirm":
+                    self.arm_gui_confirmation_observer()
                 self.agent_input(
-                    label, action, window, frame, captured, deadline, self.require_binding_window
+                    label, action, window, frame, captured, deadline, self.guard_running
                 )
             self.require_binding_window()
+            deadline = min(self.request + 20, self.launch_deadline)
             receipt, frame, _ = self.agent_frame("MachineLaunchSuccess", deadline)
             self.validate_gui_observation("gui_success", frame, dict(action=[]))
             self.gui_success["evidence_kind"] = "machine_exact_gui_success"

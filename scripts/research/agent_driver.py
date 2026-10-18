@@ -659,11 +659,6 @@ class AgentDecisions:
                     decision["exact_token"] == token and decision["receiver"] == "filename_field",
                     "Fresh exact filename field required for save confirmation",
                 )
-            if stage == "gui_play":
-                require(
-                    owner.job["purpose"] == GUI_MENU_PURPOSE, "Native GUI Play purpose required"
-                )
-                owner.arm_gui_play_observer()
             if quitting:
                 require(
                     action == ["hotkey", "--key", "CmdOrCtrl+Q"]

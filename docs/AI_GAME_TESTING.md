@@ -372,11 +372,14 @@ One exact LaunchServices frontend receives the immutable anchor+390 deadline.
 The owner binds its native lease and its Swift-owned backend's PID, birth and
 executable. Fresh visual decisions select the exact original card; substring
 search results need not be unique. Current UI archive/variant/build evidence is
-required before Play. After validating the actor's fresh Play decision, the owner
-arms the observer once, outside the input mutation guard and before Play input.
-Actor decision time therefore consumes the original 390-second work interval,
-without consuming observer readiness. The conservative arm timestamp is recorded
-before the maintained arm call; failure cannot renew it or re-arm.
+required before Play. In finite `--play-deadline` mode, header Play and the
+Original choice only obtain reviews. Even an empty warning requires explicit
+final confirmation; ordinary nonfinite no-warning Play is unchanged. The owner
+validates the fresh exact final sheet/control, then arms the observer once outside
+the input mutation guard. Actor and preflight review time consume the original
+390-second work interval without consuming observer readiness. The conservative
+arm timestamp is recorded before the maintained arm call; failure or a frame that
+expires afterward cannot renew it or re-arm.
 If the current Issues & Evidence body places provenance below the viewport,
 GUI selection permits only `perform-secondary-action --element-index <fresh-area>
 --action "scroll down"`, with receiver `provenance_control`. The current detail
@@ -389,15 +392,22 @@ second action only if the first visibly advanced and metadata remains below.
 This movement judgment is actor protocol, not machine scene proof. Exact metadata
 is still required before observing selection or Play; pre-Play HOLD is unchanged.
 
-The single original request is published inside final validated Play dispatch, before input. Its real
+The single original request is published inside the validated final confirmation
+ingress, before that exact launch input. Its real
 awaiting-binding acknowledgment must arrive within the original ready+20 window;
 the conservative caller cutoff starts before arming and never renews. The existing
 input guard is reused without nesting another mutation guard. Late acknowledgment
-or actor response refuses Play input.
+refuses final confirmation input.
 
-After Play, a short mechanical sequence reads the exact initial warning/identity
+After header Play, a short mechanical sequence reads the exact initial warning/identity
 and uniquely named Play Original Edition, then a fresh distinct final warning and
-Launch This Edition Anyway, then fresh success/selection. It reuses native
+Launch This Edition Anyway. Both reviews remain preflight-only. After the final
+control is validated, one arm and the actual request acknowledgment precede its
+input. Provider, identity, frame, cancellation and deadline guards run again after
+acknowledgment. Fresh target-correlated success and exact game binding must then
+finish within that single request+20; review time before arming does not extend or
+reset either observer clock. An empty or changed warning still refuses the pinned
+review; the frontend must never dispatch it implicitly. It reuses native
 frame/input/validation and the pinned authorized bodies, with no coordinates,
 assumed advancement or intervening model replies. Its receipts are machine
 evidence, not fabricated actor visual decisions. Missing/changed/ambiguous

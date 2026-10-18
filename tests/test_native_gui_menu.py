@@ -360,6 +360,8 @@ class GUIControls(unittest.TestCase):
         owner.launch_deadline = owner.request + 390
         owner.last_agent_window = 33
         owner.last_agent_window_process = owner.frontend
+        # Isolated window-pair projection; the composition below checks lifecycle.
+        owner.guard_running = lambda: None
         main = dict(
             id=33, title="Map Library", app=dict(pid=21), isOffscreen=False, isMinimized=False
         )
@@ -795,9 +797,12 @@ class ComposedGUIOwner(unittest.TestCase):
         self.first_bound_record = None
         self.actor_delays = {}
         self.final_ingress_delay = 0
+        self.ack_delay = 0
+        self.after_ack_change = None
+        self.final_birth_delay = 0
         self.gui_play_decided_at = None
         self.delayed_requests = set()
-        self.provider_delay = 0
+        self.review_delay = 0
         self.observer_stop_requests = []
         installation = owner.app.installation
         installation.executable = f.fixture.root / "SyntheticGame"
@@ -868,7 +873,7 @@ class ComposedGUIOwner(unittest.TestCase):
                 self.final_ingress_delay
                 and owner.delivery_validation is not None
                 and owner.observer is not None
-                and owner.gui_play_sent
+                and owner.gui_confirm_sent
                 and not hasattr(owner, "request")
             ):
                 self.clock[0] += self.final_ingress_delay
@@ -1032,6 +1037,9 @@ class ComposedGUIOwner(unittest.TestCase):
             if self.state == "game-launcher"
             else ("Map Library" if owner.gui_phase else "Main Menu"),
         )
+        if self.state in ("initial", "final") and action in (["list-windows"], ["get-app-state"]):
+            self.clock[0] += self.review_delay
+            self.step_observer()
         if action == ["list-windows"]:
             result = dict(
                 app=dict(pid=pid),
@@ -1049,10 +1057,6 @@ class ComposedGUIOwner(unittest.TestCase):
                     )
                 )
         else:
-            if action == ["get-app-state"] and self.state == "initial" and self.provider_delay:
-                self.clock[0] += self.provider_delay
-                self.provider_delay = 0
-                self.step_observer()
             result = dict(
                 snapshot=dict(
                     id=str(uuid.uuid4()), app=dict(pid=pid), window=window, treeText=self.tree()
@@ -1071,11 +1075,20 @@ class ComposedGUIOwner(unittest.TestCase):
                         self.metadata_offscreen = False
                 elif self.state == "selected":
                     self.play_input_at = time.monotonic()
-                    self.assertEqual(self.observer_api.state.phase, "awaiting_binding")
+                    self.assertIsNone(self.observer_api)
+                    self.assertFalse(hasattr(owner, "request"))
                     self.state = "initial"
                 elif self.state == "initial":
+                    self.assertIsNone(self.observer_api)
+                    self.assertFalse(hasattr(owner, "request"))
                     self.state = "final"
                 elif self.state == "final":
+                    self.final_input_at = time.monotonic()
+                    self.assertEqual(self.observer_api.state.phase, "awaiting_binding")
+                    self.assertTrue((owner.helper_packet / "request.json").exists())
+                    if self.final_birth_delay:
+                        self.clock[0] += self.final_birth_delay
+                        self.step_observer()
                     owner.app.activate(owner.config["target"]["profile_id"])
                     (owner.profiles.live / "Logs").mkdir(exist_ok=True)
                     self.processes[73] = self.process_module.Process(
@@ -1114,7 +1127,22 @@ class ComposedGUIOwner(unittest.TestCase):
 
     def step_observer(self):
         if self.observer_api is not None:
+            if (
+                hasattr(self.owner, "request")
+                and time.monotonic() < self.owner.request + self.ack_delay
+            ):
+                return
             state = self.observer_api.run_once()
+            if state.phase == "awaiting_binding" and self.after_ack_change:
+                change, self.after_ack_change = self.after_ack_change, None
+                if change == "cancel":
+                    self.control_fixture.append(control_fixtures.user("I'm playing", seconds=1))
+                elif change == "target":
+                    self.owner.app.activate("original-game")
+                elif change == "stale":
+                    self.clock[0] += 3
+                elif change == "expiry":
+                    self.clock[0] = self.owner.request + 20.01
             if state.bound and self.first_bound_record is None:
                 self.first_bound_record = catalogue.decode(
                     (self.owner.helper_packet / "bound.json").read_bytes()
@@ -1305,7 +1333,7 @@ class ComposedGUIOwner(unittest.TestCase):
         self.r1_measurement = dict(
             case="delayed_gui_actor_8s",
             ready_to_request=owner.request - self.observer_ready_at,
-            request_to_play=self.play_input_at - owner.request,
+            request_to_final_confirmation=self.final_input_at - owner.request,
             request_to_first_bound=bound["observed"] - owner.request,
             ready_request_limit=20,
             request_bind_limit=20,
@@ -1340,7 +1368,7 @@ class ComposedGUIOwner(unittest.TestCase):
         original_arm = owner.gui_arm_started
         before = self.serial
         with self.assertRaisesRegex(ControlRefused, "One observer arm"):
-            owner.arm_gui_play_observer()
+            owner.arm_gui_confirmation_observer()
         self.assertEqual(owner.gui_arm_started, original_arm)
         self.assertEqual(self.serial, before)
         self.r1_measurement = dict(
@@ -1348,7 +1376,7 @@ class ComposedGUIOwner(unittest.TestCase):
             actor_delay=20.816,
             decision_to_arm=owner.gui_arm_started - self.gui_play_decided_at,
             ready_to_request=owner.request - self.observer_ready_at,
-            request_to_play=self.play_input_at - owner.request,
+            request_to_final_confirmation=self.final_input_at - owner.request,
             request_to_first_bound=self.first_bound_record["observed"] - owner.request,
             ready_request_limit=20,
             request_bind_limit=20,
@@ -1356,13 +1384,19 @@ class ComposedGUIOwner(unittest.TestCase):
             observer_arms=1,
         )
 
-    def test_final_ingress_after_ready_plus_twenty_refuses_before_any_play_input(self):
+    def test_final_ingress_after_ready_plus_twenty_refuses_final_input_without_rearm(self):
         self.final_ingress_delay = 20.01
         owner = self.owner
         with self.assertRaisesRegex(ControlRefused, r"observer exited|ready\+20"):
             owner.launch()
-        self.assertEqual(self.actions, [])
+        self.assertEqual([state for state, _ in self.actions], ["selected", "initial"])
         self.assertFalse(hasattr(owner, "request"))
+        before = self.serial
+        original_arm = owner.gui_arm_started
+        with self.assertRaisesRegex(ControlRefused, "One observer arm"):
+            owner.arm_gui_confirmation_observer()
+        self.assertEqual(owner.gui_arm_started, original_arm)
+        self.assertEqual(self.serial, before)
         self.assertFalse((owner.helper_packet / "request.json").exists())
         self.assertFalse((owner.helper_packet / "bound.json").exists())
         self.assertEqual(self.observer_api.state.reason, "request_timeout")
@@ -1377,28 +1411,126 @@ class ComposedGUIOwner(unittest.TestCase):
             bound_receipt=False,
         )
 
-    def test_review_after_request_plus_twenty_refuses_new_input_and_false_bind(self):
-        self.provider_delay = 20.01
+    def test_long_preflight_review_then_one_final_request_binds_and_restores(self):
+        self.review_delay = 7.0
+        self.test_actual_decisions_entry_observer_close_game_quit_and_restoration()
+        owner = self.owner
+        self.assertGreaterEqual(owner.gui_arm_started - self.play_input_at, 28)
+        self.assertLess(self.final_input_at - owner.request, 20)
+        self.assertLess(self.first_bound_record["observed"] - owner.request, 20)
+        self.assertEqual(len([p for p in owner.creation if p["role"] == "observer"]), 1)
+        self.assertEqual([state for state, _ in self.actions][:3], ["selected", "initial", "final"])
+        for label in ("MachineOriginalReview", "MachineFinalReview"):
+            prepared = catalogue.decode(
+                (owner.directory / (label + "-mechanical.json")).read_bytes()
+            )
+            self.assertIsNone(prepared["request"])
+            self.assertFalse(prepared["observer_armed"])
+
+    def test_birth_after_single_request_plus_twenty_never_binds_or_renews(self):
+        self.final_birth_delay = 20.01
         owner = self.owner
         with self.assertRaisesRegex(ControlRefused, r"request\+20"):
             owner.launch()
-        self.assertEqual([state for state, _ in self.actions], ["selected"])
+        self.assertEqual([state for state, _ in self.actions], ["selected", "initial", "final"])
         request = catalogue.decode((owner.helper_packet / "request.json").read_bytes())
         self.assertEqual(request["request"], owner.request)
         self.assertFalse((owner.helper_packet / "bound.json").exists())
         self.assertEqual(self.observer_api.state.reason, "binding_deadline")
         self.assertFalse(owner.dispatch_settled)
-        self.assertEqual(owner.profiles._state()["active"], owner.job["return_profile"])
-        self.assertFalse(owner.monitor.games())
-        self.r1_measurement = dict(
-            case="initial_review_after_request_plus20",
-            elapsed_since_request=time.monotonic() - owner.request,
-            actual_observer_phase=self.observer_api.state.phase,
-            reason=self.observer_api.state.reason,
-            original_request=request["request"],
-            inputs=len(self.actions),
-            bound_receipt=False,
+        before = self.serial
+        with self.assertRaisesRegex(ControlRefused, "One observer arm"):
+            owner.arm_gui_confirmation_observer()
+        self.assertEqual(self.serial, before)
+        self.assertEqual(
+            catalogue.decode((owner.helper_packet / "request.json").read_bytes()), request
         )
+
+    def test_late_actual_request_ack_refuses_final_input_without_renewal(self):
+        self.ack_delay = 20.01
+        owner = self.owner
+        with self.assertRaisesRegex(ControlRefused, "before acknowledgment"):
+            owner.launch()
+        self.assertEqual([state for state, _ in self.actions], ["selected", "initial"])
+        request = catalogue.decode((owner.helper_packet / "request.json").read_bytes())
+        self.assertFalse((owner.directory / "native-gui-request-ack.json").exists())
+        self.assertFalse((owner.helper_packet / "bound.json").exists())
+        self.ack_delay = 0
+        self.step_observer()
+        self.assertTrue(self.observer_api.state.terminal)
+        before = self.serial
+        with self.assertRaisesRegex(ControlRefused, "One observer arm"):
+            owner.arm_gui_confirmation_observer()
+        self.assertEqual(self.serial, before)
+        self.assertEqual(
+            catalogue.decode((owner.helper_packet / "request.json").read_bytes()), request
+        )
+        self.assertFalse(owner.uncertain_input)
+
+    def test_stale_after_arm_has_no_final_input_request_or_rearm(self):
+        # A shorter fixture freshness window reaches the real delivery fence
+        # while the unchanged ready/request deadlines remain 20 seconds.
+        self.final_ingress_delay = 3
+        owner = self.owner
+        with patch.object(driver, "FRAME_SECONDS", 2):
+            with self.assertRaises(driver.StaleFrame):
+                owner.launch()
+        self.assertEqual([state for state, _ in self.actions], ["selected", "initial"])
+        self.assertFalse(hasattr(owner, "request"))
+        self.assertEqual(len([p for p in owner.creation if p["role"] == "observer"]), 1)
+        before = self.serial
+        with self.assertRaisesRegex(ControlRefused, "One observer arm"):
+            owner.arm_gui_confirmation_observer()
+        self.assertEqual(self.serial, before)
+        self.assertFalse(owner.uncertain_input)
+
+    def assert_after_ack_refuses_final_input(self, change, error):
+        self.after_ack_change = change
+        owner = self.owner
+        with self.assertRaises(error):
+            owner.launch()
+        self.assertEqual([state for state, _ in self.actions], ["selected", "initial"])
+        self.assertFalse((owner.helper_packet / "bound.json").exists())
+        self.assertFalse(owner.monitor.games())
+        self.assertFalse(owner.uncertain_input)
+        request = catalogue.decode((owner.helper_packet / "request.json").read_bytes())
+        before = self.serial
+        with self.assertRaisesRegex(ControlRefused, "One observer arm"):
+            owner.arm_gui_confirmation_observer()
+        self.assertEqual(self.serial, before)
+        self.assertEqual(
+            catalogue.decode((owner.helper_packet / "request.json").read_bytes()), request
+        )
+
+    def test_cancel_after_actual_ack_refuses_final_input(self):
+        self.assert_after_ack_refuses_final_input("cancel", (ControlRefused, driver.UserCancelled))
+
+    def test_foreign_target_after_actual_ack_refuses_final_input(self):
+        self.assert_after_ack_refuses_final_input("target", ControlRefused)
+
+    def test_expiry_after_actual_ack_refuses_final_input(self):
+        self.assert_after_ack_refuses_final_input("expiry", ControlRefused)
+
+    def test_stale_after_actual_ack_refuses_final_input(self):
+        with patch.object(driver, "FRAME_SECONDS", 2):
+            self.assert_after_ack_refuses_final_input("stale", driver.StaleFrame)
+
+    def test_warning_drift_to_empty_refuses_pinned_review_before_arm(self):
+        original_tree = self.tree
+
+        def changed_tree():
+            tree = original_tree()
+            if self.state == "final":
+                tree = tree.replace(self.owner.config["warning"], "")
+            return tree
+
+        with patch.object(self, "tree", side_effect=changed_tree):
+            with self.assertRaisesRegex(ControlRefused, "Exact current review"):
+                self.owner.launch()
+        self.assertEqual([state for state, _ in self.actions], ["selected", "initial"])
+        self.assertIsNone(self.owner.observer)
+        self.assertFalse(hasattr(self.owner, "request"))
+        self.assertFalse(self.owner.monitor.games())
 
     def assert_unknown_holds(self, mode):
         self.fail_mode = mode

@@ -149,6 +149,10 @@ struct MapToolDraft {
         }
     }
     func cancelPlay() { playIntent = UUID(); playReview = nil }
+    func presentsPlayReview(_ model: LauncherModel) -> Bool {
+        guard let review = playReview else { return false }
+        return model.playDeadline != nil || !review.warning.isEmpty
+    }
     func beginPlay(_ model: LauncherModel, _ map: MapItem?, prepareCompatibility: Bool = true) async {
         guard !playPending else { return }
         playPending = true; cancelPlay()
@@ -188,7 +192,7 @@ struct MapToolDraft {
                 fingerprint: result.text("fingerprint"), warning: result.text("warning"),
                 prepareCompatibility: prepareCompatibility, preparationTitle: result.object("preparation").text("title"))
         }
-        if let review = playReview, review.intent == intent, review.warning.isEmpty {
+        if let review = playReview, review.intent == intent, review.warning.isEmpty, model.playDeadline == nil {
             await confirmPlay(model, review)
         }
     }
@@ -564,7 +568,7 @@ struct NativePlayReviewModifier: ViewModifier {
             .onChange(of: tools.originalBuild) { _ in
                 if tools.playReview?.target.profile == "original-game" { tools.cancelPlay() }
             }
-            .confirmationDialog(tools.playReview?.preparationTitle.isEmpty == false ? "Compatibility edition available" : "Known map issue", isPresented: Binding(get: { tools.playReview != nil && tools.playReview?.warning.isEmpty == false }, set: { if !$0 { tools.playReview = nil } }), titleVisibility: .visible) {
+            .confirmationDialog(tools.playReview?.preparationTitle.isEmpty == false ? "Compatibility edition available" : "Known map issue", isPresented: Binding(get: { tools.presentsPlayReview(model) }, set: { if !$0 { tools.playReview = nil } }), titleVisibility: .visible) {
                 if let review = tools.playReview {
                     Button(review.preparationTitle.isEmpty ? "Launch This Edition Anyway" : "Prepare & Play Compatibility Edition") { Task { await tools.confirmPlay(model, review) } }
                     if !review.preparationTitle.isEmpty {

@@ -150,7 +150,7 @@ import Foundation
         tools.cancelPlay()
         _ = try await backend.call("fixture.configure")
         await tools.beginPlay(model, map)
-        require(try await count("play_commit") == 2 && tools.playReview == nil, "Normal no-warning Play does not need a warning dialog")
+        require(try await count("play_commit") == 2 && tools.playReview == nil && !tools.presentsPlayReview(model), "Normal no-warning Play does not need a warning dialog")
         _ = try await backend.call("fixture.configure", ["preparation": true])
         await tools.beginPlay(model, map)
         let preparedPlay = tools.playReview
@@ -185,6 +185,29 @@ import Foundation
         finite.connected = true; finite.maps = [map]; finite.selection = map.id
         finite.details[map.id] = model.details[map.id]
         let finiteTools = NativeMapToolsState()
+        let finiteCommits = try await count("play_commit")
+        _ = try await backend.call("fixture.configure")
+        await finiteTools.beginPlay(finite, map)
+        let emptyReview = finiteTools.playReview
+        require(emptyReview?.warning.isEmpty == true && finiteTools.presentsPlayReview(finite), "Finite empty-warning Play must display final consent")
+        require(try await count("play_commit") == finiteCommits, "Finite header Play is preflight-only even without warnings")
+        finiteTools.cancelPlay()
+        await finiteTools.confirmPlay(finite, emptyReview)
+        require(!finiteTools.presentsPlayReview(finite), "Cancelled finite consent dismisses its dialog")
+        require(try await count("play_commit") == finiteCommits, "Cancelled finite consent cannot launch")
+        await finiteTools.beginPlay(finite, map)
+        let finiteWrongTarget = finiteTools.playReview
+        finite.selection = "different-map"
+        await finiteTools.confirmPlay(finite, finiteWrongTarget)
+        finite.selection = map.id
+        require(try await count("play_commit") == finiteCommits, "Changed finite target refuses final launch")
+        await finiteTools.beginPlay(finite, map)
+        let staleFinite = finiteTools.playReview
+        await finiteTools.beginPlay(finite, map)
+        await finiteTools.confirmPlay(finite, staleFinite)
+        require(try await count("play_commit") == finiteCommits, "Replaced finite review cannot launch")
+        await finiteTools.confirmPlay(finite, finiteTools.playReview)
+        require(try await count("play_commit") == finiteCommits + 1, "Only explicit final consent commits finite empty-warning Play")
         _ = try await backend.call("fixture.configure", ["warning": "Known synthetic issue"])
         await finiteTools.beginPlay(finite, map)
         var finiteLast = try await backend.call("fixture.last")
@@ -199,7 +222,15 @@ import Foundation
         require(finiteLast.object("maptools.play_commit")["launch_deadline"] as? Double == fixedDeadline, "Consent/waiting cannot renew the owner deadline")
         _ = try await backend.call("fixture.configure", ["preparation": true])
         await finiteTools.beginPlay(finite, map)
-        await finiteTools.beginOriginalPlay(finite, finiteTools.playReview!)
+        let finiteOriginalChoice = finiteTools.playReview!
+        let beforeOriginal = try await count("play_commit")
+        await finiteTools.beginOriginalPlay(finite, finiteOriginalChoice)
+        require(finiteTools.playReview?.warning.isEmpty == true && finiteTools.presentsPlayReview(finite), "Original re-preflight still displays finite final consent after warning drift to empty")
+        require(try await count("play_commit") == beforeOriginal, "Header and Original choice cannot dispatch before final consent")
+        await finiteTools.beginOriginalPlay(finite, finiteOriginalChoice)
+        require(try await count("play_commit") == beforeOriginal, "Consumed Original choice cannot launch or renew consent")
+        await finiteTools.confirmPlay(finite, finiteTools.playReview)
+        require(try await count("play_commit") == beforeOriginal + 1, "Finite Original needs one explicit final confirmation")
         finiteLast = try await backend.call("fixture.last")
         require(finiteLast.object("maptools.play_commit")["launch_deadline"] as? Double == fixedDeadline && finiteLast.object("maptools.play_commit")["prepare_compatibility"] as? Bool == false, "Play Original retains the fixed gate")
         for invalid in [["--play-deadline"], ["--play-deadline", "nan"], ["--play-deadline", "inf"], ["--play-deadline", "0"], ["--play-deadline", "-1"], ["--play-deadline", "bad"], ["--play-deadline", "1", "--play-deadline", "2"]] {
