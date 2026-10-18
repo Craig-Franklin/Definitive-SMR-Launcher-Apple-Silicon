@@ -247,9 +247,17 @@ class FilesystemProfiles:
             return _fsync_tree(path)
         return self.observed_io.fsync_tree(path)
 
-    def _copytree(self, source, destination):
+    def _copytree(self, source, destination, *, clone_assets=False):
         if self.observed_io is None:
-            return shutil.copytree(source, destination, copy_function=shutil.copy2)
+            from .asset_copy import copy_asset
+
+            def copy_file(path, output):
+                relative = Path(path).relative_to(source)
+                if clone_assets and relative.parts[0] in ("CustomAssets", "UserMaps"):
+                    return copy_asset(path, output)
+                return shutil.copy2(path, output)
+
+            return shutil.copytree(source, destination, copy_function=copy_file)
         return self.observed_io.copytree(source, destination)
 
     def _make_writable_tree(self, root):
@@ -480,7 +488,7 @@ class FilesystemProfiles:
                 return profile_id
             temporary = self.staging / (profile_id + "-" + uuid.uuid4().hex)
             try:
-                self._copytree(source, temporary)
+                self._copytree(source, temporary, clone_assets=True)
                 self._make_writable_tree(temporary)
                 if (
                     self._asset_hash(temporary) != expected_hash

@@ -366,6 +366,7 @@ class NativeTools:
                     app.library / "downloads",
                     self._progress,
                     self.cancelled,
+                    downloader=app.download_archive,
                     importer=lambda remote, path: app.import_archive(
                         path, original_filename=remote.name, remote=remote
                     ),

@@ -47,7 +47,6 @@ from .application import LauncherApplication, MapRecord
 from .collection import (
     RemoteMap,
     download_all_maps,
-    download_map,
     fetch_catalogue,
     read_cached_catalogue,
     write_cached_catalogue,
@@ -1311,9 +1310,8 @@ class LauncherWindow:
 
         def operation() -> MapRecord:
             try:
-                path = download_map(
+                path = app.download_archive(
                     record,
-                    app.library / "downloads",
                     progress=lambda count, total: self._download_event(
                         record, "Downloading", count, total, ""
                     ),
@@ -1362,6 +1360,7 @@ class LauncherWindow:
                 app.library / "downloads",
                 self._download_event,
                 self.bulk_cancel,
+                downloader=app.download_archive,
                 importer=lambda record, path: app.import_archive(
                     path, original_filename=record.name, remote=record
                 ),

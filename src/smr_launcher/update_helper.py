@@ -10,9 +10,11 @@ import fcntl
 import json
 import os
 import re
+import shutil
+import stat
 import time
 
-from .activation import _assert_no_symlink_ancestor, _atomic_json, _fsync_dir
+from .activation import _assert_no_symlink_ancestor, _atomic_json, _fsync_dir, _walk_error
 from .updates import (
     BUNDLE_NAME,
     UpdateError,
@@ -20,6 +22,7 @@ from .updates import (
     trusted_team_from_bundle,
     verify_publisher,
     version_tuple,
+    _sha256,
 )
 
 
@@ -116,7 +119,33 @@ def _finalize(
             pass
     else:
         raise UpdateError("Previous app bundle is missing after exchange")
-    _atomic_json(record_path, dict(record, state="installed", backup=str(backup)))
+    completed = dict(record, state="installed", backup=str(backup))
+    token = candidate.parent.name[len(".smr-update-") :]
+    if (
+        re.fullmatch(r"[0-9a-f]{32}", token)
+        and "archive_sha256" in completed
+        and "archive_size" in completed
+    ):
+        history = record_path.parent / "completed"
+        receipt = history / (token + ".json")
+        _completed_projection(receipt, completed, record_path.parent, target, team, new_version)
+        marker = Path(completed["helper_bundle"]).parent / ".archive.json"
+        _assert_no_symlink_ancestor(marker)
+        # Older installed launchers do not produce retention provenance. Finish
+        # their verified exchange, but leave its artifacts outside automatic cleanup.
+        if marker.exists():
+            try:
+                provenance = json.loads(marker.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise UpdateError("Completed helper archive provenance cannot be read") from exc
+            if provenance != dict(
+                sha256=completed["archive_sha256"], size=completed["archive_size"]
+            ):
+                raise UpdateError("Completed helper archive provenance differs")
+            _assert_no_symlink_ancestor(history)
+            history.mkdir(mode=0o700, exist_ok=True)
+            _atomic_json(receipt, completed)
+    _atomic_json(record_path, completed)
 
 
 def reconcile_after_exchange(record_path: Path, installed_version: str) -> bool:
@@ -159,6 +188,8 @@ def main(record_path: Path) -> None:
         if record.get("state") == "installed":
             return
         target, candidate, backup, helper, team, old_version, new_version = _paths(record)
+        record["helper_pid"] = os.getpid()
+        _atomic_json(record_path, record)
         if backup.exists():
             _finalize(
                 record_path, record, target, candidate, backup, team, old_version, new_version
@@ -176,3 +207,221 @@ def main(record_path: Path) -> None:
                 _swap(target, candidate)
                 raise
         _finalize(record_path, record, target, candidate, backup, team, old_version, new_version)
+
+
+def _cleanup_manifest(root: Path) -> dict:
+    """Bind every remaining entry without following signed bundle symlinks."""
+    _assert_no_symlink_ancestor(root)
+    if not root.exists():
+        return {}
+    paths = [root]
+    if root.is_dir():
+        for base, directories, files in os.walk(root, followlinks=False, onerror=_walk_error):
+            paths.extend(Path(base) / name for name in directories + files)
+    manifest = {}
+    device = root.stat().st_dev
+    for path in paths:
+        before = path.lstat()
+        entry = dict(
+            device=before.st_dev,
+            inode=before.st_ino,
+            mode=before.st_mode,
+            uid=before.st_uid,
+            gid=before.st_gid,
+        )
+        if before.st_dev != device:
+            raise UpdateError("Cleanup tree crosses a volume boundary")
+        if stat.S_ISREG(before.st_mode):
+            if before.st_nlink != 1:
+                raise UpdateError("Cleanup tree contains a shared hardlink")
+            entry.update(
+                size=before.st_size,
+                mtime_ns=before.st_mtime_ns,
+                ctime_ns=before.st_ctime_ns,
+                sha256=_sha256(path),
+            )
+        elif stat.S_ISLNK(before.st_mode):
+            entry.update(target=os.readlink(path), ctime_ns=before.st_ctime_ns)
+        elif not stat.S_ISDIR(before.st_mode):
+            raise UpdateError("Cleanup tree contains an unsupported file")
+        after = path.lstat()
+        if (
+            before.st_dev,
+            before.st_ino,
+            before.st_mode,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_mode,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        ):
+            raise UpdateError("Cleanup tree changed during inventory")
+        manifest[path.relative_to(root).as_posix()] = entry
+    return manifest
+
+
+def _completed_projection(
+    receipt: Path, record: dict, root: Path, target: Path, team: str, installed_version: str
+):
+    old_target, candidate, backup, helper, old_team, old, new = _paths(record)
+    token = receipt.stem
+    digest, size = record.get("archive_sha256"), record.get("archive_size")
+    if (
+        record.get("state") != "installed"
+        or old_target != target
+        or old_team != team
+        or version_tuple(new) > version_tuple(installed_version)
+        or candidate.parent.name != ".smr-update-" + token
+        or backup.name != ".smr-previous-" + old + "-" + token + ".app"
+        or helper.parent.parent != root
+        or not helper.parent.name.startswith(".app-stage-")
+        or candidate.exists()
+        or any(
+            not path.is_absolute() or ".." in path.parts
+            for path in (old_target, candidate, backup, helper)
+        )
+        or not isinstance(digest, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", digest)
+        or type(size) is not int
+        or size <= 0
+    ):
+        raise UpdateError("Completed update ownership or archive identity is ambiguous")
+    return backup, helper, old, new, digest, size
+
+
+def prune_completed_updates(
+    record_path: Path, installed_app: Path, installed_version: str
+) -> list[str]:
+    """Prune only recorded, superseded exchanges after authenticated app startup.
+
+    Legacy/untracked downloads and staging directories remain untouched. The current
+    transaction retains its rollback, archive and helper. A live or unidentifiable
+    helper protects the entire older transaction. Cleanup failures remain retryable.
+    """
+    errors = []
+    with _install_lock(record_path.parent):
+        current = _read_record(record_path)
+        if (
+            current.get("state") != "installed"
+            or current.get("target") != str(installed_app)
+            or current.get("new_version") != installed_version
+        ):
+            return errors
+        target, _, current_backup, _, team, current_old, _ = _paths(current)
+        verify_publisher(target, team, installed_version)
+        verify_publisher(current_backup, team, current_old, require_name=False)
+        history = record_path.parent / "completed"
+        _assert_no_symlink_ancestor(history)
+        if not history.exists():
+            return errors
+        records = []
+        for receipt in history.iterdir():
+            try:
+                if not re.fullmatch(r"[0-9a-f]{32}\.json", receipt.name):
+                    raise UpdateError("Unrecognized completed update receipt")
+                record = _read_record(receipt)
+                _completed_projection(
+                    receipt, record, record_path.parent, target, team, installed_version
+                )
+                cleanup = record.get("cleanup")
+                if cleanup is not None and (
+                    not isinstance(cleanup, dict)
+                    or set(cleanup) != {"backup", "helper", "archive"}
+                    or any(not isinstance(value, dict) for value in cleanup.values())
+                ):
+                    raise UpdateError("Completed cleanup authorization is invalid")
+                records.append((receipt, record))
+            except (OSError, RuntimeError, ValueError) as exc:
+                errors.append(str(exc))
+        # Unknown receipts could reference shared artifacts: refuse all pruning.
+        if errors:
+            return errors
+        for receipt, record in records:
+            try:
+                backup, helper, old, new, digest, size = _completed_projection(
+                    receipt, record, record_path.parent, target, team, installed_version
+                )
+                if backup == current_backup or version_tuple(new) >= version_tuple(
+                    installed_version
+                ):
+                    continue
+                pid = record.get("helper_pid")
+                if type(pid) is not int or pid <= 1:
+                    continue
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    pass
+                else:
+                    continue
+                archive = record_path.parent / (digest + ".zip")
+                # Shared archives/helpers/backups stay pinned by every other receipt.
+                others = [other for path, other in records if path != receipt and path.exists()] + [
+                    current
+                ]
+                protected = {other.get("backup") for other in others}
+                protected.update(other.get("helper_bundle") for other in others)
+                if str(backup) in protected or str(helper) in protected:
+                    continue
+                shared_archive = any(other.get("archive_sha256") == digest for other in others)
+                cleanup = record.get("cleanup")
+                roots = dict(backup=backup, helper=helper.parent, archive=archive)
+                if cleanup is None:
+                    _assert_no_symlink_ancestor(archive)
+                    if archive.exists():
+                        info = archive.stat()
+                        if (
+                            not stat.S_ISREG(info.st_mode)
+                            or info.st_nlink != 1
+                            or info.st_size != size
+                            or _sha256(archive) != digest
+                        ):
+                            raise UpdateError("Completed update archive differs from its identity")
+                    if backup.exists():
+                        verify_publisher(backup, team, old, require_name=False)
+                    if helper.parent.exists():
+                        if set(p.name for p in helper.parent.iterdir()) - {
+                            BUNDLE_NAME,
+                            ".archive.json",
+                        }:
+                            raise UpdateError("Completed helper directory has unknown contents")
+                        marker = helper.parent / ".archive.json"
+                        _assert_no_symlink_ancestor(marker)
+                        provenance = json.loads(marker.read_text(encoding="utf-8"))
+                        if provenance != dict(sha256=digest, size=size):
+                            raise UpdateError("Completed helper archive provenance differs")
+                        verify_publisher(helper, team, new)
+                    cleanup = {key: _cleanup_manifest(path) for key, path in roots.items()}
+                    record = dict(record, cleanup=cleanup)
+                    _atomic_json(receipt, record)
+                # A remaining tree must be a subset of the authenticated pre-deletion
+                # manifest. Missing children are expected after interrupted removal;
+                # changed/replaced/new contents refuse recovery before further deletion.
+                for key, path in roots.items():
+                    if key == "archive" and shared_archive:
+                        continue
+                    remaining = _cleanup_manifest(path)
+                    if any(cleanup[key].get(name) != entry for name, entry in remaining.items()):
+                        raise UpdateError(
+                            "Authorized cleanup contents changed; retained for inspection"
+                        )
+                # Validate every artifact before deleting any part of this transaction.
+                if backup.exists():
+                    shutil.rmtree(backup)
+                    _fsync_dir(backup.parent)
+                if helper.parent.exists():
+                    shutil.rmtree(helper.parent)
+                    _fsync_dir(helper.parent.parent)
+                if archive.exists() and not shared_archive:
+                    archive.unlink()
+                    _fsync_dir(archive.parent)
+                receipt.unlink()
+                _fsync_dir(history)
+            except (OSError, RuntimeError, ValueError) as exc:
+                errors.append(str(exc))
+    return errors

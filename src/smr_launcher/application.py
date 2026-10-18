@@ -355,6 +355,70 @@ class LauncherApplication:
             stage.unlink(missing_ok=True)
             _fsync_dir(self.originals)
 
+    def download_archive(self, remote: RemoteMap, *, progress=None, cancelled=None) -> Path:
+        """Reuse a SHA-256 canonical archive only after size and SHA-1 checks."""
+        from .collection import CollectionError, download_map
+
+        if cancelled and cancelled():
+            raise CollectionError("Download canceled")
+        with self._locked():
+            self._stopped()
+            _assert_no_symlink_ancestor(self.originals)
+            # Catalogue hits come first. Size filters bound fallback reads for local
+            # imports and retained archives whose last catalogue row was removed.
+            records = self.catalogue()
+            preferred = {r.archive_sha256 for r in records if r.archive_sha1 == remote.sha1}
+            candidates = sorted(self.originals.glob("*.7z"), key=lambda p: p.stem not in preferred)
+            for path in candidates:
+                _assert_no_symlink_ancestor(path)
+                if (
+                    len(path.stem) != 64
+                    or any(c not in "0123456789abcdef" for c in path.stem)
+                    or not path.is_file()
+                ):
+                    raise ApplicationError("Canonical archive ownership needs inspection")
+                if path.stem not in preferred and path.stat().st_size != remote.size:
+                    continue
+                if _digest(path) != path.stem:
+                    raise ApplicationError("Canonical archive differs from its SHA-256 identity")
+                if self._matches_remote(path, remote):
+                    if cancelled and cancelled():
+                        raise CollectionError("Download canceled")
+                    if progress:
+                        progress(remote.size, remote.size)
+                    return path
+                if path.stem in preferred:
+                    raise ApplicationError("Canonical archive differs from collection metadata")
+        return download_map(
+            remote, self.library / "downloads", progress=progress, cancelled=cancelled
+        )
+
+    def _discard_committed_download(
+        self, source: Path, digest: str, remote: Optional[RemoteMap]
+    ) -> None:
+        """The application lock and durable catalogue commit precede this deletion."""
+        if remote is None or source != self.library / "downloads" / (remote.sha1 + ".7z"):
+            return
+        _assert_no_symlink_ancestor(source)
+        if not source.exists():
+            return
+        archive = self.originals / (digest + ".7z")
+        _assert_no_symlink_ancestor(archive)
+        before = source.stat()
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or _digest(archive) != digest
+            or not self._matches_remote(archive, remote)
+            or _digest(source) != digest
+            or not self._matches_remote(source, remote)
+            or self._collection_archive_identity(source.stat())
+            != self._collection_archive_identity(before)
+        ):
+            raise ApplicationError("Committed download identity changed; retained for inspection")
+        source.unlink()
+        _fsync_dir(source.parent)
+
     def import_archive(
         self,
         source: Path,
@@ -392,7 +456,9 @@ class LauncherApplication:
                 None,
             )
             if existing is not None:
-                return self._record_source(existing, remote) if remote else existing
+                result = self._record_source(existing, remote) if remote else existing
+                self._discard_committed_download(source, inspection.source_sha256, remote)
+                return result
             archive = self._preserve_archive(source, inspection.source_sha256)
             self.imports.mkdir(parents=True, exist_ok=True)
             imported = self.imports / uuid.uuid4().hex
@@ -437,6 +503,7 @@ class LauncherApplication:
             _atomic_json(
                 self.catalogue_file, dict(schema=1, maps=[item.as_json() for item in records])
             )
+            self._discard_committed_download(source, inspection.source_sha256, remote)
             return record
 
     def _prepared_root(self, record: MapRecord) -> Path:

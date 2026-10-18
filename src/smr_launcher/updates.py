@@ -172,6 +172,13 @@ class UpdatePreferences:
 
 
 def download_release(release: Release, private_directory: Path) -> Path:
+    from .update_helper import _install_lock
+
+    with _install_lock(Path(private_directory)):
+        return _download_release(release, private_directory)
+
+
+def _download_release(release: Release, private_directory: Path) -> Path:
     directory = Path(private_directory).expanduser()
     _assert_no_symlink_ancestor(directory)
     directory.mkdir(parents=True, mode=0o700, exist_ok=True)
@@ -375,6 +382,13 @@ def verify_publisher(
 
 
 def stage_release(zip_path: Path, release: Release, library: Path, trusted_team: str) -> Path:
+    from .update_helper import _install_lock
+
+    with _install_lock(Path(library) / "updates"):
+        return _stage_release(zip_path, release, library, trusted_team)
+
+
+def _stage_release(zip_path: Path, release: Release, library: Path, trusted_team: str) -> Path:
     """Extract and authenticate an app without touching the installed app or maps."""
     if not TEAM_ID.fullmatch(trusted_team):
         raise UpdateError("Automatic installation requires a trusted Developer ID build")
@@ -396,6 +410,7 @@ def stage_release(zip_path: Path, release: Release, library: Path, trusted_team:
             raise UpdateError("macOS could not unpack the release app")
         bundle = stage / BUNDLE_NAME
         verify_publisher(bundle, trusted_team, release.version)
+        _atomic_json(stage / ".archive.json", dict(sha256=release.sha256, size=release.size))
         return bundle
     except Exception:
         shutil.rmtree(stage)
@@ -448,12 +463,24 @@ def pending_install(library: Path, installed_app: Path, current_version: str) ->
         raise UpdateError("Pending update record needs inspection") from exc
     if not isinstance(record, dict) or record.get("schema") != 1:
         raise UpdateError("Pending update record has an unexpected format")
+    if record.get("state") == "installed":
+        from .update_helper import prune_completed_updates
+
+        errors = prune_completed_updates(pending, installed_app, current_version)
+        if errors:
+            raise UpdateError("Completed update cleanup needs inspection: " + "; ".join(errors))
+        return None
     if record.get("state") != "ready":
         return None
     if record.get("target") == str(installed_app) and record.get("new_version") == current_version:
         from .update_helper import reconcile_after_exchange
 
         reconcile_after_exchange(pending, current_version)
+        from .update_helper import prune_completed_updates
+
+        errors = prune_completed_updates(pending, installed_app, current_version)
+        if errors:
+            raise UpdateError("Completed update cleanup needs inspection: " + "; ".join(errors))
         return None
     candidate = record.get("candidate")
     if (
@@ -483,6 +510,29 @@ def pending_install_manual(pending: Path) -> bool:
 
 
 def prepare_install(
+    staged_app: Path,
+    installed_app: Path,
+    release: Release,
+    library: Path,
+    trusted_team: str,
+    current_version: str,
+    manual_install: bool = False,
+) -> Path:
+    from .update_helper import _install_lock
+
+    with _install_lock(Path(library) / "updates"):
+        return _prepare_install(
+            staged_app,
+            installed_app,
+            release,
+            library,
+            trusted_team,
+            current_version,
+            manual_install,
+        )
+
+
+def _prepare_install(
     staged_app: Path,
     installed_app: Path,
     release: Release,
@@ -550,6 +600,8 @@ def prepare_install(
                 new_version=release.version,
                 pid=os.getpid(),
                 manual_install=manual_install,
+                archive_sha256=release.sha256,
+                archive_size=release.size,
             ),
         )
         return pending
