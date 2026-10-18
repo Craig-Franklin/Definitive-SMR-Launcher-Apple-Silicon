@@ -1082,6 +1082,10 @@ def pilot_class(common):
                 self.delivery_validation = None
 
         def agent_frame(self, label, deadline):
+            # Before any scene exists the actor cannot request a partial finish.
+            # LOAD readiness shares its original launch bound, not the work interval.
+            if self.job["purpose"] in LOAD_PURPOSES and not hasattr(self, "last_agent_window"):
+                deadline = min(deadline, self.launch_deadline)
             attempt = 0
             while True:
                 require(time.monotonic() < deadline, "Game window readiness deadline expired")

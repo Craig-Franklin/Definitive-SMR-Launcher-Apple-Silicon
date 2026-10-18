@@ -140,6 +140,7 @@ class AgentRouteTests(unittest.TestCase):
         owner = self.owner
         owner.directory = owner.operation_directory = self.directory
         owner.anchor, owner.clock = 100.0, self.clock
+        owner.launch_deadline = owner.anchor + 120
         owner.frames = owner.launches = owner.seq = 0
         owner.first_stop_verified = owner.running = owner.cancelled = owner.uncertain_input = False
         owner.delivery_validation = None
@@ -1141,6 +1142,90 @@ class AgentRouteTests(unittest.TestCase):
                 self.owner.agent_frame(
                     "Malformed" + str(len(list(self.directory.iterdir()))), 102.0
                 )
+        self.assertEqual(self.actions, [])
+
+    def test_direct_load_first_window_expiry_uses_owned_cleanup_without_actor_turn(self):
+        import catalogue_menu
+
+        parent = type(self.owner)
+        self.owner.__class__ = catalogue_menu.pilot_class(self.common, parent)
+        for name in ("prepare", "launch", "stop", "restore"):
+            setattr(self.owner, name, MethodType(getattr(parent, name), self.owner))
+        self.owner.job["purpose"] = driver.CATALOGUE_LOAD_PURPOSE
+        self.owner.job.pop("agent_save")
+        self.owner.config = dict(
+            target=dict(profile_id=self.owner.diagnostic),
+            scenario_title="Exact synthetic scenario",
+            scenario_subtitle="Exact synthetic subtitle",
+        )
+        self.clock[0] = self.owner.launch_deadline - 0.6
+        self.window_responses = [[]]
+        result = self.run_trial()
+        self.assertIn("Game window readiness deadline expired", result["outcome"]["cause"])
+        self.assertTrue(result["stopped"] and result["restored"] and result["terminal_finished"])
+        self.assertLess(self.clock[0], self.owner.launch_deadline)
+        self.assertEqual(self.stage_indexes, {})
+        self.assertEqual(self.actions, [])
+        self.assertFalse(self.owner.uncertain_input)
+        self.assertEqual(self.keep.read_bytes(), b"preserved original synthetic save")
+
+    def test_cached_load_first_window_wait_cannot_reach_actor_work_cutoff(self):
+        self.owner.launch()
+        self.owner.job["purpose"] = driver.CACHED_LOAD_PURPOSE
+        self.owner.job.pop("agent_save")
+        self.clock[0] = self.owner.launch_deadline - 0.6
+        self.window_responses = [[]]
+        with self.assertRaisesRegex(ControlRefused, "Game window readiness deadline expired"):
+            self.owner.decisions.stage("launcher", "Observe current first game window")
+        self.assertLess(self.clock[0], self.owner.launch_deadline)
+        self.assertEqual(self.stage_indexes, {})
+        self.assertEqual(self.actions, [])
+
+    def test_load_known_window_keeps_original_later_frame_and_normal_quit_path(self):
+        self.owner.launch()
+        self.owner.job["purpose"] = driver.CATALOGUE_LOAD_PURPOSE
+        self.owner.job.pop("agent_save")
+        self.clock[0] = self.owner.launch_deadline - 0.5
+        self.window_responses = [[], [self.valid_window()]]
+        self.owner.agent_frame("Initial", self.owner.anchor + 480)
+        self.clock[0] = self.owner.launch_deadline + 1
+        self.window_responses = [[], [self.valid_window()]]
+        self.owner.agent_frame("LaterWorld", self.owner.anchor + 480)
+        self.quit_confirmation = True
+        self.owner.normal_quit("finished", None)
+        self.assertFalse(self.owner.running)
+        self.assertEqual(
+            self.actions,
+            [["hotkey", "--key", "CmdOrCtrl+Q"], ["press-key", "--key", "Return"]],
+        )
+
+    def test_expired_load_first_scene_never_calls_provider(self):
+        self.owner.launch()
+        self.owner.job["purpose"] = driver.CATALOGUE_LOAD_PURPOSE
+        self.clock[0] = self.owner.launch_deadline
+        with patch.object(self.owner, "native") as native:
+            with self.assertRaisesRegex(ControlRefused, "Game window readiness deadline expired"):
+                self.owner.agent_frame("Expired", self.owner.anchor + 480)
+        native.assert_not_called()
+        self.assertEqual(self.actions, [])
+
+    def test_load_first_scene_never_extends_an_earlier_caller_deadline(self):
+        self.owner.launch()
+        self.owner.job["purpose"] = driver.CACHED_LOAD_PURPOSE
+        caller_deadline = self.clock[0] + 0.1
+        self.window_responses = [[]]
+        with self.assertRaisesRegex(ControlRefused, "Game window readiness deadline expired"):
+            self.owner.agent_frame("Earlier", caller_deadline)
+        self.assertLess(self.clock[0], caller_deadline)
+        self.assertEqual(self.actions, [])
+
+    def test_nonload_first_window_keeps_existing_caller_deadline(self):
+        self.owner.launch()
+        self.owner.job["purpose"] = driver.WINDOW_PURPOSE
+        self.clock[0] = self.owner.launch_deadline + 1
+        self.window_responses = [[], [self.valid_window()]]
+        self.owner.agent_frame("OriginalMenu", self.clock[0] + 2)
+        self.assertGreater(self.clock[0], self.owner.launch_deadline)
         self.assertEqual(self.actions, [])
 
     def test_empty_startup_windows_wait_then_capture_without_input(self):
