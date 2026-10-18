@@ -169,6 +169,7 @@ class Fixture:
                 ),
             )
         actions["cargo_transport"]["protocol"]["required_assertions"] = CARGO
+        actions["ai_competition"]["protocol"]["ai_opponents_option"] = "ai"
         features = {
             f: dict(
                 state="unknown" if f == feature_unknown else "reviewed",
@@ -254,6 +255,65 @@ class ScenarioEvidenceTests(unittest.TestCase):
         self.addCleanup(t.cleanup)
         self.root = Path(t.name).resolve()
         self.f = Fixture(self.root)
+
+    def test_ai_competition_needs_positive_integer_in_reviewed_options(self):
+        for count in (0, -1, False, True, 1.0, "1", {"players": ["rival"]}):
+            with self.subTest(count=count), tempfile.TemporaryDirectory() as directory:
+                fixture = Fixture(Path(directory).resolve())
+                fixture.context = engine_context(
+                    fixture.context["game_sha256"],
+                    fixture.context["prepared_output_sha256"],
+                    fixture.resources,
+                    known_options({"ai": count}),
+                )
+                fixture.build = build_record(
+                    fixture.inventory,
+                    fixture.a["archive_sha256"],
+                    fixture.a["edition_id"],
+                    fixture.context["prepared_output_sha256"],
+                    fixture.resources,
+                    fixture.context["game_sha256"],
+                    fixture.context["options"],
+                )
+                fixture.store.append(fixture.build)
+                contract = fixture.contract()
+                fixture.record(contract, "ai_competition")
+                fixture.record(contract, "camera")
+                result = fixture.status([fixture.a])
+                actions = dict(result.scenarios[0].actions)
+                self.assertEqual(actions["ai_competition"], "unknown")
+                self.assertEqual(actions["camera"], "pass")
+                self.assertEqual(result.status, "Not verified")
+                self.assertIn("positive opponent count", " ".join(result.scenarios[0].limitations))
+
+    def test_ai_competition_legacy_or_invalid_option_mapping_stays_unknown(self):
+        for field in (None, "missing", [], {}, 1):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
+                fixture = Fixture(Path(directory).resolve())
+                original = fixture.contract()
+                payload = json.loads(canonical(original.payload))
+                protocol = payload["actions"]["ai_competition"]["protocol"]
+                protocol.pop("ai_opponents_option")
+                if field is not None:
+                    protocol["ai_opponents_option"] = field
+                contract = EvidenceRecord.create("contract", payload, original.value["refs"])
+                fixture.store.append(contract)
+                fixture.record(contract, "ai_competition")
+                before = fixture.store.path.read_bytes()
+                result = fixture.status([fixture.a])
+                self.assertEqual(dict(result.scenarios[0].actions)["ai_competition"], "unknown")
+                self.assertEqual(fixture.store.path.read_bytes(), before)
+
+    def test_ai_competition_positive_setup_does_not_erase_failure(self):
+        contract = self.f.contract()
+        self.f.record(contract, "ai_competition")
+        self.assertEqual(
+            dict(self.f.status([self.f.a]).scenarios[0].actions)["ai_competition"], "pass"
+        )
+        self.f.record(contract, "ai_competition", "failure")
+        result = self.f.status([self.f.a])
+        self.assertEqual(dict(result.scenarios[0].actions)["ai_competition"], "failure")
+        self.assertEqual(result.status, "Known issue")
 
     def test_one_action_leaves_other_actions_and_sibling_unknown(self):
         c = self.f.contract()
@@ -730,6 +790,14 @@ class E02CorrectionTests(unittest.TestCase):
         self.assertEqual(known["state"], "known")
 
     def test_r4_nested_bool_int_float_contexts_are_distinct(self):
+        def options(player):
+            return attest_options(
+                {"ai": 1, "nested": {"players": [player]}},
+                required_fields=["ai", "nested"],
+                contract_version="synthetic-options-v1",
+                basis="One confirmed opponent; independent nested option identity control",
+            )
+
         self.f.build = build_record(
             self.f.inventory,
             self.f.a["archive_sha256"],
@@ -737,21 +805,21 @@ class E02CorrectionTests(unittest.TestCase):
             h(b"prepared bytes"),
             self.f.resources,
             h(b"engine"),
-            known_options({"ai": {"players": [1]}}),
+            options(1),
         )
         self.f.store.append(self.f.build)
         self.f.context = self.f.build.payload["context"]
         self.complete()
         for alternate in (True, 1.0):
-            context = dict(self.f.context, options=known_options({"ai": {"players": [alternate]}}))
+            context = dict(self.f.context, options=options(alternate))
             self.assertNotEqual(context_identity(context), context_identity(self.f.context))
             status = self.f.status([self.f.a], context)
             self.assertEqual(status.status, "Not verified")
             self.assertEqual(set(dict(status.scenarios[0].actions).values()), {"unknown"})
         # Also keep float-to-bool and nested zero/False distinct.
         for left, right in ((True, 1.0), (0, False), (0.0, False)):
-            a = dict(self.f.context, options=known_options({"ai": {"players": [left]}}))
-            b = dict(self.f.context, options=known_options({"ai": {"players": [right]}}))
+            a = dict(self.f.context, options=options(left))
+            b = dict(self.f.context, options=options(right))
             self.assertNotEqual(context_identity(a), context_identity(b))
 
     def test_r3_omitted_provider_rejected_empty_existing_roots_valid(self):

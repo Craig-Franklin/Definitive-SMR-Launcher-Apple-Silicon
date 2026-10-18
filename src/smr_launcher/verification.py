@@ -351,6 +351,19 @@ def reduce_verification(records, scenarios, context, *, historical=()):
                         for k, expected in p["protocol"].get("feature_assertions", {}).items()
                     ):
                         outcome = "unknown"
+                    if outcome == "pass" and action == "ai_competition":
+                        field = p["protocol"].get("ai_opponents_option")
+                        options = p["actual_context"]["options"]
+                        opponents = (
+                            options["values"].get(field)
+                            if type(field) is str and field in options["required_fields"]
+                            else None
+                        )
+                        if type(opponents) is not int or opponents < 1:
+                            outcome = "unknown"
+                            limitation = "AI competition lacks a confirmed positive opponent count."
+                            if limitation not in limitations:
+                                limitations.append(limitation)
                     outcomes.append(outcome)
                 if "failure" in outcomes:
                     actions[action] = "failure"

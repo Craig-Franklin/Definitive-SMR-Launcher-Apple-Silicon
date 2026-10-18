@@ -71,3 +71,12 @@ construction, AI, era, goal and save work. Scheduling those checks later never
 removes final obligations in issue #26 or promotes load-only evidence to whole-
 scenario acceptance. Keep crash/stop, normal exit and restoration outcomes
 separate from gameplay results.
+
+For applicable `ai_competition`, the independently reviewed protocol must name
+the top-level opponent-count option in `ai_opponents_option`. That field must
+belong to the exact known option attestation and contain a positive integer;
+zero, booleans, strings and unresolved player lists cannot establish competition.
+The existing expected-action and feature assertions still apply. This names a
+reviewed collection field; it does not infer a count from arbitrary option names
+or collect game settings. Older protocols without the mapping remain readable,
+but cannot earn a current AI-competition pass. A failure remains a failure.
