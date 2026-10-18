@@ -236,13 +236,29 @@ def review_body(owner, *, initial):
 
 
 def exact_review(owner, frame, *, initial):
-    # treeText uses literal newlines within multiline Text labels. Require the
-    # complete body, rather than matching fragments or the other review's hash.
+    # Native treeText may flatten Text whitespace. Compare the entire sheet
+    # label, not a substring: the initial warning can contain the final one.
     body = review_body(owner, initial=initial)
-    require(body in frame["treeText"], "Exact current review body/identity required")
-    other = review_body(owner, initial=not initial)
-    require(other not in frame["treeText"], "Stale or overlapping GUI reviews")
-    button_index(frame, "Play Original Edition" if initial else "Launch This Edition Anyway")
+    text = frame["treeText"]
+    require(
+        len(re.findall(r"^[ \t]*\d+ sheet alert$", text, re.M)) == 1,
+        "One GUI review sheet required",
+    )
+    sheet = re.search(
+        r"^([ \t]*)\d+ sheet alert\n(.*?)(?=\n\1\d+ |\nThe focused UI element|\Z)",
+        text,
+        re.M | re.S,
+    )
+    require(sheet is not None, "Current GUI review sheet unavailable")
+    labels = re.findall(r"^[ \t]+\d+ text (.*?)(?=\n[ \t]+\d+ [^\n]+|\Z)", sheet[2], re.M | re.S)
+    require(
+        sum(" ".join(label.split()) == " ".join(body.split()) for label in labels) == 1,
+        "Exact current review body/identity required",
+    )
+    button_index(
+        dict(treeText=sheet[2]),
+        "Play Original Edition" if initial else "Launch This Edition Anyway",
+    )
 
 
 def search_focused(frame):
@@ -328,6 +344,39 @@ def pilot_class(common, catalogue_class):
 
         def native_receiver(self):
             return self.frontend if self.gui_phase else super().native_receiver()
+
+        def gui_review_windows(self, label, windows):
+            # An AppKit confirmation sheet has its own CG window, but remains
+            # an AX child of the already bound Map Library receiver. Preserve
+            # the raw enumeration and never apply this exception to the game.
+            if len(windows) == 1 or label not in ("MachineOriginalReview", "MachineFinalReview"):
+                return windows
+            self.require_binding_window()
+            require(
+                self.gui_phase
+                and self.gui_play_sent
+                and not self.gui_bound
+                and len(windows) == 2
+                and self.last_agent_window_process.same(self.frontend)
+                and all(
+                    type(w.get("id")) is int
+                    and w["id"] > 0
+                    and w.get("app", {}).get("pid") == self.frontend.pid
+                    and w.get("isOffscreen") is False
+                    and w.get("isMinimized") is False
+                    for w in windows
+                ),
+                "Exact owned GUI review windows required",
+            )
+            main = [w for w in windows if w["id"] == self.last_agent_window]
+            other = [w for w in windows if w["id"] != self.last_agent_window]
+            require(
+                len(main) == len(other) == 1
+                and main[0].get("title") == "Map Library"
+                and other[0].get("title") == "",
+                "Bound Map Library and one native review window required",
+            )
+            return main
 
         def verify_launcher_files(self):
             expected = self.gui["launcher_files"]

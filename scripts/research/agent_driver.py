@@ -1125,6 +1125,8 @@ def pilot_class(common):
                 )
                 time.sleep(0.25)
             visible = windows
+            if self.job["purpose"] == GUI_MENU_PURPOSE and self.gui_phase:
+                visible = self.gui_review_windows(label, windows)
             require(
                 len(visible) == 1
                 and type(visible[0].get("id")) is int

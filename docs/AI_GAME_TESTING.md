@@ -403,6 +403,14 @@ assumed advancement or intervening model replies. Its receipts are machine
 evidence, not fabricated actor visual decisions. Missing/changed/ambiguous
 observables remain HOLD. Ordinary observer binding must finish within the single
 original request+20 window; the caller cannot override the frozen deadline.
+Native confirmation sheets may enumerate as a second untitled frontend window.
+Only the two mechanical review reads can retain the already bound Map Library
+receiver in that exact owned pair. The raw enumeration stays intact; unrelated,
+hidden, replaced or additional windows refuse. The fresh AX sheet must contain
+the complete expected review label and its exact consent button. Whitespace
+flattening is allowed, but warning text, edition and build must match in full;
+the longer initial warning cannot substitute for the final warning. Game-window
+selection and all original input, observer and cleanup bounds stay unchanged.
 No source `app.play`, direct game open, preparation, import or save is permitted.
 
 Acceptance combines a fresh target-gated UI success transition, current exact

@@ -53,6 +53,18 @@ def scroll_detail_tree(name, paragraph=0):
     )
 
 
+def review_tree(owner, *, initial, flatten=True):
+    body = gui.review_body(owner, initial=initial)
+    if flatten:
+        body = " ".join(body.split())
+    button = (
+        "10 button Play Original Edition" if initial else "11 button Launch This Edition Anyway"
+    )
+    return (
+        "0 standard window Map Library\n\t92 sheet alert\n\t\t94 text " + body + "\n\t\t" + button
+    )
+
+
 class GUIControls(unittest.TestCase):
     def setUp(self):
         fixture = fixtures.CatalogueRestoreTests()
@@ -292,9 +304,7 @@ class GUIControls(unittest.TestCase):
     def test_initial_and_final_reviews_never_substitute_for_each_other(self):
         owner = self.owner
         owner.gui_play_sent = True
-        self.frame["treeText"] = (
-            gui.review_body(owner, initial=True) + "\n4 button Play Original Edition"
-        )
+        self.frame["treeText"] = review_tree(owner, initial=True).replace("10 button", "4 button")
         action = ["click", "--element-index", "4"]
         self.assertEqual(
             owner.validate_gui_action("gui_original", self.decision(action), self.frame), action
@@ -303,9 +313,7 @@ class GUIControls(unittest.TestCase):
             owner.validate_gui_action(
                 "gui_confirm", self.decision(["click", "--element-index", "5"]), self.frame
             )
-        self.frame["treeText"] = (
-            gui.review_body(owner, initial=False) + "\n5 button Launch This Edition Anyway"
-        )
+        self.frame["treeText"] = review_tree(owner, initial=False).replace("11 button", "5 button")
         action = ["click", "--element-index", "5"]
         self.assertEqual(
             owner.validate_gui_action("gui_confirm", self.decision(action), self.frame), action
@@ -324,11 +332,61 @@ class GUIControls(unittest.TestCase):
         with self.assertRaisesRegex(ControlRefused, "Exact selected UI identity"):
             self.owner.validate_gui_observation("gui_select", frame, self.decision())
 
+    def test_full_sheet_body_allows_whitespace_and_nested_warning_not_substitution(self):
+        owner = self.owner
+        owner.gui["initial_warning"] = owner.config["warning"] + "\nAdditional preparation warning."
+        for initial in (True, False):
+            for flatten in (True, False):
+                frame = dict(treeText=review_tree(owner, initial=initial, flatten=flatten))
+                gui.exact_review(owner, frame, initial=initial)
+                with self.assertRaisesRegex(ControlRefused, "Exact current review"):
+                    gui.exact_review(owner, frame, initial=not initial)
+        original = review_tree(owner, initial=True)
+        for changed in (
+            original.replace("Additional", "Different"),
+            original.replace("warning.\n", "warning. OMITTED\n"),
+            original.replace("b" * 64, "d" * 64),
+            original + "\n\t\t95 text " + " ".join(gui.review_body(owner, initial=True).split()),
+        ):
+            with self.assertRaisesRegex(ControlRefused, "Exact current review"):
+                gui.exact_review(owner, dict(treeText=changed), initial=True)
+        with self.assertRaisesRegex(ControlRefused, "One GUI review sheet"):
+            gui.exact_review(owner, dict(treeText=original + "\n\t99 sheet alert"), initial=True)
+
+    def test_review_windows_only_select_bound_main_for_exact_owned_modal_pair(self):
+        owner = self.owner
+        owner.gui_play_sent = owner.gui_selection_bound = True
+        owner.request = time.monotonic()
+        owner.launch_deadline = owner.request + 390
+        owner.last_agent_window = 33
+        owner.last_agent_window_process = owner.frontend
+        main = dict(
+            id=33, title="Map Library", app=dict(pid=21), isOffscreen=False, isMinimized=False
+        )
+        sheet = dict(main, id=34, title="")
+        rows = [main, sheet]
+        self.assertEqual(owner.gui_review_windows("MachineOriginalReview", rows), [main])
+        self.assertEqual(rows, [main, sheet])
+        self.assertIs(owner.gui_review_windows("Agent008", rows), rows)
+        for changed in (
+            [main, dict(sheet, app=dict(pid=999))],
+            [main, dict(sheet, id=33)],
+            [dict(main, id=35), sheet],
+            [main, dict(sheet, title="Unrelated window")],
+            [main, dict(sheet, isOffscreen=True)],
+            [main, sheet, dict(sheet, id=35)],
+        ):
+            with self.assertRaises(ControlRefused):
+                owner.gui_review_windows("MachineFinalReview", changed)
+        owner.last_agent_window_process = Process(21, 999, "/synthetic/frontend")
+        with self.assertRaises(ControlRefused):
+            owner.gui_review_windows("MachineOriginalReview", rows)
+
     def test_no_preparation_or_unreviewed_confirmation(self):
         self.owner.gui_play_sent = True
         self.frame["treeText"] = (
-            gui.review_body(self.owner, initial=True)
-            + "\n4 button Play Original Edition\n5 button Prepare & Play Compatibility Edition"
+            review_tree(self.owner, initial=True).replace("10 button", "4 button")
+            + "\n\t\t5 button Prepare & Play Compatibility Edition"
         )
         with self.assertRaisesRegex(ControlRefused, "Preparation refused"):
             self.owner.validate_gui_action(
@@ -868,9 +926,8 @@ class ComposedGUIOwner(unittest.TestCase):
             return scroll_detail_tree(owner.gui["display_name"], self.semantic_scrolls)
         return {
             "selected": selected + "\n9 button",
-            "initial": gui.review_body(owner, initial=True) + "\n10 button Play Original Edition",
-            "final": gui.review_body(owner, initial=False)
-            + "\n11 button Launch This Edition Anyway",
+            "initial": review_tree(owner, initial=True),
+            "final": review_tree(owner, initial=False),
             "success": selected
             + ("\n" + gui.SUCCESS if self.fail_mode != "unknown-success" else "\nOutcome unknown"),
             "game-launcher": "18 button Play",
@@ -973,13 +1030,24 @@ class ComposedGUIOwner(unittest.TestCase):
             height=800,
             title="Sid Meier's Railroads! Options"
             if self.state == "game-launcher"
-            else "Main Menu",
+            else ("Map Library" if owner.gui_phase else "Main Menu"),
         )
         if action == ["list-windows"]:
             result = dict(
                 app=dict(pid=pid),
                 windows=[dict(window, app=dict(pid=pid), isOffscreen=False, isMinimized=False)],
             )
+            if self.state in ("initial", "final"):
+                result["windows"].append(
+                    dict(
+                        window,
+                        id=34,
+                        title="",
+                        app=dict(pid=pid),
+                        isOffscreen=False,
+                        isMinimized=False,
+                    )
+                )
         else:
             if action == ["get-app-state"] and self.state == "initial" and self.provider_delay:
                 self.clock[0] += self.provider_delay
@@ -1128,6 +1196,21 @@ class ComposedGUIOwner(unittest.TestCase):
         self.assertEqual((target / "Saves/existing.sav").read_bytes(), b"existing target save")
         self.assertEqual((target / "Saves/new.sav").read_bytes(), b"new save remains")
         self.assertEqual((owner.profiles.live / "Saves/personal.sav").read_bytes(), b"return save")
+
+    def test_two_native_review_windows_keep_raw_receipts_and_full_nested_bodies(self):
+        self.owner.gui["initial_warning"] = (
+            self.owner.config["warning"] + "\nAdditional original-edition preparation warning."
+        )
+        self.test_actual_decisions_entry_observer_close_game_quit_and_restoration()
+        for label in ("MachineOriginalReview", "MachineFinalReview"):
+            raw = catalogue.decode(
+                (self.owner.directory / (label + "Windows01.stdout")).read_bytes()
+            )
+            self.assertEqual([w["id"] for w in raw["result"]["windows"]], [33, 34])
+            self.assertEqual(raw["result"]["windows"][1]["title"], "")
+            frame = catalogue.decode((self.owner.directory / (label + "-frame.json")).read_bytes())
+            self.assertEqual(frame["window"]["id"], 33)
+        self.assertLess(self.first_bound_record["observed"] - self.owner.request, 20)
 
     def start_offscreen_selection_hold(self):
         self.metadata_offscreen = True
