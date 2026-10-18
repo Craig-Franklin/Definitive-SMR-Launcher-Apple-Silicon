@@ -11,7 +11,7 @@ struct LauncherView: View {
     @ViewState private var discardMap: String?
     @ViewState private var showingDiscard = false
     @FocusState private var focusedMapID: String?
-    @FocusState private var inspectorFocused: Bool
+    @FocusState private var focusedSection: String?
     @ViewState private var searchFocusRequest: UUID?
     @ViewState private var pendingInspectorFocus = false
     @ViewState private var mountedInspectorID: String?
@@ -57,7 +57,7 @@ struct LauncherView: View {
                 ToolbarItemGroup {
                     if model.destination == "Map Library" {
                         NativeLibrarySearch(query: $model.query, title: model.translated("Search maps"), focusRequest: searchFocusRequest, active: model.destination == "Map Library", focused: {
-                            focusedMapID = nil; inspectorFocused = false
+                            focusedMapID = nil; focusedSection = nil
                         }, consumed: { id in
                             if searchFocusRequest == id { searchFocusRequest = nil }
                         }).frame(minWidth: 150, idealWidth: 220, maxWidth: 300)
@@ -287,9 +287,25 @@ struct LauncherView: View {
                     Button("Edit Details…") { model.edit(map) }
                     Button("Record Outcome…") { model.record(map) }
                 }.disabled(model.working)
-                Picker("Map section", selection: $model.section) {
-                    ForEach(["Overview", "Play History", "Issues & Evidence", "Compatibility & Editions", "History Scope", "Legacy Mac Test", "Edit Details", "Record Outcome"], id: \.self) { Text($0) }
-                }.labelsHidden().pickerStyle(.menu).focusable().focused($inspectorFocused)
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 8) {
+                    ForEach(["Overview", "Play History", "Issues & Evidence", "Compatibility & Editions", "History Scope", "Legacy Mac Test", "Edit Details", "Record Outcome"], id: \.self) { section in
+                        Button {
+                            focusedSection = section
+                            model.section = section
+                        } label: {
+                            HStack {
+                                Text(section).multilineTextAlignment(.leading)
+                                Spacer(minLength: 4)
+                                if model.section == section { Image(systemName: "checkmark").accessibilityHidden(true) }
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                        }.buttonStyle(.bordered)
+                            .tint(model.section == section ? .accentColor : .secondary)
+                            .accessibilityLabel("Show \(section) section")
+                            .accessibilityValue(model.section == section ? "Selected" : "Not selected")
+                            .accessibilityAddTraits(model.section == section ? .isSelected : [])
+                            .focused($focusedSection, equals: section)
+                    }
+                }
                     .onAppear {
                         mountedInspectorID = map.id
                         focusInspector(map.id)
@@ -561,13 +577,13 @@ struct LauncherView: View {
         Task { await model.workflow(action, profile: profile ?? model.selection) }
     }
     private func focusSearch() {
-        focusedMapID = nil; inspectorFocused = false
+        focusedMapID = nil; focusedSection = nil
         model.destination = "Map Library"
         searchFocusRequest = UUID()
     }
     private func returnToLibrary() {
         model.narrowDetail = false
-        searchFocusRequest = nil; inspectorFocused = false
+        searchFocusRequest = nil; focusedSection = nil
         DispatchQueue.main.async { focusedMapID = model.visible.first(where: { $0.id == model.selection })?.id ?? model.visible.first?.id }
     }
     private func openMap(_ map: MapItem) {
@@ -579,7 +595,7 @@ struct LauncherView: View {
     private func focusInspector(_ id: String) {
         DispatchQueue.main.async {
             if pendingInspectorFocus && mountedInspectorID == id && model.selection == id && model.destination == "Map Library" {
-                inspectorFocused = true; pendingInspectorFocus = false
+                focusedSection = model.section; pendingInspectorFocus = false
             }
         }
     }
