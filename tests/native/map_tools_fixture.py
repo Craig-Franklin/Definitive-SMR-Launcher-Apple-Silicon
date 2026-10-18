@@ -5,6 +5,7 @@ import sys
 import time
 
 configuration, counts, last = {}, {}, {}
+held_preflights = []
 for line in sys.stdin:
     request = json.loads(line)
     method, params = request["method"], request["params"]
@@ -19,6 +20,11 @@ for line in sys.stdin:
         value = counts
     elif method == "fixture.last":
         value = last
+    elif method == "fixture.release_preflight":
+        for response in held_preflights:
+            print(json.dumps(response), flush=True)
+        held_preflights.clear()
+        configuration.pop("hold_preflight", None)
     elif method == "maptools.original_context":
         value = {"game_executable_sha256": "c" * 64}
     elif method == "maptools.play_preflight":
@@ -76,4 +82,8 @@ for line in sys.stdin:
         }
     elif method == "shutdown":
         break
-    print(json.dumps({"id": request["id"], "ok": ok, "data" if ok else "error": value}), flush=True)
+    response = {"id": request["id"], "ok": ok, "data" if ok else "error": value}
+    if method == "maptools.play_preflight" and configuration.get("hold_preflight"):
+        held_preflights.append(response)
+    else:
+        print(json.dumps(response), flush=True)

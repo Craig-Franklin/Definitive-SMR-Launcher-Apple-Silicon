@@ -129,10 +129,14 @@ import Foundation
         model.details[map.id] = ["context": ["game_executable_sha256": build]]
         require(try await count("play_commit") == 0, "Changed Play target must be reviewed again")
 
-        _ = try await backend.call("fixture.configure", ["warning": "Known synthetic issue", "delay": true])
+        _ = try await backend.call("fixture.configure", ["warning": "Known synthetic issue", "hold_preflight": true])
+        let preflightCount = try await count("play_preflight")
         let reading = Task { await tools.beginPlay(model, map) }
-        try await Task.sleep(nanoseconds: 30_000_000)
+        // Keep the actual preflight pending until the selection has changed.
+        while try await count("play_preflight") == preflightCount { await Task.yield() }
+        require(model.busy && tools.playReview == nil, "Selection changes while the preflight is still pending")
         model.selection = "different-map"
+        _ = try await backend.call("fixture.release_preflight")
         await reading.value
         require(tools.playReview == nil, "Stale preflight cannot present another target's warning")
         model.selection = map.id
