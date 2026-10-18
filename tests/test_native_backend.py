@@ -18,6 +18,7 @@ import zlib
 from smr_launcher.annotations import AnnotationStore, validate_image
 from smr_launcher.application import MapRecord
 from smr_launcher.map_metadata import MapMetadata
+from smr_launcher.application import LauncherApplication
 from smr_launcher.native_backend import (
     NativeBackendWindow,
     NativeLibrary,
@@ -57,6 +58,7 @@ def app(library):
     result.verification_for = Mock(return_value=None)
     result.map_icon = Mock(return_value=None)
     result.import_checks = Mock(return_value=None)
+    result.scenario_metadata = Mock(return_value=[])
     return result
 
 
@@ -89,6 +91,44 @@ def window():
 
 
 class AnnotationTests(TestCase):
+    def test_details_read_authored_labels_from_each_exact_selected_scenario(self):
+        with TemporaryDirectory(dir=Path(gettempdir()).resolve()) as folder:
+            application = app(folder)
+            selected = replace(
+                record(),
+                prepared_directory="d" * 32,
+                scenarios=("UserMaps/A.xml", "UserMaps/B.xml"),
+            )
+            real = LauncherApplication.__new__(LauncherApplication)
+            real.prepared = Path(folder) / "prepared"
+            root = real.prepared / selected.prepared_directory
+            (root / "UserMaps").mkdir(parents=True)
+            for name, title in (("A", "Solo"), ("B", "Competition")):
+                (root / f"UserMaps/{name}.xml").write_text(
+                    f"<RRTScenario><szMapName>{title}</szMapName><szSubtitle>{name} subtitle</szSubtitle><szDescription>Different briefing</szDescription></RRTScenario>"
+                )
+            application.catalogue.return_value = (selected,)
+            application.scenario_metadata = real.scenario_metadata
+            before = {p: p.read_bytes() for p in root.rglob("*.xml")}
+            details = NativeLibrary().details(application, dict(profile_id=selected.profile_id))
+            self.assertEqual(details["scenarios"], list(selected.scenarios))
+            self.assertEqual(
+                details["scenario_metadata"],
+                [
+                    dict(path=f"UserMaps/{name}.xml", title=title, subtitle=f"{name} subtitle")
+                    for name, title in (("A", "Solo"), ("B", "Competition"))
+                ],
+            )
+            # A malformed or escaping catalogue path never borrows another edition's labels.
+            wrong = replace(
+                selected, scenarios=("../UserMaps/A.xml", "/outside.xml", "UserMaps/missing.xml")
+            )
+            self.assertEqual(
+                real.scenario_metadata(wrong),
+                [dict(path=p, title=None, subtitle=None) for p in wrong.scenarios],
+            )
+            self.assertEqual({p: p.read_bytes() for p in before}, before)
+
     def test_identity_scoped_overrides_leave_package_facts_alone(self):
         with TemporaryDirectory(dir=Path(gettempdir()).resolve()) as folder:
             store, r = AnnotationStore(folder), record()

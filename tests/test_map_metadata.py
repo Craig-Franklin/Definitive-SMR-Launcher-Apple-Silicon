@@ -12,10 +12,56 @@ from smr_launcher.map_metadata import (
     MapMetadata,
     parse_map_metadata,
     read_map_metadata,
+    read_scenario_labels,
 )
 
 
 class MapMetadataTests(unittest.TestCase):
+    def test_scenario_labels_keep_subtitle_separate_from_description(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp).resolve() / "Scenario.xml"
+            for encoding in ("utf-8", "utf-16"):
+                payload = (
+                    "<RRTScenario><szMapName>Sample &amp; Coast</szMapName>"
+                    "<szSubtitle>The Short Subtitle</szSubtitle>"
+                    "<szDescription>A different, longer briefing.</szDescription></RRTScenario>"
+                ).encode(encoding)
+                path.write_bytes(payload)
+                before = path.stat()
+                self.assertEqual(
+                    read_scenario_labels(path),
+                    dict(title="Sample & Coast", subtitle="The Short Subtitle"),
+                )
+                self.assertEqual(path.read_bytes(), payload)
+                self.assertEqual(
+                    (path.stat().st_ino, path.stat().st_mtime_ns),
+                    (before.st_ino, before.st_mtime_ns),
+                )
+
+    def test_scenario_labels_leave_missing_ambiguous_or_unsafe_fields_unknown(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            path = root / "Scenario.xml"
+            unknown = dict(title=None, subtitle=None)
+            for payload in (
+                b"<RRTScenario><szDescription>Not a subtitle</szDescription></RRTScenario>",
+                b"<RRTScenario><Other><szMapName>Nested title</szMapName></Other></RRTScenario>",
+                b"<RRTScenario><szMapName>A</szMapName><szMapName>B</szMapName><szSubtitle/><szSubtitle>B</szSubtitle></RRTScenario>",
+                b"<RRTScenario><szMapName><Other>Nested</Other></szMapName></RRTScenario>",
+                b"<Other><szMapName>Wrong root</szMapName></Other>",
+                b"<!DOCTYPE RRTScenario [<!ENTITY a 'hidden'>]><RRTScenario><szMapName>&a;</szMapName></RRTScenario>",
+                b"<broken>",
+                b"x" * (8 * 1024 * 1024 + 1),
+            ):
+                path.write_bytes(payload)
+                self.assertEqual(read_scenario_labels(path), unknown)
+            path.write_text("<RRTScenario><szMapName>Retain</szMapName></RRTScenario>")
+            link = root / "link.xml"
+            link.symlink_to(path)
+            self.assertEqual(read_scenario_labels(link), unknown)
+            self.assertEqual(read_scenario_labels(root / "missing.xml"), unknown)
+            self.assertEqual(read_scenario_labels(root), unknown)
+
     def test_explicit_headers_and_description_preserve_original_text(self):
         raw = (
             "Map Name: Sample Map\r\nMap Version: V1.02\r\n"

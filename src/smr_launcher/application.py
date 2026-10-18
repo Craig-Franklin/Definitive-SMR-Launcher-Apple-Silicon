@@ -50,9 +50,10 @@ from .scenario_evidence import (
     read_bytes,
     MAX_RECEIPT_BYTES,
     engine_context,
+    relative,
 )
 from .collection import RemoteMap
-from .map_metadata import MapMetadata, read_map_metadata
+from .map_metadata import MapMetadata, read_map_metadata, read_scenario_labels
 from . import import_checks, removal
 from .import_checks import inspect_map
 from .launch_preferences import prepare_settings
@@ -691,6 +692,19 @@ class LauncherApplication:
         if not directory or Path(directory).name != directory or directory in (".", ".."):
             return MapMetadata()
         return read_map_metadata(self.imports / directory / "mapInfo.txt")
+
+    def scenario_metadata(self, record: MapRecord) -> list[dict]:
+        """Keep every authored label attached to its exact catalogue path."""
+        rows = []
+        for scenario in record.scenarios:
+            labels = dict(title=None, subtitle=None)
+            try:
+                path = self._prepared_root(record) / relative(scenario)
+                labels = read_scenario_labels(path)
+            except (EvidenceError, OSError, RuntimeError, ValueError):
+                pass  # Unreadable presentation metadata must not prevent browsing.
+            rows.append(dict(path=scenario, **labels))
+        return rows
 
     def create_compatibility_edition(
         self, record: MapRecord, rules: tuple, *, label: str

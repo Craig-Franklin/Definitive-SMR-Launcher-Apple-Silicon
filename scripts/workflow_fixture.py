@@ -194,6 +194,14 @@ class WorkflowFixture:
                 profile_id=record.profile_id,
                 context=ctx,
                 scenarios=record.scenarios,
+                scenario_metadata=[
+                    dict(
+                        path=record.scenarios[0],
+                        title="Synthetic Coast Scenario",
+                        subtitle="A subtitle, not the briefing",
+                    ),
+                    dict(path=record.scenarios[1], title=None, subtitle=None),
+                ],
                 history=history,
                 summary=self.presentation(record)["summary"],
                 verification_text=(

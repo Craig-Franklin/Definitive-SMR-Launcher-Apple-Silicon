@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 import os
 import re
 import stat
+import xml.etree.ElementTree as ET
 
 
 MAX_MAP_INFO_BYTES = 256 * 1024
@@ -136,7 +137,7 @@ def parse_map_metadata(payload: bytes) -> MapMetadata:
     )
 
 
-def read_map_metadata(path: Path) -> MapMetadata:
+def _read_metadata(path: Path, maximum: int) -> bytes:
     """Read one regular file without following any symlink in its path.
 
     Descriptor-relative traversal also rejects directory substitutions during
@@ -145,7 +146,7 @@ def read_map_metadata(path: Path) -> MapMetadata:
     """
     path = Path(path).expanduser()
     if ".." in path.parts:
-        return MapMetadata()
+        return b""
     path = path.absolute()
     directory_fd = None
     file_fd = None
@@ -160,16 +161,42 @@ def read_map_metadata(path: Path) -> MapMetadata:
             path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd
         )
         info = os.fstat(file_fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_MAP_INFO_BYTES:
-            return MapMetadata()
+        if not stat.S_ISREG(info.st_mode) or info.st_size > maximum:
+            return b""
         with os.fdopen(file_fd, "rb") as stream:
             file_fd = None
-            payload = stream.read(MAX_MAP_INFO_BYTES + 1)
-        return parse_map_metadata(payload)
+            payload = stream.read(maximum + 1)
+        return payload if len(payload) <= maximum else b""
     except (OSError, ValueError):
-        return MapMetadata()
+        return b""
     finally:
         if file_fd is not None:
             os.close(file_fd)
         if directory_fd is not None:
             os.close(directory_fd)
+
+
+def read_map_metadata(path: Path) -> MapMetadata:
+    return parse_map_metadata(_read_metadata(path, MAX_MAP_INFO_BYTES))
+
+
+def read_scenario_labels(path: Path) -> dict:
+    """Read literal authored labels, never a rendered-title or Play assertion."""
+    result = dict(title=None, subtitle=None)
+    payload = _read_metadata(path, 8 * 1024 * 1024)
+    declarations = payload.replace(b"\0", b"").upper()
+    if b"<!DOCTYPE" in declarations or b"<!ENTITY" in declarations:
+        return result
+    try:
+        document = ET.fromstring(payload)
+    except (ET.ParseError, ValueError):
+        return result
+    if document.tag != "RRTScenario":
+        return result
+    for field, tag in (("title", "szMapName"), ("subtitle", "szSubtitle")):
+        nodes = document.findall("./" + tag)
+        if len(nodes) == 1 and not len(nodes[0]):
+            value = (nodes[0].text or "").strip()
+            if value and len(value) <= 4000:
+                result[field] = value
+    return result

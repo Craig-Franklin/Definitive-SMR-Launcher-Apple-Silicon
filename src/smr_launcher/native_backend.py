@@ -318,6 +318,7 @@ class NativeLibrary:
         return dict(
             profile_id=record.profile_id,
             scenarios=list(record.scenarios),
+            scenario_metadata=app.scenario_metadata(record),
             languages=[dict(id=k, name=v) for k, v in LANGUAGES.items()],
             context=ctx,
             history=[{**e, "label": LABELS[e["kind"]]} for e in rows],

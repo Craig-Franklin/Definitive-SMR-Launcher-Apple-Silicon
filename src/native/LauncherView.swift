@@ -328,6 +328,18 @@ struct LauncherView: View {
 
     private func overview(_ map: MapItem) -> some View {
         VStack(alignment: .leading, spacing: 16) {
+            let scenarios = model.details[map.id]?.rows("scenario_metadata") ?? []
+            if !scenarios.isEmpty {
+                Text("Authored Scenarios").font(.headline)
+                ForEach(scenarios.indices, id: \.self) { index in
+                    VStack(alignment: .leading, spacing: 6) {
+                        fact("Title", scenarios[index].text("title", "Not provided or unreadable"))
+                        fact("Subtitle", scenarios[index].text("subtitle", "Not provided or unreadable"))
+                        Text(scenarios[index].text("path")).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    }
+                }
+                Text("Package-authored labels; the game may display different text.").font(.caption).foregroundStyle(.secondary)
+            }
             artwork(map).frame(height: 155)
                 .modifier(NativePersonalImageDrop(model: model, map: map))
             Text("Drop one local image to edit. Save is still required.").font(.caption).foregroundStyle(.secondary)
