@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from .asset_copy import copy_asset
 from pathlib import Path
 from typing import Dict, Tuple
 import hashlib
@@ -108,6 +109,11 @@ def _prepare_variant(
         raise PackageError("Imported package has no UserMaps")
     if any((imported_package / name).is_file() for name in ("CustomAssets", "UserMaps")):
         raise PackageError("Install roots must be directories")
+    source_manifest = _tree_manifest(imported_package)
+    source_metadata = {
+        path.relative_to(imported_package): (path.stat().st_mode, path.stat().st_mtime_ns)
+        for path in imported_package.rglob("*")
+    }
     source_roots = (clean_profile.resolve(), imported_package.resolve())
     destination = destination.parent.resolve() / destination.name
     if any(
@@ -129,10 +135,17 @@ def _prepare_variant(
         for name in ("CustomAssets", "UserMaps"):
             source = imported_package / name
             if source.is_dir():
-                shutil.copytree(source, stage / name, copy_function=shutil.copy2)
+                shutil.copytree(source, stage / name, copy_function=copy_asset)
             else:
                 (stage / name).mkdir()
         (stage / "Saves").mkdir()
+        _assert_regular_tree(imported_package)
+        if _tree_manifest(imported_package) != source_manifest or any(
+            (path.stat().st_mode, path.stat().st_mtime_ns) != metadata
+            for relative, metadata in source_metadata.items()
+            for path in (imported_package / relative,)
+        ):
+            raise PackageError("Imported assets changed during preparation")
         _assert_regular_tree(stage)
         if rules or edition_options:
             _make_writable_tree(stage)
