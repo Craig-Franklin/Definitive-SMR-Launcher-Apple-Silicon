@@ -262,7 +262,7 @@ struct LauncherView: View {
                         Text(map.title.isEmpty ? "Local map edition" : "Personal display name · \(map.packageName)").font(.subheadline).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    if model.section == "Overview" {
+                    if model.section == "Overview" || model.section == "Issues & Evidence" {
                         Button("Play", systemImage: "play.fill") { Task { await mapTools.beginPlay(model, map) } }
                             .primaryPlayStyle().accessibilityLabel("Play selected map").disabled(model.working || !model.enrolled || !model.connected)
                     }
