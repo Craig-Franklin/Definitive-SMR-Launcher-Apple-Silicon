@@ -52,6 +52,17 @@ before service startup. The backend remains responsible for expiry and the
 neither a UI-test owner nor admission, observer, cancellation or restoration;
 those must be established separately before a game test.
 
+The agent driver also supports a separate, exact Orca 1.4.229 pre-input
+binding. Its job must include the pinned installed helper, official source,
+source/refusal analysis, official-release binary comparison and connection-loop
+source. The complete entry validator and each mutable input recheck those files.
+The frozen 1.4.224 contract remains unchanged; selecting a new version never
+updates or reuses an old job/admission. The 1.4.229 binding does not reuse the
+older TypeScript completed-click error settlement: such an error remains
+uncertain and cannot authorize restoration. Matching source and official release
+bytes is not a reproducible-build proof or runtime/game acceptance. A GUI launch
+still needs its distinct owner and an exact reviewed, freshly admitted job.
+
 The service rechecks its owner and the fixed deadline at the application/profile
 exchange, settings update and actual `Popen` boundary. Finite launch refuses busy
 locks instead of waiting. Native input EOF/disconnection prevents a later
@@ -256,6 +267,78 @@ This is packaged **backend** acceptance, not a Swift UI click or map gameplay.
 Focused offline controls: `python -m unittest discover -s tests -p test_catalogue_menu.py`.
 The temporary service and profile fixtures do not admit a live trial or prove
 that a game reached its menu. Runtime observations require separate review.
+
+
+`ONE_AGENT_NATIVE_GUI_CATALOGUE_MENU_V1` is the closed native GUI alternative.
+It requires the reviewed Orca 1.4.229 contract, the existing MENU `agent_save`
+metadata shape, one existing original catalogue target, and a distinct current
+return. It does not save a game. `catalogue_menu.native_gui` pins `display_name`,
+`frontend_sha256`, `initial_warning`, and `launcher_files` (exact facts or absence
+for `update-preferences.json` and `updates/pending.json`). The ordinary target,
+package, preservation and mutable-preimage fields remain required. The final
+no-preparation warning is `catalogue_menu.warning`; it must not be substituted
+with the initial compatibility warning. No cached preparation descriptor applies.
+
+One exact LaunchServices frontend receives the immutable anchor+390 deadline.
+The owner binds its native lease and its Swift-owned backend's PID, birth and
+executable. Fresh visual decisions select the exact original card; substring
+search results need not be unique. Current UI archive/variant/build evidence is
+required before Play. After validating the actor's fresh Play decision, the owner
+arms the observer once, outside the input mutation guard and before Play input.
+Actor decision time therefore consumes the original 390-second work interval,
+without consuming observer readiness. The conservative arm timestamp is recorded
+before the maintained arm call; failure cannot renew it or re-arm.
+If the current Issues & Evidence body places provenance below the viewport,
+GUI selection permits only `perform-secondary-action --element-index <fresh-area>
+--action "scroll down"`, with receiver `provenance_control`. The current detail
+scroll area must advertise that action and contain the exact target title and
+Issues & Evidence body. At most two dispatches are counted in the final input
+hook after cancellation/freshness guards, before attempted input and Popen. This
+allowance does not use the transport scroll grammar or counter. After each action,
+the actor must inspect the fresh viewport: stop if it did not move down; use a
+second action only if the first visibly advanced and metadata remains below.
+This movement judgment is actor protocol, not machine scene proof. Exact metadata
+is still required before observing selection or Play; pre-Play HOLD is unchanged.
+
+The single original request is published inside final validated Play dispatch, before input. Its real
+awaiting-binding acknowledgment must arrive within the original ready+20 window;
+the conservative caller cutoff starts before arming and never renews. The existing
+input guard is reused without nesting another mutation guard. Late acknowledgment
+or actor response refuses Play input.
+
+After Play, a short mechanical sequence reads the exact initial warning/identity
+and uniquely named Play Original Edition, then a fresh distinct final warning and
+Launch This Edition Anyway, then fresh success/selection. It reuses native
+frame/input/validation and the pinned authorized bodies, with no coordinates,
+assumed advancement or intervening model replies. Its receipts are machine
+evidence, not fabricated actor visual decisions. Missing/changed/ambiguous
+observables remain HOLD. Ordinary observer binding must finish within the single
+original request+20 window; the caller cannot override the frozen deadline.
+No source `app.play`, direct game open, preparation, import or save is permitted.
+
+Acceptance combines a fresh target-gated UI success transition, current exact
+selection, active profile/assets, one expected game birth in the original interval,
+and positive observer binding. A generic status or PID alone grants nothing.
+The observer stays bound while normal launcher Quit settles both frontend and
+backend absence, excludes updater/helper work and reaps only the owned open child.
+Backend absence is recorded without invented EOF, returncode or protocol response.
+Then the existing visual menu, normal game quit and preservation/restoration path
+runs under the original 390/480/900 bounds. Unknown dispatch remains HOLD even if
+the GUI dies; neither `service=None` nor a frontend-only exit permits restoration.
+Draft/update prompts receive no automatic consent. A missing observable or route
+ends the attempt; there is no selector fallback or replay.
+
+Run `python -m unittest discover -s tests -p test_native_gui_menu.py` for public
+synthetic controls. Set `SMR_GUI_COMMON_ROOT` to the retained reviewed common tree
+to also run the composed checks against its actual frame, frozen Wrapper/Observer
+state machine and lifecycle implementation. The fixture steps the original API
+over temporary receipts and a simulated monitor; it does not fabricate ready,
+awaiting-binding, bound or normal-exit acknowledgments. Delayed eight-second actor
+responses must still bind within 20 seconds; readiness/binding overruns refuse
+new input. Those checks simulate OS/provider boundaries and use temporary
+profiles; they never launch the installed app or game. Without the private tree,
+those composed checks are explicitly skipped. Source checks do not establish a
+live GUI launch, game menu arrival or gameplay acceptance.
 
 
 `ONE_AGENT_PACKAGED_CACHED_MENU_V1` is the separate original-to-cached menu

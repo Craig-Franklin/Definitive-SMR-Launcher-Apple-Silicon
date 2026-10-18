@@ -473,6 +473,54 @@ class CatalogueRestoreTests(unittest.TestCase):
         )
         return job, admission
 
+    def test_real_229_entry_checks_current_evidence_and_complete_closure(self):
+        job, admission = self.entry_contract(driver.CACHED_LOAD_PURPOSE)
+        expected = dict(driver.PREINPUT_229)
+        contract = dict(expected)
+        for path_key, hash_key in (
+            ("native_helper_path", "native_helper_sha256"),
+            ("native_source", "native_source_sha256"),
+            ("proof_path", "proof_sha256"),
+            ("release_match_path", "release_match_sha256"),
+            ("request_loop_source_path", "request_loop_source_sha256"),
+        ):
+            path = (
+                Path(job["native_source"])
+                if path_key == "native_source"
+                else self.owner.directory / path_key
+            )
+            path.write_bytes(("temporary provider " + path_key).encode())
+            expected[hash_key] = contract[hash_key] = driver.sha(path.read_bytes())
+            if path_key != "native_source":
+                contract[path_key] = str(path)
+        expected["native_helper_path"] = contract["native_helper_path"]
+        job["preinput_refusal_contract"] = contract
+        paths = {row["path"] for row in job["closure"]}
+        paths.update(
+            contract[key]
+            for key in ("proof_path", "release_match_path", "request_loop_source_path")
+        )
+        job["closure"] = [
+            dict(path=p, bytes=Path(p).stat().st_size, sha256=driver.sha(Path(p).read_bytes()))
+            for p in sorted(paths)
+        ]
+        review_path = Path(admission["review"]["path"])
+        review = menu.decode(review_path.read_bytes())
+        review["closure"] = job["closure"]
+        review_path.write_bytes(menu.canonical(review))
+        admission["review"]["sha256"] = driver.sha(review_path.read_bytes())
+        with patch.object(driver, "PREINPUT_229", expected):
+            driver.verify_entry(job, admission, "a" * 64)
+            proof = Path(contract["proof_path"])
+            original = proof.read_bytes()
+            proof.write_bytes(b"changed proof")
+            with self.assertRaisesRegex(ControlRefused, "build/proof changed"):
+                driver.verify_entry(job, admission, "a" * 64)
+            proof.write_bytes(original)
+            job["closure"] = [row for row in job["closure"] if row["path"] != str(proof)]
+            with self.assertRaisesRegex(ControlRefused, "Actual imported source paths missing"):
+                driver.verify_entry(job, admission, "a" * 64)
+
     def test_real_load_entry_needs_no_save_intent_and_keeps_closure_guard(self):
         job, admission = self.entry_contract(driver.CACHED_LOAD_PURPOSE)
         self.assertNotIn("agent_save", job)

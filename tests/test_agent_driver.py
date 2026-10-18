@@ -1470,6 +1470,34 @@ class AgentRouteTests(unittest.TestCase):
             )
         self.assertNotIn("finish", self.owner.events)
 
+    def test_new_provider_contract_refuses_before_actual_native_spawn(self):
+        self.owner.launch()
+        self.owner.job["preinput_refusal_contract"] = dict(scope=driver.PREINPUT_229["scope"])
+        with self.assertRaisesRegex(ControlRefused, "Exact prospective"):
+            self.owner.native(
+                "UnreviewedProvider", ["click", "--element-index", "18"], 7, 110, mutable=True
+            )
+        self.assertEqual(self.argv, [])
+        self.assertFalse(self.owner.uncertain_input)
+
+    def test_new_provider_completed_click_failure_does_not_reuse_old_wrapper_proof(self):
+        self.owner.launch()
+        self.owner.job["preinput_refusal_contract"] = dict(scope=driver.PREINPUT_229["scope"])
+        self.native_failure = RuntimeError("completed click; effect unknown")
+        with (
+            patch.object(driver, "verify_preinput_229"),
+            patch.object(driver, "native_source_digest", return_value=driver.NATIVE_SOURCE_SHA256),
+            patch.object(driver, "completed_click_error", return_value=object()),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "effect unknown"):
+                self.owner.native(
+                    "CurrentClick", ["click", "--element-index", "18"], 7, 110, mutable=True
+                )
+        self.assertTrue(self.owner.uncertain_input)
+        self.assertEqual(len(self.argv), 1)
+        self.assertIsNone(getattr(self.owner, "completed_input", None))
+        self.assertFalse((self.directory / "CurrentClick-completed-error.json").exists())
+
     def test_cancellation_during_final_poll_prevents_native_spawn(self):
         self.before_poll = lambda: setattr(self.owner.control, "cancelled", True)
         result = self.run_trial()
@@ -1519,6 +1547,84 @@ class AgentRouteTests(unittest.TestCase):
                 driver.validate_action(
                     "filename", action, frame, "SyntheticToken12345", "filename_field"
                 )
+
+
+class NativePreinput229Tests(unittest.TestCase):
+    def setUp(self):
+        self.directory = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.expected = dict(driver.PREINPUT_229)
+        self.contract = dict(self.expected)
+        self.job = dict(preinput_refusal_contract=self.contract)
+        for path_key, hash_key in (
+            ("native_helper_path", "native_helper_sha256"),
+            ("native_source", "native_source_sha256"),
+            ("proof_path", "proof_sha256"),
+            ("release_match_path", "release_match_sha256"),
+            ("request_loop_source_path", "request_loop_source_sha256"),
+        ):
+            path = self.directory / path_key
+            path.write_bytes(("synthetic " + path_key).encode())
+            digest = driver.sha(path.read_bytes())
+            self.expected[hash_key] = self.contract[hash_key] = digest
+            if path_key == "native_source":
+                self.job[path_key] = str(path)
+            else:
+                self.contract[path_key] = str(path)
+        self.expected["native_helper_path"] = self.contract["native_helper_path"]
+        self.enterContext(patch.object(driver, "PREINPUT_229", self.expected))
+
+    def test_actual_owner_selects_exact_new_contract_and_keeps_legacy_delegate(self):
+        calls = []
+
+        class Legacy:
+            def verify_preinput_contract(self):
+                calls.append("legacy")
+
+        owner = object.__new__(driver.pilot_class(SimpleNamespace(UKCalibration=Legacy)))
+        owner.job = self.job
+        owner.verify_preinput_contract()
+        self.assertEqual(
+            driver.native_source_digest(self.job), self.expected["native_source_sha256"]
+        )
+        self.assertEqual(calls, [])
+        owner.job = dict(preinput_refusal_contract=dict(scope="old frozen scope"))
+        owner.verify_preinput_contract()
+        self.assertEqual(calls, ["legacy"])
+        self.assertEqual(driver.native_source_digest(owner.job), driver.NATIVE_SOURCE_SHA256)
+
+    def test_each_runtime_input_and_evidence_file_remains_strict(self):
+        driver.verify_preinput_229(self.job)
+        for path in self.directory.iterdir():
+            with self.subTest(path=path.name):
+                original = path.read_bytes()
+                path.write_bytes(original + b"changed")
+                with self.assertRaisesRegex(ControlRefused, "build/proof changed"):
+                    driver.verify_preinput_229(self.job)
+                path.write_bytes(original)
+        path = Path(self.contract["request_loop_source_path"])
+        path.unlink()
+        with self.assertRaises(FileNotFoundError):
+            driver.verify_preinput_229(self.job)
+
+    def test_fields_and_types_cannot_replace_the_contract(self):
+        for key, value in (
+            ("scope", "different"),
+            ("schema", True),
+            ("binary_reproducible_build_proven", 0),
+            ("native_helper_sha256", "a" * 64),
+            ("native_source_blob", "b" * 40),
+            ("extra", "not accepted"),
+        ):
+            with self.subTest(key=key):
+                changed = {**self.contract, key: value}
+                with self.assertRaisesRegex(ControlRefused, "Exact prospective"):
+                    driver.verify_preinput_229({**self.job, "preinput_refusal_contract": changed})
+        for key in self.contract:
+            with self.subTest(missing=key):
+                changed = dict(self.contract)
+                del changed[key]
+                with self.assertRaisesRegex(ControlRefused, "Exact prospective"):
+                    driver.verify_preinput_229({**self.job, "preinput_refusal_contract": changed})
 
 
 if __name__ == "__main__":

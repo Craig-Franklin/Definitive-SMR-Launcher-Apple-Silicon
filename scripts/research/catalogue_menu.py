@@ -29,6 +29,7 @@ PURPOSE = "ONE_AGENT_PACKAGED_CATALOGUE_MENU_V1"
 CACHED_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_MENU_V1"
 LOAD_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_LOAD_V1"
 SAVE_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_SAVE_REOPEN_V1"
+GUI_PURPOSE = "ONE_AGENT_NATIVE_GUI_CATALOGUE_MENU_V1"
 OWNED_AUTOSAVE = "Saves/Auto0.SMRailroadsSavedGame"
 
 
@@ -223,7 +224,7 @@ def verify_config(job):
         verify_window_probe(job)
     target = config["target"]
     require(
-        job["purpose"] in (PURPOSE, CACHED_PURPOSE, LOAD_PURPOSE, SAVE_PURPOSE),
+        job["purpose"] in (PURPOSE, CACHED_PURPOSE, LOAD_PURPOSE, SAVE_PURPOSE, GUI_PURPOSE),
         "Closed catalogue purpose required",
     )
     cached = job["purpose"] in (CACHED_PURPOSE, LOAD_PURPOSE, SAVE_PURPOSE)
@@ -268,7 +269,11 @@ def verify_config(job):
     require(
         config["prepare_compatibility"] is cached
         and type(config["warning"]) is str
-        and (0 < len(config["warning"]) <= 16384 if cached else config["warning"] == ""),
+        and (
+            0 < len(config["warning"]) <= 16384
+            if cached or job["purpose"] == GUI_PURPOSE
+            else config["warning"] == ""
+        ),
         "Exact direct or cached preparation/warning contract required",
     )
     if cached:
@@ -312,6 +317,10 @@ def verify_config(job):
         and sha(read_plain(helper, maximum=128 * 1024**2)) == package["executable_sha256"],
         "Exact packaged backend helper required",
     )
+    if job["purpose"] == GUI_PURPOSE:
+        from native_gui_menu import verify_gui_config
+
+        verify_gui_config(job)
     return config
 
 
@@ -621,6 +630,8 @@ def bind_observer(owner, admission):
 def restoration_guard(owner):
     with owner.control.cleanup_guard():
         require(time.monotonic() < owner.anchor + 900, "Original restoration cutoff expired")
+        if owner.job.get("purpose") == GUI_PURPOSE:
+            owner.require_gui_closed()
         require(
             owner.service is None or owner.service.child.poll() is not None,
             "Packaged service still live",

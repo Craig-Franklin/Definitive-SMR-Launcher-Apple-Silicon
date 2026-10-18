@@ -39,6 +39,8 @@ CATALOGUE_MENU_PURPOSE = "ONE_AGENT_PACKAGED_CATALOGUE_MENU_V1"
 CACHED_MENU_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_MENU_V1"
 CACHED_LOAD_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_LOAD_V1"
 CACHED_SAVE_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_SAVE_REOPEN_V1"
+GUI_MENU_PURPOSE = "ONE_AGENT_NATIVE_GUI_CATALOGUE_MENU_V1"
+GUI_STAGES = ("gui_select", "gui_play", "gui_quit")
 TRANSPORT_WORK_SECONDS = 390
 STAGES = ("world", "action", "filename", "saved", "quit", "reopened", "continued", "finished")
 MENU_STAGES = ("launcher", "menu", "returned")
@@ -47,6 +49,49 @@ FRAME_SECONDS = 60
 NATIVE_SOURCE_SHA256 = "1eabe4e19f52bc6684c0b58e6cbc2c92ccf8b8d95d160205e3164432e9951601"
 LAUNCHER_CALIBRATION_SHA256 = "cfa6ec9095af74e7230e2f87a281988e958b1a97a4f6dc57750f2f3812df352c"
 CLICK_SOURCE_SHA256 = "7beb128e95a8e4ed0f18e188a7a97231d6fd70a9e130ca1a4c6adff5eda395eb"
+PREINPUT_229 = {
+    "schema": 1,
+    "scope": "orca-1.4.229-closed-click-stale-element-before-input-v1",
+    "native_helper_path": "/Applications/Orca.app/Contents/Resources/Orca Computer Use.app/Contents/MacOS/orca-computer-use-macos",
+    "native_helper_sha256": "395dec52f2495374b1a28518ce119bc5a50164cbd8022f56652795d9eb9c270d",
+    "native_source_blob": "4d0428d9691c45150d2b15ddafd21dcf80c398b8",
+    "native_source_sha256": "d08e2a7f8df9327d261eb48debc6fb23f4c6fed05930a97f91b04a06e9d7f0b4",
+    "proof_sha256": "ff8017f6a2468d8bd5d00a9580df760ef7e7390ea414c8f74c7c9579a4f114ac",
+    "release_match_sha256": "5385da6759801811db408e2c3320166ac9f3428e75695947a46234958fafbe23",
+    "request_loop_source_sha256": "664d6ae6a4207f9490200d2df77221ac2f41b70427fe086049cf1c106ca0ea6c",
+    "binary_reproducible_build_proven": False,
+}
+
+
+def preinput_229(job):
+    contract = job.get("preinput_refusal_contract")
+    return type(contract) is dict and contract.get("scope") == PREINPUT_229["scope"]
+
+
+def verify_preinput_229(job):
+    """Bind the prospective provider without changing the frozen 1.4.224 owner."""
+    contract = job["preinput_refusal_contract"]
+    paths = ("proof_path", "release_match_path", "request_loop_source_path")
+    require(
+        set(contract) == set(PREINPUT_229).union(paths)
+        and all(
+            type(contract[key]) is type(value) and contract[key] == value
+            for key, value in PREINPUT_229.items()
+        ),
+        "Exact prospective 1.4.229 pre-input contract required",
+    )
+    for path, digest in (
+        (contract["native_helper_path"], contract["native_helper_sha256"]),
+        (job["native_source"], contract["native_source_sha256"]),
+        (contract["proof_path"], contract["proof_sha256"]),
+        (contract["release_match_path"], contract["release_match_sha256"]),
+        (contract["request_loop_source_path"], contract["request_loop_source_sha256"]),
+    ):
+        require(sha(read_plain(path)) == digest, "Native 1.4.229 pre-input build/proof changed")
+
+
+def native_source_digest(job):
+    return PREINPUT_229["native_source_sha256"] if preinput_229(job) else NATIVE_SOURCE_SHA256
 
 
 def admission_decisions(purpose):
@@ -59,6 +104,7 @@ def admission_decisions(purpose):
         CACHED_MENU_PURPOSE: "AGENT_PACKAGED_CACHED_MENU",
         CACHED_LOAD_PURPOSE: "AGENT_PACKAGED_CACHED_LOAD",
         CACHED_SAVE_PURPOSE: "AGENT_PACKAGED_CACHED_SAVE_REOPEN",
+        GUI_MENU_PURPOSE: "AGENT_NATIVE_GUI_CATALOGUE_MENU",
     }
     require(purpose in names, "Fresh agent purpose required")
     return "ADMIT_ONE_" + names[purpose], "GO_ONE_" + names[purpose]
@@ -313,13 +359,13 @@ class AgentDecisions:
     def stage(self, stage, instruction, *, validate=None, return_after_input=False):
         owner = self.owner
         require(
-            stage in STAGES + MENU_STAGES and stage not in self.used_stages,
+            stage in STAGES + MENU_STAGES + GUI_STAGES and stage not in self.used_stages,
             "Unknown or repeated agent stage",
         )
         self.used_stages.add(stage)
         # Navigation can include startup animations and several observed menus.
         # All stages remain inside the original operation anchor; no renewal.
-        deadline = owner.anchor + ACTION_SECONDS
+        deadline = owner.anchor + (390 if stage in GUI_STAGES else ACTION_SECONDS)
         menu_inputs = 0
         quit_inputs = 0
         play_sent = False
@@ -391,7 +437,7 @@ class AgentDecisions:
                 "stage": stage,
                 "instruction": instruction,
                 "job": owner.job["job"],
-                "process": asdict(owner.game),
+                "process": asdict(owner.native_receiver()),
                 "snapshot": frame["snapshot"],
                 "image_sha256": frame["sha256"],
                 "frame": frame,
@@ -471,6 +517,8 @@ class AgentDecisions:
                 owner.write(label + "-stale-decision.json", {"no_input": True, "reobserve": True})
                 continue
             if decision["choice"] == "observed":
+                if stage in GUI_STAGES:
+                    owner.validate_gui_observation(stage, frame, decision)
                 require(not quitting, "Normal Quit requires actual process exit")
                 require(
                     stage not in MENU_STAGES or menu_inputs == 1,
@@ -528,14 +576,23 @@ class AgentDecisions:
             if stage in MENU_STAGES:
                 require(menu_inputs == 0, "One menu input per stage maximum")
                 menu_inputs += 1
-            action = validate_action(
-                stage,
-                decision["action"],
-                frame,
-                owner.job["agent_save"]["token"],
-                decision["receiver"],
-                purpose=owner.job["purpose"],
+            action = (
+                owner.validate_gui_action(stage, decision, frame)
+                if stage in GUI_STAGES
+                else validate_action(
+                    stage,
+                    decision["action"],
+                    frame,
+                    owner.job["agent_save"]["token"],
+                    decision["receiver"],
+                    purpose=owner.job["purpose"],
+                )
             )
+            if stage == "gui_play":
+                require(
+                    owner.job["purpose"] == GUI_MENU_PURPOSE, "Native GUI Play purpose required"
+                )
+                owner.arm_gui_play_observer()
             if quitting:
                 require(
                     action == ["hotkey", "--key", "CmdOrCtrl+Q"]
@@ -625,6 +682,12 @@ def pilot_class(common):
                 sha(read_plain(self.directory / settled["record"])) == settled["sha256"],
                 "Completed provider evidence changed",
             )
+
+        def verify_preinput_contract(self):
+            if preinput_229(self.job):
+                verify_preinput_229(self.job)
+            else:
+                super().verify_preinput_contract()
 
         @contextmanager
         def mutation_guard(self):
@@ -739,6 +802,9 @@ def pilot_class(common):
             require(self.observer.poll() is None, "Independent observer exited")
             self.sample()
 
+        def native_receiver(self):
+            return self.game
+
         def native(
             self, label, action, window, deadline, *, mutable=False, validate=None, allow_exit=False
         ):
@@ -747,7 +813,7 @@ def pilot_class(common):
             if mutable:
                 self.verify_preinput_contract()
                 require(
-                    sha(read_plain(self.job["native_source"])) == NATIVE_SOURCE_SHA256,
+                    sha(read_plain(self.job["native_source"])) == native_source_digest(self.job),
                     "Native source contract drift",
                 )
             require(self.frames < 192, "Finite provider call budget exhausted")
@@ -757,7 +823,7 @@ def pilot_class(common):
                 "computer",
                 *action,
                 "--app",
-                f"pid:{self.game.pid}",
+                f"pid:{self.native_receiver().pid}",
                 "--json",
             ]
             if action[0] != "list-windows":
@@ -851,7 +917,7 @@ def pilot_class(common):
                         and snapshot["window"]["id"] > 0
                     )
                     require(
-                        snapshot.get("app", {}).get("pid") == self.game.pid
+                        snapshot.get("app", {}).get("pid") == self.native_receiver().pid
                         and (
                             window is None
                             or snapshot.get("window", {}).get("id") == window
@@ -907,7 +973,9 @@ def pilot_class(common):
                         self.job["actor_binding"]["provider_runtime_id"],
                         limit,
                     )
-                    if completed is not None:
+                    # The TypeScript completed-click evidence is version-specific.
+                    # The new native binding supplies no such error settlement.
+                    if completed is not None and not preinput_229(self.job):
                         require(
                             sha(read_plain(self.job["native_click_source"])) == CLICK_SOURCE_SHA256,
                             "Single-click emission source changed",
@@ -948,7 +1016,7 @@ def pilot_class(common):
                 )["result"]
                 require(
                     type(result.get("app", {}).get("pid")) is int
-                    and result["app"]["pid"] == self.game.pid,
+                    and result["app"]["pid"] == self.native_receiver().pid,
                     "Window enumeration app drift",
                 )
                 windows = result.get("windows")
@@ -971,7 +1039,7 @@ def pilot_class(common):
                 and type(visible[0].get("id")) is int
                 and visible[0]["id"] > 0
                 and type(visible[0].get("app", {}).get("pid")) is int
-                and visible[0]["app"]["pid"] == self.game.pid
+                and visible[0]["app"]["pid"] == self.native_receiver().pid
                 and visible[0].get("isOffscreen") is False
                 and visible[0].get("isMinimized") is False,
                 "One exact game window required",
@@ -981,7 +1049,7 @@ def pilot_class(common):
             receipt = self.native(label + "Read", ["get-app-state"], window, deadline)
             frame = self.retain_frame(receipt, label)
             frame["play_index"] = common.fresh_play_index(
-                receipt, self.game.pid, allow_missing=True
+                receipt, self.native_receiver().pid, allow_missing=True
             )
             self.scene_frame(receipt, frame, window)
             self.last_agent_window = window
@@ -991,9 +1059,10 @@ def pilot_class(common):
             self, label, action, window, frame, captured, deadline, validate, *, allow_exit=False
         ):
             def delivery():
-                actual = self.monitor.inspect(self.game.pid)
+                actual = self.monitor.inspect(self.native_receiver().pid)
                 require(
-                    actual is not None and self.game.same(actual), "Agent receiver identity changed"
+                    actual is not None and self.native_receiver().same(actual),
+                    "Agent receiver identity changed",
                 )
                 if validate:
                     validate()
@@ -1291,6 +1360,10 @@ def verify_launch_backend(common_root):
 
 def verify_entry(job, admission, job_sha):
     admission_decision, review_decision = admission_decisions(job["purpose"])
+    if job["purpose"] == GUI_MENU_PURPOSE:
+        require(preinput_229(job), "Native GUI owner requires the reviewed 1.4.229 contract")
+    if preinput_229(job):
+        verify_preinput_229(job)
     verify_launch_backend(job["common_root"])
     actor = job["actor_binding"]["driver_actor"]
     require(
@@ -1315,7 +1388,7 @@ def verify_entry(job, admission, job_sha):
         "Fresh bounded agent admission required",
     )
     require(sha(read_plain(job["authority_path"])) == job["authority_sha256"], "Authority drift")
-    if job["purpose"] in (PURPOSE, CACHED_SAVE_PURPOSE):
+    if job["purpose"] in (PURPOSE, CACHED_SAVE_PURPOSE, GUI_MENU_PURPOSE):
         config = job.get("agent_save")
         require(
             type(config) is dict
@@ -1330,6 +1403,7 @@ def verify_entry(job, admission, job_sha):
         CACHED_MENU_PURPOSE,
         CACHED_LOAD_PURPOSE,
         CACHED_SAVE_PURPOSE,
+        GUI_MENU_PURPOSE,
     ):
         from catalogue_menu import verify_config
 
@@ -1382,13 +1456,21 @@ def verify_entry(job, admission, job_sha):
         )
     )
     needed.add(job["native_source"])
+    if preinput_229(job):
+        needed.update(
+            job["preinput_refusal_contract"][key]
+            for key in ("proof_path", "release_match_path", "request_loop_source_path")
+        )
     if job["purpose"] in (
         CATALOGUE_MENU_PURPOSE,
         CACHED_MENU_PURPOSE,
         CACHED_LOAD_PURPOSE,
         CACHED_SAVE_PURPOSE,
+        GUI_MENU_PURPOSE,
     ):
         needed.add(str(Path(__file__).with_name("catalogue_menu.py").resolve()))
+    if job["purpose"] == GUI_MENU_PURPOSE:
+        needed.add(str(Path(__file__).with_name("native_gui_menu.py").resolve()))
     require(needed.issubset(paths), "Actual imported source paths missing from closure")
     raw_review = read_plain(admission["review"]["path"])
     review = decode(raw_review)
@@ -1436,10 +1518,15 @@ def main():
         CACHED_MENU_PURPOSE,
         CACHED_LOAD_PURPOSE,
         CACHED_SAVE_PURPOSE,
+        GUI_MENU_PURPOSE,
     ):
         from catalogue_menu import pilot_class as catalogue_pilot_class
 
         owner_class = catalogue_pilot_class(common, owner_class)
+    if job["purpose"] == GUI_MENU_PURPOSE:
+        from native_gui_menu import pilot_class as gui_pilot_class
+
+        owner_class = gui_pilot_class(common, owner_class)
     owner = owner_class(job, common_root, admission, lambda: queue.guard(lease))
     result = run_calibration(owner)
     print(json.dumps(result, sort_keys=True))
