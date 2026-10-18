@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 
-from active_job_control import decode, read_plain, require
+from active_job_control import MAX_NATIVE_HISTORY_BYTES, decode, read_plain, require
 
 
 def collect_actor(binding):
@@ -45,7 +45,7 @@ def collect_actor(binding):
         and path.is_relative_to(Path.home() / ".codex/sessions"),
         "Exact native driver rollout required",
     )
-    raw = read_plain(path, maximum=256 * 1024 * 1024)
+    raw = read_plain(path, maximum=MAX_NATIVE_HISTORY_BYTES)
     end = raw.rfind(b"\n") + 1
     require(end > 0, "Complete native actor boundary required")
     rows = raw[:end].splitlines()

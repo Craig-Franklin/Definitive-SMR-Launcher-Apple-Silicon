@@ -27,6 +27,11 @@ import tempfile
 import uuid
 
 
+# Native history grows across the same long-lived Run; other control files keep
+# their smaller default bound. Identity, prefix and authoritative-row limits stay strict.
+MAX_NATIVE_HISTORY_BYTES = 512 * 1024 * 1024
+
+
 class ControlRefused(RuntimeError):
     pass
 
@@ -393,7 +398,7 @@ class ActiveJobControl:
         verify_run_owner(self.job)
         data = read_plain(
             self.binding["rollout"],
-            maximum=256 * 1024 * 1024,
+            maximum=MAX_NATIVE_HISTORY_BYTES,
             identity=self.binding["stream_identity"],
         )
         start = self.binding["start_offset"]

@@ -147,6 +147,18 @@ class Fixture(unittest.TestCase):
 
 
 class NativeControlTests(Fixture):
+    def test_native_history_uses_its_own_finite_bound_and_keeps_handback(self):
+        # Scale the history cap for the fixture; exercise the real reader/poll.
+        self.append({"type": "event_msg", "payload": {"padding": "x" * 2048}})
+        self.append(user("I'm playing"))
+        with patch.object(control, "MAX_NATIVE_HISTORY_BYTES", 4096):
+            with self.assertRaises(control.UserCancelled):
+                self.control.poll()
+        self.assertTrue(self.read()["active_job_control"]["cancelled"])
+        with patch.object(control, "MAX_NATIVE_HISTORY_BYTES", 1024):
+            with self.assertRaisesRegex(control.ControlRefused, "Bounded regular"):
+                self.control.poll()
+
     def test_large_native_image_record_does_not_hide_following_handback(self):
         self.append(
             {
