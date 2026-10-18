@@ -578,8 +578,9 @@ def verify_config(job):
         target["profile_id"] == "map-" + target["variant_id"]
         and target["profile_id"] != job["return_profile"]
         and (
-            len(target["scenarios"]) == 2
-            and len({Path(s).name.casefold() for s in target["scenarios"]}) == 2
+            len(target["scenarios"]) in (1, 2)
+            and len({Path(s).name.casefold() for s in target["scenarios"]})
+            == len(target["scenarios"])
             if direct_load
             else len(target["scenarios"]) == 1
         ),

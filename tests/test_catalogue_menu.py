@@ -1296,7 +1296,7 @@ class CatalogueRestoreTests(unittest.TestCase):
         with self.assertRaisesRegex(ControlRefused, "source closure drift"):
             driver.verify_entry(job, admission, "a" * 64)
 
-    def direct_load_entry(self):
+    def direct_load_entry(self, scenario_count=2):
         job, admission = self.entry_contract(driver.CATALOGUE_LOAD_PURPOSE)
         config = job["catalogue_menu"]
         config.pop("selection")
@@ -1307,18 +1307,25 @@ class CatalogueRestoreTests(unittest.TestCase):
             scenario_title="Synthetic Solo",
             scenario_subtitle="Version 2",
         )
-        config["target"]["scenarios"].append("UserMaps/Synthetic/RRT_Scenario_Solo.xml")
-        job["source_original"]["scenario"] = config["target"]["scenarios"][1]
+        if scenario_count == 2:
+            config["target"]["scenarios"].append("UserMaps/Synthetic/RRT_Scenario_Solo.xml")
+        job["source_original"]["scenario"] = config["target"]["scenarios"][-1]
         return job, admission
 
     def test_direct_catalogue_load_real_entry_decisions_world_and_normal_quit(self):
-        job, admission = self.direct_load_entry()
+        self.assert_direct_load_lifecycle(2)
+
+    def test_single_scenario_direct_load_real_entry_decisions_world_and_normal_quit(self):
+        self.assert_direct_load_lifecycle(1)
+
+    def assert_direct_load_lifecycle(self, scenario_count):
+        job, admission = self.direct_load_entry(scenario_count)
         route = route_fixtures.AgentRouteTests()
         route.setUp()
         self.addCleanup(route.doCleanups)
         owner = route.owner
         route.cached_save_owner()  # Reuse the catalogue class and closed physical lifecycle.
-        job["job"] = "synthetic-direct-two-scenario-load"
+        job["job"] = "synthetic-direct-load-" + str(scenario_count)
         job["game_sha256"] = owner.job["game_sha256"]
         job["orca"] = "/synthetic/orca"
         job["root"]["session"] = "synthetic-root"
@@ -1342,7 +1349,7 @@ class CatalogueRestoreTests(unittest.TestCase):
         )
         self.assertIn("'Synthetic Solo' and subtitle 'Version 2'", request["instruction"])
         self.assertIn("do not assume its default selection", request["instruction"])
-        self.assertEqual(len(owner.config["target"]["scenarios"]), 2)
+        self.assertEqual(len(owner.config["target"]["scenarios"]), scenario_count)
         self.assertEqual(result["outcome"]["world_loaded"], "agent_observed")
         self.assertFalse(
             result["outcome"]["gameplay_credit"] or result["outcome"]["save_reopen_credit"]
@@ -1361,7 +1368,8 @@ class CatalogueRestoreTests(unittest.TestCase):
         for cause in (
             "missing-scenario",
             "duplicate-basename",
-            "one-scenario",
+            "no-scenarios",
+            "three-scenarios",
             "prepare",
             "save",
             "resume",
@@ -1375,8 +1383,10 @@ class CatalogueRestoreTests(unittest.TestCase):
                     job["source_original"]["scenario"] = "UserMaps/Other.xml"
                 elif cause == "duplicate-basename":
                     config["target"]["scenarios"][1] = "CustomAssets/synthetic.xml"
-                elif cause == "one-scenario":
-                    config["target"]["scenarios"].pop()
+                elif cause == "no-scenarios":
+                    config["target"]["scenarios"] = []
+                elif cause == "three-scenarios":
+                    config["target"]["scenarios"].append("UserMaps/Synthetic/Third.xml")
                 elif cause == "prepare":
                     config["prepare_compatibility"] = True
                 elif cause == "save":

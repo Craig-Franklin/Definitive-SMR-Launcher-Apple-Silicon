@@ -188,7 +188,7 @@ the game must finish loading within the screenshot's freshness interval.
 ## Direct catalogue scenario load
 
 `ONE_AGENT_PACKAGED_CATALOGUE_LOAD_V1` reuses the existing direct packaged Play
-and load lifecycle for one exact existing two-scenario edition with distinct
+and load lifecycle for one exact existing one- or two-scenario edition with distinct
 selector basenames. It never prepares or selects a cached repair. The fresh job
 binds both retained scenario paths, the one requested scenario path and its exact
 rendered title/subtitle, edition/build/assets, complete warning and current return.
