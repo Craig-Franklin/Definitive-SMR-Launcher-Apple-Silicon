@@ -172,6 +172,7 @@ struct MapToolDraft {
             }
             return
         }
+        messages[target.key] = nil
         guard !unknown.contains("play:" + target.key) else {
             model.error = "The previous native launch outcome is unknown. Inspect the active profile and game before a new launch."
             return
@@ -211,7 +212,10 @@ struct MapToolDraft {
         var received = false
         await model.request("maptools.play_commit", params) { result in
             received = true
-            if self.currentPlay(model, target), target.matches(result.object("target")) { model.status = result.text("message") }
+            if self.currentPlay(model, target), target.matches(result.object("target")) {
+                let message = result.text("message")
+                model.status = message; self.messages[target.key] = message
+            }
         }
         if !received && (!model.connected || model.error.hasPrefix("Native launch outcome unknown") || model.error.hasPrefix("Map tool outcome needs inspection")) {
             unknown.insert("play:" + target.key)

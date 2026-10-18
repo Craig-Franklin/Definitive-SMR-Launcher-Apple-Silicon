@@ -142,6 +142,12 @@ import Foundation
         await tools.confirmPlay(model, validPlay)
         await tools.confirmPlay(model, validPlay)
         require(try await count("play_commit") == 1, "One review cannot launch twice")
+        require(model.status == "Synthetic launch accepted" && tools.messages[key] == "Synthetic launch accepted", "Accepted Play keeps its exact-edition result in existing map messages")
+        backend.event?("status", ["status": "Steam Mac game found. Select a map or play Original Game.", "busy": false])
+        require(model.status.hasPrefix("Steam Mac game found") && tools.messages[key] == "Synthetic launch accepted", "Ordinary service status cannot erase the selected edition's accepted Play result")
+        await tools.beginPlay(model, map)
+        require(tools.messages[key] == nil, "A new Play review clears the earlier result instead of presenting stale success")
+        tools.cancelPlay()
         _ = try await backend.call("fixture.configure")
         await tools.beginPlay(model, map)
         require(try await count("play_commit") == 2 && tools.playReview == nil, "Normal no-warning Play does not need a warning dialog")
@@ -206,6 +212,19 @@ import Foundation
         await tools.perform(model, map, build, "link_issue")
         require(tools.unknown.contains(key) && tools.drafts[key]?.legacyScope == draft.legacyScope)
         require(try await count("link_issue") == 1, "Partial history result holds UNKNOWN without retry")
+        // A dispatched reply for an old selection cannot label the current edition.
+        let lateModel = LauncherModel(fixture: false, backend: backend)
+        lateModel.connected = true; lateModel.maps = [map]; lateModel.selection = map.id
+        lateModel.details[map.id] = ["context": ["game_executable_sha256": build]]
+        let lateTools = NativeMapToolsState()
+        _ = try await backend.call("fixture.configure", ["warning": "Known issue", "delay": true])
+        await lateTools.beginPlay(lateModel, map)
+        let lateReview = lateTools.playReview
+        let lateCommit = Task { await lateTools.confirmPlay(lateModel, lateReview) }
+        while !lateModel.busy { await Task.yield() }
+        lateModel.selection = "different-map"; lateModel.status = "Current selection status"
+        await lateCommit.value
+        require(lateTools.messages[key] == nil && lateModel.status == "Current selection status", "A late accepted reply cannot show success on another selected target")
         print("Native consent checks passed: cancellation, selection/edition/build/recipe changes, queued changes, immutable fields, single use, stale replies, warning review, no-warning Play, original build and unknown holds")
     }
 }
