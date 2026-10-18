@@ -332,6 +332,191 @@ class CatalogueRestoreTests(unittest.TestCase):
                 with self.assertRaisesRegex(ControlRefused, "settled owned trial"):
                     menu.autosave_origin(self.owner.job)
 
+    def successful_autosave_origin(self):
+        job = self.save_config(empty=True)
+        job["game_sha256"] = "e" * 64
+        root = self.owner.profiles.live
+        (root / menu.OWNED_AUTOSAVE).write_bytes(b"owned successful-trial autosave")
+        (root / "Saves/personal.sav").write_bytes(b"strict prior named save")
+        self.owner.baseline["target_files"].update(
+            {"Saves/" + name: facts for name, facts in menu.tree_files(root / "Saves").items()}
+        )
+        facts = menu.file_facts(root / menu.OWNED_AUTOSAVE)
+        expected = {
+            key: self.owner.config["selection"][key]
+            for key in ("profile_id", "archive_sha256", "variant_id")
+        }
+        expected["game_executable_sha256"] = job["game_sha256"]
+
+        def service(pid):
+            return dict(
+                pid=pid,
+                commit_sent=True,
+                eof_closed=True,
+                reaped=True,
+                returncode=0,
+                pending=None,
+                commit_response=dict(
+                    ok=True, data=dict(target=expected, launched_profile_id=self.target.profile_id)
+                ),
+            )
+
+        def exited(pid):
+            return dict(
+                job="prior-successful-job",
+                process=dict(pid=pid, birth=str(pid), executable="/synthetic/game"),
+                result=dict(state="observed_exited", stop_requested=False, terminal=True),
+            )
+
+        origin = dict(
+            job="prior-successful-job",
+            invocation=dict(returncode=0),
+            lease_released=True,
+            preservation_verified=True,
+            terminal_finished=True,
+            game_absent=True,
+            both_normal_quits_verified=True,
+            service_settled=[service(300), service(400)],
+            exact_normal_exit=exited(100),
+            second_observer=exited(200),
+            owned_absences=[
+                dict(pid=pid, role=role, positive_absence=True)
+                for pid, role in (
+                    (100, "game"),
+                    (200, "game"),
+                    (300, "packaged_service"),
+                    (400, "packaged_service"),
+                )
+            ],
+            current_test_autosave=facts,
+        )
+        path = self.owner.directory / "successful-root-readback.json"
+        path.write_bytes(menu.canonical(origin))
+        self.owner.config["owned_autosave"] = dict(
+            origin_readback=str(path), origin_sha256=menu.sha(path.read_bytes()), facts=facts
+        )
+        return path, origin
+
+    def test_successful_two_service_origin_reaches_real_config_and_preserves_rotation(self):
+        self.successful_autosave_origin()
+        self.assertIs(menu.verify_config(self.owner.job), self.owner.config)
+        root = self.owner.profiles.live
+        copy = menu.preserve_owned_autosave(self.owner, root)
+        self.owner.autosave_preimage = copy
+        (root / menu.OWNED_AUTOSAVE).write_bytes(b"next owned autosave")
+        self.assertTrue(menu.restore_catalogue(self.owner))
+        target = self.owner.profiles._profile_path(self.target.profile_id)
+        self.assertEqual(copy.read_bytes(), b"owned successful-trial autosave")
+        self.assertEqual((target / menu.OWNED_AUTOSAVE).read_bytes(), b"next owned autosave")
+        self.assertEqual((target / "Saves/personal.sav").read_bytes(), b"strict prior named save")
+
+    def test_successful_origin_requires_each_exact_success_proof(self):
+        path, original = self.successful_autosave_origin()
+        changes = [
+            (("invocation", "returncode"), 1),
+            (("job",), "foreign-job"),
+            (("both_normal_quits_verified",), None),
+            *(
+                (
+                    ((key,), None)
+                    for key in (
+                        "lease_released",
+                        "preservation_verified",
+                        "terminal_finished",
+                        "game_absent",
+                    )
+                )
+            ),
+            (("current_test_autosave", "inode"), 1),
+            (("current_test_autosave",), None),
+            (("owned_absences",), []),
+            (("service_settled", 1, "pid"), 300),
+        ]
+        for index in (0, 1):
+            changes.extend(
+                [
+                    (("service_settled", index, "commit_sent"), False),
+                    (("service_settled", index, "eof_closed"), False),
+                    (("service_settled", index, "reaped"), False),
+                    (("service_settled", index, "returncode"), 1),
+                    (("service_settled", index, "pending"), "pending"),
+                    (("service_settled", index, "pending"), None),
+                    (("service_settled", index, "commit_response"), None),
+                    (("service_settled", index, "commit_response", "ok"), False),
+                    (
+                        (
+                            "service_settled",
+                            index,
+                            "commit_response",
+                            "data",
+                            "launched_profile_id",
+                        ),
+                        "foreign",
+                    ),
+                ]
+            )
+            for key in ("profile_id", "archive_sha256", "variant_id", "game_executable_sha256"):
+                changes.append(
+                    (
+                        ("service_settled", index, "commit_response", "data", "target", key),
+                        "foreign",
+                    )
+                )
+        for index in range(4):
+            changes.append((("owned_absences", index, "positive_absence"), False))
+            changes.append((("owned_absences", index, "role"), "foreign"))
+        for key in ("exact_normal_exit", "second_observer"):
+            changes.extend(
+                [
+                    ((key,), None),
+                    ((key, "job"), "foreign-job"),
+                    ((key, "process", "pid"), 100 if key == "second_observer" else 200),
+                    ((key, "process", "birth"), "unknown"),
+                    ((key, "process", "executable"), "/foreign/game"),
+                    ((key, "result", "state"), "unknown"),
+                    ((key, "result", "terminal"), False),
+                    ((key, "result", "stop_requested"), True),
+                ]
+            )
+        before = menu.tree_files(self.owner.profiles.live)
+        for keys, replacement in changes:
+            with self.subTest(keys=keys):
+                value = menu.decode(menu.canonical(original))
+                node = value
+                for key in keys[:-1]:
+                    node = node[key]
+                if replacement is None:
+                    node.pop(keys[-1])
+                else:
+                    node[keys[-1]] = replacement
+                path.write_bytes(menu.canonical(value))
+                self.owner.config["owned_autosave"]["origin_sha256"] = menu.sha(path.read_bytes())
+                with self.assertRaises(ControlRefused):
+                    menu.verify_config(self.owner.job)
+                self.assertEqual(menu.tree_files(self.owner.profiles.live), before)
+
+    def test_successful_origin_never_allows_changed_current_autosave(self):
+        self.successful_autosave_origin()
+        (self.owner.profiles.live / menu.OWNED_AUTOSAVE).write_bytes(b"foreign autosave")
+        with self.assertRaisesRegex(ControlRefused, "changed before preservation"):
+            menu.preserve_owned_autosave(self.owner, self.owner.profiles.live)
+        self.assertFalse((self.owner.directory / "owned-Auto0-preimage").exists())
+
+    def test_successful_origin_keeps_named_save_and_pretrial_slot_restrictions(self):
+        self.successful_autosave_origin()
+        facts = self.owner.config["owned_autosave"]["facts"]
+        for index in range(1, 5):
+            name = f"Saves/Auto{index}.SMRailroadsSavedGame"
+            self.owner.baseline["target_files"][name] = facts
+            with self.assertRaisesRegex(ControlRefused, "pretrial Auto1..4 refuse"):
+                menu.verify_config(self.owner.job)
+            del self.owner.baseline["target_files"][name]
+        self.owner.autosave_preimage = menu.preserve_owned_autosave(
+            self.owner, self.owner.profiles.live
+        )
+        (self.owner.profiles.live / "Saves/personal.sav").write_bytes(b"changed named save")
+        self.assert_refusal_preserves("Existing target file changed")
+
     def save_config(self, *, empty=False):
         if empty:
             self.owner.job.update(purpose=menu.SAVE_PURPOSE, catalogue_menu=self.owner.config)

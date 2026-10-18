@@ -450,7 +450,11 @@ The save pilot accepts a target with no pre-existing saves, without declaring or
 copying a prior autosave. Its fresh complete preservation baseline must still
 match before launch. New named saves and autosave slots remain in that edition.
 Otherwise it requires the exact owned `Auto0` from a previously settled trial,
-with its original readback and current file facts bound in the job. A partial
+with its original readback and current file facts bound in the job. A successful
+two-launch trial requires both exact committed service responses, settled services,
+matching job and distinct game identities, both observed normal quits and positive
+game/service absences, plus terminal, preservation and lease settlement. A zero
+return code alone does not qualify an autosave. A partial
 trial can supply that provenance only after its first normal exit, both services
 have settled, and root preservation and lease settlement passed. The second
 service must either have sent no commit, or have launched the exact known target

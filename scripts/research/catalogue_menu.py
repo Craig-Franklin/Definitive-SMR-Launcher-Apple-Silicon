@@ -105,45 +105,126 @@ def autosave_origin(job):
         # observed normal exit or the root's preservation/lease settlement.
         require(len(service) == 2, "Exact settled two-service origin required")
         first, second = service
-        exit_result = origin["exact_normal_exit"]["result"]
-        response = second["commit_response"]
-        observed = origin.get("second_observer", {})
-        pid = observed.get("process", {}).get("pid")
-        second_owned_exit = (
-            second["commit_sent"] is True
-            and type(response) is dict
-            and response.get("ok") is True
-            and response["data"]["launched_profile_id"] == config["target"]["profile_id"]
-            and type(origin.get("job")) is str
-            and observed.get("job") == origin["job"]
-            and type(pid) is int
-            and pid > 0
-            and pid != origin["exact_normal_exit"].get("process", {}).get("pid")
-            and observed.get("result", {}).get("state") == "observed_exited"
-            and observed["result"]["terminal"] is True
-            and any(
-                row.get("pid") == pid
-                and row.get("role") == "game"
-                and row.get("positive_absence") is True
-                for row in origin.get("owned_absences", [])
+        if origin["invocation"]["returncode"] == 0:
+            expected = {
+                key: config["selection"][key]
+                for key in ("profile_id", "archive_sha256", "variant_id")
+            }
+            expected["game_executable_sha256"] = job["game_sha256"]
+            exits = (origin.get("exact_normal_exit"), origin.get("second_observer"))
+            completed = (
+                type(origin["invocation"]["returncode"]) is int
+                and type(origin.get("job")) is str
+                and bool(origin["job"])
+                and origin.get("both_normal_quits_verified") is True
+                and type(origin.get("current_test_autosave")) is dict
+                and all(
+                    origin.get(key) is True
+                    for key in (
+                        "lease_released",
+                        "preservation_verified",
+                        "terminal_finished",
+                        "game_absent",
+                    )
+                )
+                and all(
+                    type(row) is dict
+                    and type(row.get("pid")) is int
+                    and row["pid"] > 0
+                    and row.get("commit_sent") is True
+                    and row.get("eof_closed") is True
+                    and row.get("reaped") is True
+                    and type(row.get("returncode")) is int
+                    and row["returncode"] == 0
+                    and "pending" in row
+                    and row["pending"] is None
+                    and type(row.get("commit_response")) is dict
+                    and row["commit_response"].get("ok") is True
+                    and type(row["commit_response"].get("data")) is dict
+                    and row["commit_response"]["data"].get("target") == expected
+                    and row["commit_response"]["data"].get("launched_profile_id")
+                    == config["target"]["profile_id"]
+                    for row in service
+                )
+                and first["pid"] != second["pid"]
+                and all(
+                    type(receipt) is dict
+                    and receipt.get("job") == origin["job"]
+                    and type(receipt.get("process")) is dict
+                    and type(receipt["process"].get("pid")) is int
+                    and receipt["process"]["pid"] > 0
+                    and type(receipt["process"].get("birth")) is str
+                    and receipt["process"]["birth"].isdigit()
+                    and type(receipt["process"].get("executable")) is str
+                    and Path(receipt["process"]["executable"]).is_absolute()
+                    and type(receipt.get("result")) is dict
+                    and receipt["result"].get("state") == "observed_exited"
+                    and receipt["result"].get("terminal") is True
+                    and receipt["result"].get("stop_requested") is False
+                    for receipt in exits
+                )
+                and exits[0]["process"]["pid"] != exits[1]["process"]["pid"]
+                and exits[0]["process"]["executable"] == exits[1]["process"]["executable"]
+                and type(origin.get("owned_absences")) is list
+                and all(
+                    any(
+                        type(row) is dict
+                        and row.get("pid") == pid
+                        and row.get("role") == role
+                        and row.get("positive_absence") is True
+                        for row in origin["owned_absences"]
+                    )
+                    for pid, role in (
+                        (first["pid"], "packaged_service"),
+                        (second["pid"], "packaged_service"),
+                        (exits[0]["process"]["pid"], "game"),
+                        (exits[1]["process"]["pid"], "game"),
+                    )
+                )
             )
-        )
-        completed = (
-            origin["invocation"]["returncode"] == 2
-            and first["commit_sent"] is True
-            and first["commit_response"]["ok"] is True
-            and ((second["commit_sent"] is False and response is None) or second_owned_exit)
-            and all(
-                row["reaped"] is True
-                and row["returncode"] == 0
-                and row["pending"] is None
-                and row["eof_closed"] is True
-                for row in service
+            require(
+                completed, "Successful autosave origin requires exact launches and normal exits"
             )
-            and exit_result["state"] == "observed_exited"
-            and exit_result["stop_requested"] is False
-            and exit_result["terminal"] is True
-        )
+        else:
+            exit_result = origin["exact_normal_exit"]["result"]
+            response = second["commit_response"]
+            observed = origin.get("second_observer", {})
+            pid = observed.get("process", {}).get("pid")
+            second_owned_exit = (
+                second["commit_sent"] is True
+                and type(response) is dict
+                and response.get("ok") is True
+                and response["data"]["launched_profile_id"] == config["target"]["profile_id"]
+                and type(origin.get("job")) is str
+                and observed.get("job") == origin["job"]
+                and type(pid) is int
+                and pid > 0
+                and pid != origin["exact_normal_exit"].get("process", {}).get("pid")
+                and observed.get("result", {}).get("state") == "observed_exited"
+                and observed["result"]["terminal"] is True
+                and any(
+                    row.get("pid") == pid
+                    and row.get("role") == "game"
+                    and row.get("positive_absence") is True
+                    for row in origin.get("owned_absences", [])
+                )
+            )
+            completed = (
+                origin["invocation"]["returncode"] == 2
+                and first["commit_sent"] is True
+                and first["commit_response"]["ok"] is True
+                and ((second["commit_sent"] is False and response is None) or second_owned_exit)
+                and all(
+                    row["reaped"] is True
+                    and row["returncode"] == 0
+                    and row["pending"] is None
+                    and row["eof_closed"] is True
+                    for row in service
+                )
+                and exit_result["state"] == "observed_exited"
+                and exit_result["stop_requested"] is False
+                and exit_result["terminal"] is True
+            )
         facts = origin["current_test_autosave"]
         service = first
     else:
