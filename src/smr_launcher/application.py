@@ -54,7 +54,8 @@ from .scenario_evidence import (
 )
 from .collection import RemoteMap
 from .map_metadata import MapMetadata, read_map_metadata, read_scenario_labels
-from . import import_checks, removal
+from . import import_checks, removal, compact_library
+from .cold_storage import ColdStorage, _checkpoint
 from .import_checks import inspect_map
 from .launch_preferences import prepare_settings
 from .resource_identity import ContentHashCache, fingerprint_resources
@@ -137,6 +138,7 @@ class LauncherApplication:
         self.imports = self.library / "imports"
         self.prepared = self.library / "prepared"
         self.icons = self.library / "icons"
+        self.cold_storage = ColdStorage(self.library)
         self.catalogue_file = self.library / "catalogue.json"
         self.verification_store = VerificationStore(self.library / "gameplay-verification.json")
         self.scenario_evidence_store = EvidenceStore(self.library / "scenario-evidence.jsonl")
@@ -147,6 +149,7 @@ class LauncherApplication:
             self.managed,
             ("CustomAssets", "UserMaps"),
             installation.game_running,
+            cold_storage=self.cold_storage,
         )
 
     @classmethod
@@ -181,7 +184,7 @@ class LauncherApplication:
 
     @contextmanager
     def _locked(
-        self, *, observed_io=None, recover_removal=True, nonblocking=False
+        self, *, observed_io=None, recover_removal=True, nonblocking=False, allow_compaction=False
     ) -> Iterator[None]:
         _assert_no_symlink_ancestor(self.library)
         self.library.mkdir(parents=True, exist_ok=True)
@@ -214,6 +217,10 @@ class LauncherApplication:
                 raise ApplicationError(
                     "Launcher application is busy; guarded play refused"
                 ) from exc
+            migration = self.library / compact_library.JOURNAL
+            _assert_no_symlink_ancestor(migration)
+            if migration.exists() and not allow_compaction:
+                raise ApplicationError("Pending compact migration requires its exact owner")
             if observed_io is None and recover_removal:
                 removal.resume(self)
             elif pending.exists() or pending.is_symlink():
@@ -225,6 +232,67 @@ class LauncherApplication:
             finally:
                 call("application.lock_close", os.close, fd)
         call("application.lock_exit", lambda: None)
+
+    def _is_cold(self, path):
+        storage = getattr(self, "cold_storage", None)
+        return storage is not None and storage.is_cold(path)
+
+    def plan_compaction(
+        self, *, exclude=(), include_profiles=(), cancelled=None, progress=None
+    ) -> dict:
+        """Read-only exact migration proposal; exclusions retain ownership and bytes."""
+        with self._locked(recover_removal=False):
+            self._stopped()
+            with self.profiles._locked():
+                self.profiles._recover_locked(recover_pending=False)
+                return compact_library.plan(
+                    self, exclude, include_profiles, cancelled=cancelled, progress=progress
+                )
+
+    def compact_library(self, plan: dict, *, cancelled=None, progress=None) -> None:
+        """Apply one exact migration; never select unknown data or run the game."""
+        with self._locked(recover_removal=False, allow_compaction=True):
+            self._stopped()
+            with self.profiles._locked():
+                self.profiles._recover_locked(recover_pending=False)
+                compact_library.migrate(self, plan, cancelled=cancelled, progress=progress)
+
+    def rollback_compaction(self, plan: dict, *, cancelled=None, progress=None) -> None:
+        """Restore the exact migration under both locks; preserve later edits by refusing."""
+        with self._locked(recover_removal=False, allow_compaction=True):
+            self._stopped()
+            with self.profiles._locked():
+                self.profiles._recover_locked(recover_pending=False)
+                compact_library.rollback(self, plan, cancelled=cancelled, progress=progress)
+
+    def _warm_record(self, record, *, readonly=False, cancelled=None, progress=None):
+        # Caller holds the application lock; materialization also excludes game use.
+        if compact_library.config(self) is None:
+            return
+        with self.profiles._locked(nonblocking=readonly):
+            self.profiles._require_stopped()
+            self.profiles._recover_locked(recover_pending=False)
+            compact_library.warm(
+                self, record, readonly=readonly, cancelled=cancelled, progress=progress
+            )
+
+    def _cool_library(self, *, keep=None):
+        if compact_library.config(self) is None:
+            return
+        with self.profiles._locked():
+            self.profiles._require_stopped()
+            self.profiles._recover_locked(recover_pending=False)
+            compact_library.cool(self, keep=keep)
+
+    def prepare_map(self, record: MapRecord, *, cancelled=None, progress=None):
+        """Prepare one selected map without activating it; old working trees go cold."""
+        with self._locked():
+            self._stopped()
+            self._warm_record(record, cancelled=cancelled, progress=progress)
+            with self.profiles._locked():
+                self.profiles._require_stopped()
+                compact_library.cool(self, keep=record, cancelled=cancelled, progress=progress)
+        return record
 
     def _installation_identity(self) -> dict:
         game = self.installation
@@ -460,6 +528,16 @@ class LauncherApplication:
                 self._discard_committed_download(source, inspection.source_sha256, remote)
                 return result
             archive = self._preserve_archive(source, inspection.source_sha256)
+            if compact_library.config(self) is not None:
+                from .archive_references import archive_references
+
+                references = dict(self.cold_storage.references())
+                for digest, reference in archive_references(archive).items():
+                    references.setdefault(digest, reference)
+                _atomic_json(
+                    self.library / "cold-storage/archive-references.json",
+                    dict(schema=1, references=references),
+                )
             self.imports.mkdir(parents=True, exist_ok=True)
             imported = self.imports / uuid.uuid4().hex
             extract_package(archive, imported, inspection.source_sha256)
@@ -478,6 +556,7 @@ class LauncherApplication:
                 variant.variant_id,
                 prepared_path,
                 saved_games=removal.retained_saves(self, variant.variant_id),
+                cold=compact_library.config(self) is not None,
             )
             record = MapRecord(
                 display_name,
@@ -504,6 +583,7 @@ class LauncherApplication:
                 self.catalogue_file, dict(schema=1, maps=[item.as_json() for item in records])
             )
             self._discard_committed_download(source, inspection.source_sha256, remote)
+            self._cool_library()
             return record
 
     def _prepared_root(self, record: MapRecord) -> Path:
@@ -516,7 +596,11 @@ class LauncherApplication:
             recipe="original",
             archive=record.archive_sha256,
             game=record.game_executable_sha256,
-            assets=assets_manifest_hash(self._prepared_root(record)),
+            assets=(
+                self.cold_storage.assets_manifest_hash(self._prepared_root(record))
+                if self._is_cold(self._prepared_root(record))
+                else assets_manifest_hash(self._prepared_root(record))
+            ),
         )
         return (
             hashlib.sha256(
@@ -603,7 +687,12 @@ class LauncherApplication:
             path = removal._leaf(
                 self.library / "import-checks", record.variant_id + ".json", r"[0-9a-f]{64}\.json"
             )
+            if not refresh and self._is_cold(self._prepared_root(record)):
+                return None  # Cold reports are retained, not promoted to current scan evidence.
             if refresh:
+                if self._is_cold(self._prepared_root(record)):
+                    self._stopped()
+                    self._warm_record(record)
                 self.installation.check_current()
                 return self._write_import_checks(record)
             if not path.exists():
@@ -623,7 +712,13 @@ class LauncherApplication:
     def remove_map(self, record: MapRecord) -> Path:
         """Remove this map and unshared launcher archives; retain exact-variant saves."""
         with self._locked():
-            return removal.remove(self, record, remove_download=True)
+            self._stopped()
+            self._warm_record(record)
+            result = removal.remove(
+                self, record, remove_download=compact_library.config(self) is None
+            )
+            self._cool_library()
+            return result
 
     @staticmethod
     def _matches_remote(path: Path, remote: RemoteMap) -> bool:
@@ -758,7 +853,14 @@ class LauncherApplication:
         directory = record.imported_directory
         if not directory or Path(directory).name != directory or directory in (".", ".."):
             return MapMetadata()
-        return read_map_metadata(self.imports / directory / "mapInfo.txt")
+        root = self.imports / directory
+        if self._is_cold(root):
+            from .map_metadata import parse_map_metadata, MAX_MAP_INFO_BYTES
+
+            return parse_map_metadata(
+                self.cold_storage.read_file(root, "mapInfo.txt", MAX_MAP_INFO_BYTES)
+            )
+        return read_map_metadata(root / "mapInfo.txt")
 
     def scenario_metadata(self, record: MapRecord) -> list[dict]:
         """Keep every authored label attached to its exact catalogue path."""
@@ -766,8 +868,15 @@ class LauncherApplication:
         for scenario in record.scenarios:
             labels = dict(title=None, subtitle=None)
             try:
-                path = self._prepared_root(record) / relative(scenario)
-                labels = read_scenario_labels(path)
+                root = self._prepared_root(record)
+                if self._is_cold(root):
+                    from .map_metadata import parse_scenario_labels
+
+                    labels = parse_scenario_labels(
+                        self.cold_storage.read_file(root, relative(scenario), 8 * 1024**2)
+                    )
+                else:
+                    labels = read_scenario_labels(root / relative(scenario))
             except (EvidenceError, OSError, RuntimeError, ValueError):
                 pass  # Unreadable presentation metadata must not prevent browsing.
             rows.append(dict(path=scenario, **labels))
@@ -778,7 +887,11 @@ class LauncherApplication:
     ) -> MapRecord:
         """Build reviewed exact rules as an independent, explicitly labelled edition."""
         with self._locked():
-            return self._create_compatibility_edition_locked(record, rules, label=label)
+            self._stopped()
+            self._warm_record(record)
+            result = self._create_compatibility_edition_locked(record, rules, label=label)
+            self._cool_library(keep=result)
+            return result
 
     def create_recipe_edition(
         self,
@@ -801,18 +914,37 @@ class LauncherApplication:
                 raise ApplicationError("Pending activation requires its owner; review Play again")
             if not reuse_only:
                 self.profiles.recover()
+            self._warm_record(record, readonly=reuse_only or expected_plan is not None)
             if record not in self.catalogue() or not self._is_original_variant(record):
                 raise ApplicationError("Recipe compilation requires a current original map")
+            if (
+                not reuse_only
+                and expected_plan is None
+                and compact_library.config(self) is not None
+            ):
+                from .recipe_service import _RECIPES, _donor_record
+
+                recipe = _RECIPES.get(recipe_id)
+                if recipe is not None and recipe.additions:
+                    self._warm_record(_donor_record(self))
             rules, binding = resolve_bundled_recipe(self, record, recipe_id)
             if expected_plan is not None:
                 current = plan_recipe_job(self, record, recipe_id, resolved=(rules, binding))
                 if current != expected_plan:
                     raise ApplicationError("Compatibility inputs changed; review Play again")
-            if reuse_only:
+            if reuse_only or (
+                expected_plan is not None and compact_library.config(self) is not None
+            ):
                 return self._cached_recipe_edition_locked(record, rules, binding)
-            return self._create_compatibility_edition_locked(
-                record, rules, label=recipe_id, recipe_binding=binding
+            result = self._create_compatibility_edition_locked(
+                record,
+                rules,
+                label=recipe_id,
+                recipe_binding=binding,
             )
+            if expected_plan is None:
+                self._cool_library(keep=result)
+            return result
 
     def _cached_recipe_edition_locked(self, original, rules, binding):
         """Read one intact current compiled edition; never prepare or recover."""
@@ -866,6 +998,7 @@ class LauncherApplication:
             matches = [r for r in self.catalogue() if r.profile_id == profile_id]
             if len(matches) != 1 or not self._is_original_variant(matches[0]):
                 raise ApplicationError("Bank inspection requires a unique current original map")
+            self._warm_record(matches[0], readonly=True)
             return inspect_bank_candidate(
                 self,
                 matches[0],
@@ -914,6 +1047,7 @@ class LauncherApplication:
                             raise ApplicationError(
                                 "Recipe planning requires a unique current original map"
                             )
+                        self._warm_record(matches[0], readonly=True)
                         source = removal._leaf(
                             self.imports, matches[0].imported_directory, r"[0-9a-f]{32}"
                         )
@@ -1073,6 +1207,7 @@ class LauncherApplication:
         selected = applicable_rules(rules, record.archive_sha256, record.game_executable_sha256)
         if len(selected) != len(rules):
             raise RuleError("Every selected rule must match this archive and game build")
+        self._warm_record(record)
         imported = removal._leaf(self.imports, record.imported_directory, r"[0-9a-f]{32}")
         _assert_regular_tree(imported)
         input_assets = assets_manifest_hash(imported)
@@ -1115,6 +1250,7 @@ class LauncherApplication:
             )
         existing = next((item for item in records if item.variant_id == variant.variant_id), None)
         if existing is not None:
+            self._warm_record(existing)
             if recipe_binding is not None:
                 self._validate_recipe_context(existing)
             _unfreeze_directories(destination)
@@ -1315,6 +1451,7 @@ class LauncherApplication:
                 )
             if Path(record.prepared_directory).name != record.prepared_directory:
                 raise ApplicationError("Invalid prepared profile path")
+            self._warm_record(record)
             source = self.prepared / record.prepared_directory
             _assert_no_symlink_ancestor(source)
             prepared_name = uuid.uuid4().hex
@@ -1356,6 +1493,7 @@ class LauncherApplication:
             self._write_import_checks(new)
             records.append(new)
             _atomic_json(self.catalogue_file, dict(schema=1, maps=[r.as_json() for r in records]))
+            self._cool_library(keep=new)
             return new
 
     def _prepare_icon(self, imported: Path, variant_id: str) -> None:
@@ -1446,6 +1584,16 @@ class LauncherApplication:
                 if state["active"] == record.profile_id
                 else self.profiles._profile_path(record.profile_id)
             )
+            if self._is_cold(root):
+                marker = json.loads(self.cold_storage.read_file(root, MARKER, 64 * 1024))
+                if marker.get("profile_id") != record.profile_id:
+                    raise ApplicationError("Cold profile identity differs from catalogue")
+                return self.verification_store.latest(
+                    record.archive_sha256,
+                    self.installation.executable_sha256,
+                    record.variant_id,
+                    marker["assets_sha256"],
+                )
             marker = self.profiles._marker(root, record.profile_id)
             latest = self.verification_store.latest(
                 record.archive_sha256,
@@ -1483,6 +1631,8 @@ class LauncherApplication:
             if state["active"] == record.profile_id
             else self.profiles._profile_path(record.profile_id)
         )
+        if self._is_cold(root):
+            raise EvidenceError("Prepare this map before binding current gameplay evidence")
         marker = self.profiles._marker(root, record.profile_id)
         resources = self._resource_snapshot(root)
         scenarios = []
@@ -1567,7 +1717,10 @@ class LauncherApplication:
             and r.assets_sha256 == legacy.assets_sha256
             and (not r.resources_sha256 or r.resources_sha256 == legacy.resources_sha256)
         )
-        if not records:
+        cold = self.profiles._state()["active"] != record.profile_id and self._is_cold(
+            self.profiles._profile_path(record.profile_id)
+        )
+        if not records or cold:
             scenarios = [
                 dict(
                     archive_sha256=record.archive_sha256,
@@ -1660,8 +1813,14 @@ class LauncherApplication:
         with self._locked():
             self._stopped()
             self.profiles.recover()
+            if profile_id != ORIGINAL:
+                record = next((r for r in self.catalogue() if r.profile_id == profile_id), None)
+                if record is not None:
+                    self._warm_record(record)
             self._authorize_profile(profile_id)
-            return self.profiles.switch(profile_id)
+            result = self.profiles.switch(profile_id)
+            self._cool_library()
+            return result
 
     def play(
         self,
@@ -1671,6 +1830,8 @@ class LauncherApplication:
         profile_copy: Optional[str] = None,
         mutation_guard=None,
         startup_seconds: float = 30.0,
+        cancelled=None,
+        progress=None,
     ) -> str:
         """Use the app launch path, optionally on a guarded isolated asset copy.
 
@@ -1701,6 +1862,16 @@ class LauncherApplication:
                 self.profiles.recover()
             elif self.profiles.journal.exists() or self.profiles.journal.is_symlink():
                 raise ApplicationError("Guarded play refuses pending activation recovery")
+            if profile_id != ORIGINAL:
+                record = next((r for r in self.catalogue() if r.profile_id == profile_id), None)
+                if record is not None:
+                    self._warm_record(
+                        record,
+                        readonly=mutation_guard is not None,
+                        cancelled=cancelled,
+                        progress=progress,
+                    )
+            _checkpoint(cancelled)
             self._authorize_profile(profile_id)
             settings_before = settings_after = None
             if profile_id != ORIGINAL:
@@ -1750,6 +1921,7 @@ class LauncherApplication:
                 launch = lambda: subprocess.Popen(["/usr/bin/open", "-a", str(bundle)])
 
             def configured_launch() -> None:
+                _checkpoint(cancelled)
                 # Called under both locks, after the complete profile switch and
                 # stopped-game check. Frozen prepared inputs and saves stay intact.
                 with mutation_guard() if mutation_guard is not None else nullcontext():
@@ -1777,6 +1949,11 @@ class LauncherApplication:
                         finally:
                             if temporary is not None and temporary.exists():
                                 temporary.unlink()
+                if mutation_guard is None:
+                    # Both locks remain held, and the game has not been dispatched.
+                    self.profiles._require_stopped()
+                    compact_library.cool(self, cancelled=cancelled, progress=progress)
+                _checkpoint(cancelled)
                 # The finite callback owns its final dispatch fence. Do not hold
                 # STATE here across its blocking child wait or acquire it twice.
                 launch()

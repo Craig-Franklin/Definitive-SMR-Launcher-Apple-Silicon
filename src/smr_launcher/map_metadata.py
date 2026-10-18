@@ -182,8 +182,14 @@ def read_map_metadata(path: Path) -> MapMetadata:
 
 def read_scenario_labels(path: Path) -> dict:
     """Read literal authored labels, never a rendered-title or Play assertion."""
+    return parse_scenario_labels(_read_metadata(path, 8 * 1024 * 1024))
+
+
+def parse_scenario_labels(payload: bytes) -> dict:
+    """Read bounded authored labels from hot or cold presentation bytes."""
     result = dict(title=None, subtitle=None)
-    payload = _read_metadata(path, 8 * 1024 * 1024)
+    if len(payload) > 8 * 1024 * 1024:
+        return result
     declarations = payload.replace(b"\0", b"").upper()
     if b"<!DOCTYPE" in declarations or b"<!ENTITY" in declarations:
         return result

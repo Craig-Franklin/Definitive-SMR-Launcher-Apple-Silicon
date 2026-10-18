@@ -3220,7 +3220,7 @@ class LauncherWindow:
             if self.closed or self.close_when_idle or self.app is not app:
                 return
             self._submit(
-                "Switching profile and starting Railroads…",
+                "Preparing selected map and starting Railroads…",
                 lambda: self._play_with_crash_monitor(profile_id),
                 lambda _: self.status.set("Railroads launched. Quit it before changing maps."),
             )
@@ -3310,6 +3310,13 @@ class LauncherWindow:
 
         if mutation_guard is not None:
             return app.play(profile_id, launch=launch, mutation_guard=mutation_guard)
+        if getattr(app, "cold_storage", None) is not None:
+
+            def owner_cancelled():
+                self._require_launch_owner(app)
+                return False
+
+            return app.play(profile_id, launch=launch, cancelled=owner_cancelled)
         return app.play(profile_id, launch=launch)
 
     def crash_reports(self) -> None:

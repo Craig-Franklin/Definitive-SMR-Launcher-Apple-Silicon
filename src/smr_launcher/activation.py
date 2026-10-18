@@ -196,12 +196,14 @@ class FilesystemProfiles:
         fault_hook: Optional[Callable[[str], None]] = None,
         exchange: Callable[[Path, Path], None] = _macos_exchange,
         observed_io=None,
+        cold_storage=None,
     ) -> None:
         # macOS exposes /var as a system symlink to /private/var. Resolve that
         # alias once, then reject any later link substitution in managed paths.
         self.live = _canonical_directory_path(Path(live_root))
         self.store = _canonical_directory_path(Path(store_root))
         self.profiles = self.store / "profiles"
+        self.cold_storage = cold_storage
         self.staging = self.store / "staging"
         self.state_file = self.store / "state.json"
         self.journal = self.store / "journal.json"
@@ -441,6 +443,7 @@ class FilesystemProfiles:
         saved_games: Optional[Path] = None,
         recover_pending: bool = True,
         mutation_guard=None,
+        cold: bool = False,
     ) -> str:
         """Make an independent writable generation from an immutable prepared tree."""
         if not _SHA256.fullmatch(variant_id):
@@ -478,6 +481,23 @@ class FilesystemProfiles:
                 ):
                     raise RecoveryError("Active variant differs from the prepared source")
                 return profile_id
+            if self.cold_storage is not None and self.cold_storage.is_cold(destination):
+                if cold and mutation_guard is None:
+                    value = self.cold_storage._load(destination)
+                    self.cold_storage._verify_entries(value["entries"])
+                    marker = json.loads(self.cold_storage.read_file(destination, MARKER, 64 * 1024))
+                    if (
+                        marker.get("profile_id") != profile_id
+                        or marker.get("variant_id") != variant_id
+                        or marker.get("assets_sha256") != expected_hash
+                    ):
+                        raise RecoveryError(
+                            "Stored cold profile identity differs from prepared source"
+                        )
+                    return profile_id
+                if mutation_guard is not None:
+                    raise ActivationError("Prepare this cold profile before guarded use")
+                self.cold_storage.materialize(destination)
             if destination.exists():
                 marker = self._marker(destination, profile_id)
                 if (
@@ -485,6 +505,25 @@ class FilesystemProfiles:
                     or marker.get("assets_sha256") != expected_hash
                 ):
                     raise RecoveryError("Variant ID collision or modified stored profile")
+                return profile_id
+            if cold:
+                if (
+                    self.cold_storage is None
+                    or mutation_guard is not None
+                    or self.observed_io is not None
+                ):
+                    raise ActivationError("Cold registration requires its ordinary storage owner")
+                self.cold_storage.register_profile(
+                    source,
+                    destination,
+                    dict(
+                        schema=SCHEMA,
+                        profile_id=profile_id,
+                        variant_id=variant_id,
+                        assets_sha256=expected_hash,
+                    ),
+                    saved_games=saved_games,
+                )
                 return profile_id
             temporary = self.staging / (profile_id + "-" + uuid.uuid4().hex)
             try:
@@ -607,6 +646,10 @@ class FilesystemProfiles:
         if source_id == target_id:
             return target_id
         source_path = self._profile_path(source_id)
+        if self.cold_storage is not None and self.cold_storage.is_cold(target_path):
+            if self.observed_io is not None:
+                raise ActivationError("Prepare this cold profile before observed use")
+            self.cold_storage.materialize(target_path)
         if source_path.exists() or not target_path.is_dir() or target_path.is_symlink():
             raise RecoveryError("Current or target profile storage is unexpected")
         self._marker(self.live, source_id)
@@ -637,6 +680,12 @@ class FilesystemProfiles:
         ):
             if mutation_guard is not None and (self.journal.exists() or self.journal.is_symlink()):
                 raise RecoveryError("Guarded switch refuses pending activation recovery")
+            if (
+                mutation_guard is not None
+                and self.cold_storage is not None
+                and self.cold_storage.is_cold(self._profile_path(target_id))
+            ):
+                raise ActivationError("Prepare this cold profile before guarded use")
             return self._switch_locked(target_id)
 
     def play(
@@ -661,6 +710,12 @@ class FilesystemProfiles:
                     self.journal.exists() or self.journal.is_symlink()
                 ):
                     raise RecoveryError("Guarded play refuses pending activation recovery")
+                if (
+                    mutation_guard is not None
+                    and self.cold_storage is not None
+                    and self.cold_storage.is_cold(self._profile_path(target_id))
+                ):
+                    raise ActivationError("Prepare this cold profile before guarded use")
                 target = self._switch_locked(target_id)
             self._require_stopped()
             launch()
