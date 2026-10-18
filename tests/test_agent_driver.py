@@ -1181,6 +1181,20 @@ class AgentRouteTests(unittest.TestCase):
         self.assertEqual(self.stage_indexes, {})
         self.assertEqual(self.actions, [])
 
+    def test_gameplay_first_window_wait_uses_launch_bound_before_actor_request(self):
+        self.owner.launch()
+        self.owner.job["purpose"] = driver.CACHED_GAMEPLAY_PURPOSE
+        token = self.owner.job.pop("agent_save")["token"]
+        self.owner.job["catalogue_menu"] = {"resume_save": {"token": token}}
+        self.clock[0] = self.owner.launch_deadline - 0.6
+        self.window_responses = [[]]
+        with self.assertRaisesRegex(ControlRefused, "Game window readiness deadline expired"):
+            self.owner.decisions.stage("reopened", "Observe exact retained world")
+        self.assertLess(self.clock[0], self.owner.launch_deadline)
+        self.assertEqual(self.stage_indexes, {})
+        self.assertEqual(self.actions, [])
+        self.assertFalse(self.owner.uncertain_input)
+
     def test_load_known_window_keeps_original_later_frame_and_normal_quit_path(self):
         self.owner.launch()
         self.owner.job["purpose"] = driver.CATALOGUE_LOAD_PURPOSE

@@ -203,8 +203,8 @@ rendered title/subtitle, edition/build/assets, complete warning and current retu
 The target must have no pre-existing saves. Save, Load Game, construction and
 purchases are excluded; original observer, input, quit and restoration bounds apply.
 
-Direct and cached LOAD share their existing anchor+120 launch deadline when
-waiting for the first game scene. An actor cannot request a partial finish before
+Direct/cached LOAD and retained-world gameplay share their existing anchor+120
+launch deadline when waiting for the first game scene. An actor cannot request a partial finish before
 any scene exists. If readiness expires, the owner takes its existing cleanup path
 without inventing a scene or blind quit input. Once a frame has been accepted,
 later loading, normal quit and original390/480/900 bounds remain unchanged.

@@ -1078,8 +1078,10 @@ def pilot_class(common):
 
         def agent_frame(self, label, deadline):
             # Before any scene exists the actor cannot request a partial finish.
-            # LOAD readiness shares its original launch bound, not the work interval.
-            if self.job["purpose"] in LOAD_PURPOSES and not hasattr(self, "last_agent_window"):
+            # LOAD and retained-world gameplay share the original launch bound.
+            if self.job["purpose"] in (*LOAD_PURPOSES, CACHED_GAMEPLAY_PURPOSE) and not hasattr(
+                self, "last_agent_window"
+            ):
                 deadline = min(deadline, self.launch_deadline)
             attempt = 0
             while True:
