@@ -369,7 +369,7 @@ class AgentRouteTests(unittest.TestCase):
                 "evidence_kind": "agent_visual_decision",
                 "choice": "action" if action else "observed",
                 "action": action,
-                "receiver": "filename_field" if stage == "filename" else "owned_window",
+                "receiver": "filename_field" if stage in ("filename", "saved") else "owned_window",
                 "observation": "Synthetic visual decision; no game or detector evidence.",
                 "exact_token": self.owner.job.get("agent_save", {}).get("token"),
                 "overwrite_visible": False,
@@ -756,7 +756,7 @@ class AgentRouteTests(unittest.TestCase):
         self.assertEqual(result["errors"], [])
         self.assertEqual(self.owner.launches, 2)
         self.assertEqual(
-            set(self.stage_indexes), {"world", "filename", "saved", "quit", "reopened", "finished"}
+            set(self.stage_indexes), {"world", "filename", "quit", "reopened", "finished"}
         )
         self.assertFalse(
             result["outcome"]["gameplay_credit"] or result["outcome"]["save_reopen_credit"]
@@ -783,6 +783,120 @@ class AgentRouteTests(unittest.TestCase):
         self.assertNotIn(["hotkey", "--key", "CmdOrCtrl+Q"], self.actions)
         self.assertEqual(self.keep.read_bytes(), b"preserved original synthetic save")
         self.assertFalse((self.keep.parent / self.owner.job["agent_save"]["filename"]).exists())
+
+    def test_filename_commit_reuses_observed_frame_after_capture_before_without_second_decision(
+        self,
+    ):
+        self.cached_save_owner()
+        original = self.owner.agent_input
+
+        def delivery(label, *args, **kwargs):
+            if label.endswith("FilenameCommit"):
+                self.assertTrue((self.directory / "save-before.json").is_file())
+                self.assertNotIn("saved", self.stage_indexes)
+            return original(label, *args, **kwargs)
+
+        self.owner.agent_input = delivery
+        result = self.run_trial()
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(self.actions.count(["press-key", "--key", "Return"]), 1)
+        receipt = json.loads((self.directory / "save-commit-input.json").read_text())
+        self.assertEqual(receipt["evidence_kind"], "mechanical_commit_from_agent_observed_filename")
+        self.assertFalse(receipt["machine_scene_predicate"] or receipt["human_confirmation"])
+        self.assertIsNone(self.owner.decisions.filename_confirmation)
+        with self.assertRaisesRegex(ControlRefused, "Repeated save commit"):
+            self.owner.save_once(None, validate_delivery=lambda: None, deadline=580)
+
+    def test_filename_commit_stale_final_ingress_reobserves_before_one_return(self):
+        self.cached_save_owner()
+
+        def poll():
+            if (self.directory / "save-before.json").exists():
+                self.before_poll = None
+                self.clock[0] += driver.FRAME_SECONDS + 1
+
+        self.before_poll = poll
+        result = self.run_trial()
+        self.assertEqual(result["errors"], [])
+        self.assertIn("saved", self.stage_indexes)
+        self.assertEqual(self.actions.count(["press-key", "--key", "Return"]), 1)
+        self.assertFalse(any("FilenameCommit" in str(argv) for argv in self.argv))
+        receipt = json.loads((self.directory / "save-commit-input.json").read_text())
+        self.assertEqual(receipt["evidence_kind"], "agent_input_decision")
+
+    def test_filename_commit_unknown_input_never_retries_and_holds_restoration(self):
+        self.cached_save_owner()
+        original = self.owner.agent_input
+
+        def delivery(label, *args, **kwargs):
+            if label.endswith("FilenameCommit"):
+                self.native_failure = TimeoutError("Synthetic unknown Return")
+            return original(label, *args, **kwargs)
+
+        self.owner.agent_input = delivery
+        result = self.run_trial()
+        self.assertIn("unknown Return", result["outcome"]["cause"])
+        self.assertNotIn("saved", self.stage_indexes)
+        self.assertTrue(self.owner.uncertain_input)
+        self.assertFalse(result["restored"] or result["terminal_finished"])
+        self.assertEqual(sum(a[2:5] == ["press-key", "--key", "Return"] for a in self.argv), 1)
+
+    def test_filename_commit_cancellation_at_final_ingress_creates_no_return_child(self):
+        self.cached_save_owner()
+
+        def poll():
+            if (self.directory / "save-before.json").exists():
+                self.owner.control.cancelled = True
+
+        self.before_poll = poll
+        result = self.run_trial()
+        self.assertEqual(result["outcome"]["cause"], "user_requested_game_handback")
+        self.assertNotIn(["press-key", "--key", "Return"], self.actions)
+        self.assertNotIn("saved", self.stage_indexes)
+        self.assertTrue(result["restored"] and result["terminal_finished"])
+
+    def test_filename_commit_rejects_changed_intent_and_receiver_before_return(self):
+        self.owner.launch()
+        for changed in ("mapping", "filename", "receiver", "frame"):
+            with self.subTest(changed=changed):
+                # Each context is produced by actual fresh AgentDecisions.
+                self.owner.decisions = driver.AgentDecisions(self.owner)
+                self.owner.save_commit_started = False
+                self.stage_indexes = {}
+                mapping = self.owner.decisions.stage("filename", "Observe exact filename")
+                confirmation = self.owner.decisions.filename_confirmation
+                intent = driver.SaveIntent(
+                    str(self.keep.parent),
+                    self.owner.job["agent_save"]["filename"],
+                    driver.sha(driver.canonical(mapping)),
+                )
+                if changed == "mapping":
+                    intent = driver.SaveIntent(intent.save_directory, intent.filename, "0" * 64)
+                elif changed == "filename":
+                    intent = driver.SaveIntent(
+                        intent.save_directory,
+                        "Other.SMRailroadsSavedGame",
+                        intent.ui_mapping_observation_sha256,
+                    )
+                elif changed == "receiver":
+                    confirmation["process"]["birth_us"] += 1
+                else:
+                    confirmation["frame"]["window"]["width"] += 1
+                before = len(self.argv)
+                with self.assertRaisesRegex(ControlRefused, "filename commit binding"):
+                    self.owner.save_once(intent, validate_delivery=lambda: None, deadline=580)
+                self.assertEqual(len(self.argv), before)
+                # Immutable request files belong to this completed stage only.
+                for path in self.directory.glob("Agent*-*.json"):
+                    path.unlink()
+
+    def test_filename_overwrite_never_arms_commit(self):
+        self.owner.launch()
+        self.reply_transform = lambda row: dict(row, overwrite_visible=True)
+        with self.assertRaisesRegex(ControlRefused, "overwrite evidence refused"):
+            self.owner.decisions.stage("filename", "Do not overwrite")
+        self.assertFalse(hasattr(self.owner.decisions, "filename_confirmation"))
+        self.assertEqual(self.actions, [])
 
     def test_save_window_history_is_bound_to_receiver_not_previous_launch(self):
         self.owner.job["purpose"] = driver.CACHED_SAVE_PURPOSE
@@ -1310,7 +1424,8 @@ class AgentRouteTests(unittest.TestCase):
         result = self.run_trial()
         self.assertTrue(result["terminal_finished"], result)
         self.assertEqual(result["errors"], [])
-        self.assertEqual(set(self.stage_indexes), set(driver.STAGES))
+        self.assertEqual(set(self.stage_indexes), set(driver.STAGES) - {"saved"})
+        self.assertNotIn("saved", result["outcome"]["agent_observed_stages"])
         for action in (
             ["hotkey", "--key", "CmdOrCtrl+S"],
             ["type-text", "--text", "SyntheticToken12345"],
@@ -1333,7 +1448,7 @@ class AgentRouteTests(unittest.TestCase):
             (self.original_stat.st_ino, self.original_stat.st_mtime_ns),
         )
         self.assertLessEqual(self.owner.frames, 96)
-        self.assertGreaterEqual(self.owner.frames, len(self.argv) + 2 * len(driver.STAGES))
+        self.assertGreaterEqual(self.owner.frames, len(self.argv) + 2 * len(self.stage_indexes))
 
     def test_model_nonresponse_expires_and_uses_existing_cleanup(self):
         with patch.object(
@@ -1629,7 +1744,7 @@ class AgentRouteTests(unittest.TestCase):
 
     def test_ingress_prework_cannot_create_target_before_final_save_validation(self):
         def poll():
-            if "saved" in self.stage_indexes:
+            if (self.directory / "save-before.json").exists():
                 target = (
                     self.owner.profiles.live / "Saves" / self.owner.job["agent_save"]["filename"]
                 )

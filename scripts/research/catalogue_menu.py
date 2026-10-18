@@ -1558,7 +1558,7 @@ def pilot_class(common, agent_class):
                     "filename",
                     "Open Save As if not already open. Enter exactly "
                     + self.job["agent_save"]["token"]
-                    + "; observe the filename field/caret and do not save yet. Refuse overwrite. Return partial with no input if the field cannot be identified.",
+                    + "; observe the filename field/caret without saving. An empty observed reply authorizes the owner to submit Return once after its filesystem guards. Refuse overwrite. Return partial with no input if the field cannot be identified.",
                 )
                 intent = SaveIntent(
                     str(self.profiles.live / "Saves"),

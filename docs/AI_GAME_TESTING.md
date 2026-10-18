@@ -454,7 +454,14 @@ path.
 
 An observed paused world may pair with opening Save As once. The filename field,
 exact token, save commit and exact reopened row/world still require their own
-fresh evidence. On reopen, match the saved world/HUD and use the current visible
+fresh evidence. An empty `observed` reply for the exact focused filename field
+authorizes the owner to submit Return once from that same frame after capturing
+the before-save inventory. It does not require a second model decision. The
+existing final delivery fence rechecks the exact mapping, receiver, frame age,
+cancellation, target absence and original deadline. A proven stale frame with no
+input uses the existing fresh `saved` decision; an unknown dispatch never retries.
+The private commit receipt distinguishes mechanical input from agent observation.
+On reopen, match the saved world/HUD and use the current visible
 pause control if needed; do not assume the saved pause state persists. Incomplete
 world/filename/reopened prerequisites enter normal quit with a no-input partial;
 unknown dispatch or failed exact-exit evidence retains its original failure and

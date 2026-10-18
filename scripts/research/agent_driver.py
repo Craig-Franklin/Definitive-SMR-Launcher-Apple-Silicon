@@ -600,7 +600,7 @@ class AgentDecisions:
                         decision["receiver"] == "filename_field",
                         "Agent-observed filename field required",
                     )
-                return {
+                observation = {
                     **decision,
                     "stage": stage,
                     "snapshot": frame["snapshot"],
@@ -608,6 +608,24 @@ class AgentDecisions:
                     "machine_scene_predicate": False,
                     "human_confirmation": False,
                 }
+                if stage == "filename":
+                    # Carry this exact observed field into the existing save
+                    # hook; it still captures the filesystem before committing.
+                    self.filename_confirmation = decode(
+                        canonical(
+                            dict(
+                                observation=observation,
+                                frame=frame,
+                                frame_sha256=sha(canonical(frame)),
+                                window=window,
+                                captured=captured,
+                                process=asdict(owner.native_receiver()),
+                                job=owner.job["job"],
+                                label=label,
+                            )
+                        )
+                    )
+                return observation
             require(decision["choice"] == "action", "Unknown agent decision")
             if (
                 gameplay
@@ -633,6 +651,11 @@ class AgentDecisions:
                     purpose=owner.job["purpose"],
                 )
             )
+            if stage == "saved":
+                require(
+                    decision["exact_token"] == token and decision["receiver"] == "filename_field",
+                    "Fresh exact filename field required for save confirmation",
+                )
             if stage == "gui_play":
                 require(
                     owner.job["purpose"] == GUI_MENU_PURPOSE, "Native GUI Play purpose required"
@@ -1157,12 +1180,61 @@ def pilot_class(common):
 
         def save_once(self, intent, *, validate_delivery, deadline):
             require(deadline == self.anchor + ACTION_SECONDS, "Original cycle deadline required")
-            result = self.decisions.stage(
-                "saved",
-                "Confirm the exact new token once using Save or Return; refuse any overwrite prompt.",
-                validate=validate_delivery,
-                return_after_input=True,
-            )
+            require(self.job["purpose"] in (PURPOSE, CACHED_SAVE_PURPOSE), "Save purpose required")
+            require(not getattr(self, "save_commit_started", False), "Repeated save commit refused")
+            self.save_commit_started = True
+            confirmation = getattr(self.decisions, "filename_confirmation", None)
+            self.decisions.filename_confirmation = None
+            require(confirmation is not None, "Exact filename observation required before save")
+            confirmation_sha = sha(canonical(confirmation))
+
+            def validate_confirmation():
+                validate_delivery()
+                observation = confirmation["observation"]
+                require(
+                    sha(canonical(confirmation)) == confirmation_sha
+                    and sha(canonical(observation)) == intent.ui_mapping_observation_sha256
+                    and intent.filename == self.job["agent_save"]["filename"]
+                    and observation["exact_token"] == self.job["agent_save"]["token"]
+                    and confirmation["job"] == self.job["job"]
+                    and confirmation["process"] == asdict(self.native_receiver())
+                    and confirmation["window"] == confirmation["frame"]["window"]["id"]
+                    and observation["snapshot"] == confirmation["frame"]["snapshot"]
+                    and observation["image_sha256"] == confirmation["frame"]["sha256"]
+                    and confirmation["frame_sha256"] == sha(canonical(confirmation["frame"])),
+                    "Exact filename commit binding changed",
+                )
+
+            validate_confirmation()
+            try:
+                delivered = self.agent_input(
+                    confirmation["label"] + "FilenameCommit",
+                    ["press-key", "--key", "Return"],
+                    confirmation["window"],
+                    confirmation["frame"],
+                    confirmation["captured"],
+                    deadline,
+                    validate_confirmation,
+                )
+            except StaleFrame:
+                # The final pre-spawn fence proved no input. Ask for a fresh
+                # save decision under the same deadline; never replay UNKNOWN.
+                result = self.decisions.stage(
+                    "saved",
+                    "Confirm the exact new token once using Save or Return; refuse any overwrite prompt.",
+                    validate=validate_delivery,
+                    return_after_input=True,
+                )
+            else:
+                result = dict(
+                    evidence_kind="mechanical_commit_from_agent_observed_filename",
+                    filename_observation_sha256=intent.ui_mapping_observation_sha256,
+                    provider_receipt_sha256=sha(canonical(delivered)),
+                    save_effect_proven=False,
+                    machine_scene_predicate=False,
+                    human_confirmation=False,
+                )
+            self.write("save-commit-input.json", result)
             until = min(time.monotonic() + 10, deadline)
             while not (Path(intent.save_directory) / intent.filename).exists():
                 self.guard_running()
@@ -1383,7 +1455,7 @@ def pilot_class(common):
                 "filename",
                 "Open Save As and enter exactly "
                 + config["token"]
-                + "; observe its field and caret, and do not save yet.",
+                + "; observe its field and caret without saving. An empty observed reply authorizes the owner to submit Return once after its filesystem guards.",
             )
             intent = SaveIntent(
                 str(self.profiles.live / "Saves"), config["filename"], sha(canonical(mapping))
@@ -1398,7 +1470,9 @@ def pilot_class(common):
             )
             outcome.update(
                 cause="agent_visual_save_cycle_and_exact_file_bound_requires_review",
-                agent_observed_stages=list(STAGES),
+                agent_observed_stages=[
+                    stage for stage in STAGES if stage in self.decisions.used_stages
+                ],
                 world_loaded="agent_observed",
                 evidence_kind="agent_visual_observations",
                 human_confirmation=False,

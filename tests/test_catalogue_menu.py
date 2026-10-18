@@ -1174,6 +1174,37 @@ class CatalogueRestoreTests(unittest.TestCase):
         )
         driver.verify_entry(job, admission, "a" * 64)
 
+    def test_real_save_entry_through_decisions_commits_observed_filename_without_saved_turn(self):
+        route = route_fixtures.AgentRouteTests()
+        route.setUp()
+        self.addCleanup(route.doCleanups)
+        route.cached_save_owner()
+        job, admission = self.entry_contract(driver.CACHED_SAVE_PURPOSE)
+        job["job"] = "synthetic-save-entry-through-quit"
+        job["game_sha256"] = route.owner.job["game_sha256"]
+        job["agent_save"] = dict(route.owner.job["agent_save"])
+        job["orca"] = "/synthetic/orca"
+        job["root"]["session"] = "synthetic-root"
+        job["actor_binding"]["provider_runtime_id"] = "synthetic-runtime"
+        route.owner.job = job
+        route.owner.config = job["catalogue_menu"]
+        route.owner.diagnostic = route.owner.config["target"]["profile_id"]
+        driver.verify_entry(job, admission, "a" * 64)
+        with patch.object(
+            driver, "NATIVE_SOURCE_SHA256", driver.sha(Path(job["native_source"]).read_bytes())
+        ):
+            result = route.run_trial()
+        self.assertEqual(result["errors"], [])
+        self.assertTrue(result["stopped"] and result["restored"] and result["terminal_finished"])
+        self.assertEqual(route.owner.launches, 2)
+        self.assertNotIn("saved", route.stage_indexes)
+        self.assertEqual(route.actions.count(["press-key", "--key", "Return"]), 1)
+        self.assertEqual(route.actions.count(["hotkey", "--key", "CmdOrCtrl+Q"]), 2)
+        self.assertEqual(route.keep.read_bytes(), b"preserved original synthetic save")
+        commit = menu.decode((route.directory / "save-commit-input.json").read_bytes())
+        self.assertEqual(commit["evidence_kind"], "mechanical_commit_from_agent_observed_filename")
+        self.assertFalse(result["outcome"]["save_reopen_credit"])
+
     def test_real_load_entry_refuses_save_grant_or_review(self):
         job, admission = self.entry_contract(driver.CACHED_LOAD_PURPOSE)
         decision = admission["decision"]
