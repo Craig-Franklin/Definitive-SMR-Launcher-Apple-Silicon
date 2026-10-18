@@ -474,6 +474,360 @@ class CatalogueRestoreTests(unittest.TestCase):
         )
         return job, admission
 
+    def gameplay_config(self, job=None):
+        job = self.save_config(empty=True) if job is None else job
+        job["purpose"] = menu.GAMEPLAY_PURPOSE
+        job["game_sha256"] = "e" * 64
+        config = job["catalogue_menu"]
+        token = "GameTest" + "1" * 11
+        filename = token + ".SMRailroadsSavedGame"
+        saves = self.owner.profiles.live / "Saves"
+        (saves / filename).write_bytes(b"retained exact test world")
+        autosaves = {}
+        for index in (0, 1):
+            name = f"Auto{index}.SMRailroadsSavedGame"
+            (saves / name).write_bytes(("owned test autosave " + str(index)).encode())
+            autosaves[name] = menu.file_facts(saves / name)
+        facts = menu.file_facts(saves / filename)
+        expected = {
+            key: config["selection"][key] for key in ("profile_id", "archive_sha256", "variant_id")
+        }
+        expected["game_executable_sha256"] = job["game_sha256"]
+        service = dict(
+            commit_sent=True,
+            eof_closed=True,
+            reaped=True,
+            returncode=0,
+            pending=None,
+            commit_response=dict(
+                ok=True,
+                data=dict(target=expected, launched_profile_id=config["target"]["profile_id"]),
+            ),
+        )
+
+        def exited(pid):
+            return dict(
+                job="prior-owned-trial",
+                process=dict(pid=pid, birth=str(pid), executable="/synthetic/game"),
+                result=dict(state="observed_exited", terminal=True, stop_requested=False),
+            )
+
+        origin = dict(
+            job="prior-owned-trial",
+            invocation=dict(returncode=0),
+            lease_released=True,
+            preservation_verified=True,
+            terminal_finished=True,
+            game_absent=True,
+            first_normal_exit=True,
+            final_normal_exit=True,
+            service_settled=[service, service],
+            exact_normal_exit=exited(100),
+            second_observer=exited(200),
+            owned_absences=[
+                dict(pid=pid, role="game", positive_absence=True) for pid in (100, 200)
+            ],
+            exact_new_named_save=facts,
+            current_test_autosave=autosaves["Auto0.SMRailroadsSavedGame"],
+            new_target_files_retained={
+                "Saves/" + filename: facts,
+                "Saves/Auto1.SMRailroadsSavedGame": autosaves["Auto1.SMRailroadsSavedGame"],
+            },
+        )
+        path = self.owner.directory / "gameplay-origin.json"
+        path.write_bytes(menu.canonical(origin))
+        config["preservation"]["target_files"] = menu.tree_files(self.owner.profiles.live)
+        config["preservation"]["immutable"][str(path)] = menu.file_facts(path)
+        config["resume_save"] = dict(
+            token=token,
+            filename=filename,
+            facts=facts,
+            autosaves=autosaves,
+            origin_readback=str(path),
+            origin_sha256=menu.sha(path.read_bytes()),
+        )
+        return job
+
+    def test_gameplay_config_binds_named_save_and_every_owned_autosave(self):
+        job = self.gameplay_config()
+        self.assertIs(menu.verify_config(job), self.owner.config)
+        proof = job["catalogue_menu"]["resume_save"]
+        del proof["autosaves"]["Auto1.SMRailroadsSavedGame"]
+        with self.assertRaisesRegex(ControlRefused, "Every pre-existing"):
+            menu.verify_config(job)
+
+    def test_gameplay_origin_refuses_unsettled_wrong_target_and_named_save_drift(self):
+        job = self.gameplay_config()
+        proof = job["catalogue_menu"]["resume_save"]
+        path = Path(proof["origin_readback"])
+        original = menu.decode(path.read_bytes())
+        for cause in ("pending", "wrong-target", "stopped", "not-absent", "named", "autosave"):
+            with self.subTest(cause=cause):
+                value = menu.decode(menu.canonical(original))
+                if cause == "pending":
+                    value["service_settled"][1]["pending"] = "unknown"
+                elif cause == "wrong-target":
+                    value["service_settled"][1]["commit_response"]["data"][
+                        "launched_profile_id"
+                    ] = "foreign"
+                elif cause == "stopped":
+                    value["second_observer"]["result"]["stop_requested"] = True
+                elif cause == "not-absent":
+                    value["owned_absences"][1]["positive_absence"] = False
+                elif cause == "named":
+                    value["exact_new_named_save"]["sha256"] = "f" * 64
+                else:
+                    value["new_target_files_retained"]["Saves/Auto1.SMRailroadsSavedGame"][
+                        "inode"
+                    ] += 1
+                path.write_bytes(menu.canonical(value))
+                proof["origin_sha256"] = menu.sha(path.read_bytes())
+                job["catalogue_menu"]["preservation"]["immutable"][str(path)] = menu.file_facts(
+                    path
+                )
+                with self.assertRaises(ControlRefused):
+                    menu.gameplay_origin(job)
+
+    def test_gameplay_preimages_allow_only_proven_slots_and_keep_named_saves_strict(self):
+        job = self.gameplay_config()
+        self.owner.job = job
+        self.owner.gameplay_autosave_preimages = {}
+        for name, facts in self.owner.config["resume_save"]["autosaves"].items():
+            self.owner.gameplay_autosave_preimages[name] = menu.preserve_autosave_preimage(
+                self.owner.profiles.live / "Saves" / name,
+                self.owner.directory / (name + "-before"),
+                facts,
+            )
+            (self.owner.profiles.live / "Saves" / name).write_bytes(b"new owned test rotation")
+        self.owner.baseline = self.owner.config["preservation"]
+        menu.target_files_unchanged(self.owner, self.owner.profiles.live)
+        named = self.owner.profiles.live / "Saves" / self.owner.config["resume_save"]["filename"]
+        named.write_bytes(b"must refuse changed named save")
+        with self.assertRaisesRegex(ControlRefused, "Existing target file changed"):
+            menu.target_files_unchanged(self.owner, self.owner.profiles.live)
+
+    def test_gameplay_restores_return_and_retains_each_rotated_test_preimage(self):
+        job = self.gameplay_config()
+        self.owner.job = job
+        self.owner.baseline = self.owner.config["preservation"]
+        self.owner.gameplay_autosave_preimages = {}
+        saves = self.owner.profiles.live / "Saves"
+        for name, facts in self.owner.config["resume_save"]["autosaves"].items():
+            copy = self.owner.directory / (name + "-preserved")
+            self.owner.gameplay_autosave_preimages[name] = menu.preserve_autosave_preimage(
+                saves / name, copy, facts
+            )
+            (saves / name).write_bytes(b"rotated inside synthetic owned game")
+        (saves / "Auto2.SMRailroadsSavedGame").write_bytes(b"new test autosave retained")
+        self.assertTrue(menu.restore_catalogue(self.owner))
+        self.assertEqual(self.owner.profiles._state()["active"], job["return_profile"])
+        target = self.owner.profiles._profile_path(self.target.profile_id)
+        proof = self.owner.config["resume_save"]
+        self.assertEqual(menu.file_facts(target / "Saves" / proof["filename"]), proof["facts"])
+        self.assertEqual(
+            (target / "Saves/Auto2.SMRailroadsSavedGame").read_bytes(),
+            b"new test autosave retained",
+        )
+        for name, copy in self.owner.gameplay_autosave_preimages.items():
+            self.assertEqual(menu.file_facts(copy)["sha256"], proof["autosaves"][name]["sha256"])
+
+    def test_gameplay_permits_one_packaged_launch_only(self):
+        cls = menu.pilot_class(SimpleNamespace(), object)
+        owner = cls.__new__(cls)
+        owner.job = dict(purpose=menu.GAMEPLAY_PURPOSE)
+        owner.launches = 0
+        calls = []
+        owner._launch_packaged = lambda: calls.append("packaged Play")
+        owner.launch()
+        with self.assertRaisesRegex(ControlRefused, "One packaged launch maximum"):
+            owner.launch()
+        self.assertEqual(calls, ["packaged Play"])
+
+    def test_gameplay_entry_refuses_missing_origin_baseline_and_new_save_intent(self):
+        job, admission = self.entry_contract(driver.CACHED_GAMEPLAY_PURPOSE)
+        self.gameplay_config(job)
+        proof = job["catalogue_menu"]["resume_save"]
+        facts = job["catalogue_menu"]["preservation"]["immutable"].pop(proof["origin_readback"])
+        with self.assertRaisesRegex(ControlRefused, "immutable baseline"):
+            driver.verify_entry(job, admission, "a" * 64)
+        job["catalogue_menu"]["preservation"]["immutable"][proof["origin_readback"]] = facts
+        job["agent_save"] = dict(token="WrongToken1234567890", filename="irrelevant")
+        with self.assertRaisesRegex(ControlRefused, "without new-save intent"):
+            driver.verify_entry(job, admission, "a" * 64)
+
+    def gameplay_route(self):
+        job, admission = self.entry_contract(driver.CACHED_GAMEPLAY_PURPOSE)
+        self.gameplay_config(job)
+        driver.verify_entry(job, admission, "a" * 64)
+        route = route_fixtures.AgentRouteTests()
+        route.setUp()
+        self.addCleanup(route.doCleanups)
+        owner = route.owner
+        parent = type(owner)
+        owner.__class__ = menu.pilot_class(route.common, parent)
+        for name in ("prepare", "launch", "stop", "restore"):
+            setattr(owner, name, getattr(parent, name).__get__(owner))
+        owner.job = job
+        owner.config = job["catalogue_menu"]
+        owner.job["job"] = "synthetic-retained-gameplay"
+        owner.job["orca"] = "/synthetic/orca"
+        owner.job["root"]["session"] = "synthetic-root"
+        owner.job["actor_binding"]["provider_runtime_id"] = "synthetic-runtime"
+        owner.diagnostic = owner.config["target"]["profile_id"]
+        # Real entry/decisions/file validator/workflow; physical lifecycle is synthetic.
+        owner.profiles.live = self.owner.profiles.live
+        route.reply_transform = lambda value: dict(
+            value, exact_token=owner.config["resume_save"]["token"]
+        )
+        return job, admission, route
+
+    def test_real_gameplay_entry_to_actual_decisions_uses_one_launch_no_save(self):
+        job, admission, route = self.gameplay_route()
+        owner = route.owner
+        with (
+            patch.object(menu.time, "monotonic", side_effect=lambda: route.clock[0]),
+            patch.object(
+                driver, "NATIVE_SOURCE_SHA256", driver.sha(Path(job["native_source"]).read_bytes())
+            ),
+        ):
+            result = route.run_trial()
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(owner.launches, 1)
+        self.assertEqual(set(route.stage_indexes), {"reopened", "action", "continued", "finished"})
+        self.assertEqual(route.actions.count(["hotkey", "--key", "CmdOrCtrl+Q"]), 1)
+        self.assertFalse(any(action[0] == "type-text" for action in route.actions))
+        self.assertTrue(result["restored"] and result["terminal_finished"])
+        self.assertFalse(result["outcome"]["gameplay_credit"])
+        self.assertNotIn("agent_save", job)
+        admission["decision"] = driver.admission_decisions(driver.CACHED_SAVE_PURPOSE)[0]
+        with self.assertRaisesRegex(ControlRefused, "Exact root grant"):
+            driver.verify_entry(job, admission, "a" * 64)
+
+    def test_gameplay_partial_takes_normal_quit_without_action(self):
+        job, admission, route = self.gameplay_route()
+        route.reply_transform = lambda value: dict(
+            value,
+            choice="partial",
+            action=[],
+            observation="No current paused world; stop route discovery",
+        )
+        # Only work stages return partial; final Quit remains the actual input path.
+        partial = route.reply_transform
+        route.reply_transform = lambda value: (
+            partial(value) if "finished" not in route.stage_indexes else value
+        )
+        with patch.object(
+            driver, "NATIVE_SOURCE_SHA256", driver.sha(Path(job["native_source"]).read_bytes())
+        ):
+            result = route.run_trial()
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(set(route.stage_indexes), {"reopened", "finished"})
+        self.assertEqual(route.actions, [["hotkey", "--key", "CmdOrCtrl+Q"]])
+        self.assertIsNotNone(result["outcome"]["partial_reason"])
+
+    def test_gameplay_decision_cap_takes_existing_normal_quit(self):
+        job, admission, route = self.gameplay_route()
+        route.reply_transform = lambda value: (
+            dict(value, choice="wait", action=[])
+            if "finished" not in route.stage_indexes
+            else value
+        )
+        with patch.object(
+            driver, "NATIVE_SOURCE_SHA256", driver.sha(Path(job["native_source"]).read_bytes())
+        ):
+            result = route.run_trial()
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(route.stage_indexes["reopened"], 16)
+        self.assertEqual(route.actions, [["hotkey", "--key", "CmdOrCtrl+Q"]])
+        self.assertFalse(result["outcome"]["gameplay_credit"])
+
+    def test_gameplay_final_390_cutoff_blocks_work_but_allows_normal_quit(self):
+        job, admission, route = self.gameplay_route()
+        route.before_poll = lambda: route.clock.__setitem__(0, 491.0)
+        with patch.object(
+            driver, "NATIVE_SOURCE_SHA256", driver.sha(Path(job["native_source"]).read_bytes())
+        ):
+            result = route.run_trial()
+        self.assertEqual(result["errors"], [])
+        self.assertIn("cutoff", result["outcome"]["partial_reason"])
+        self.assertEqual(route.actions, [["hotkey", "--key", "CmdOrCtrl+Q"]])
+        self.assertEqual(route.owner.launches, 1)
+
+    def test_gameplay_wrong_row_acknowledgement_refuses_double_click(self):
+        job, admission, route = self.gameplay_route()
+        exact = route.reply_transform
+        route.reply_transform = lambda value: (
+            dict(value, exact_token="WrongRow12345678901")
+            if value["action"][-2:] == ["--click-count", "2"]
+            else exact(value)
+        )
+        with patch.object(
+            driver, "NATIVE_SOURCE_SHA256", driver.sha(Path(job["native_source"]).read_bytes())
+        ):
+            result = route.run_trial()
+        self.assertIn("Exact retained row acknowledgement required", result["outcome"]["cause"])
+        self.assertFalse(any(action[-2:] == ["--click-count", "2"] for action in route.actions))
+
+    def test_gameplay_refuses_a_second_retained_row_double_click(self):
+        job, admission, route = self.gameplay_route()
+        exact = route.reply_transform
+        route.reply_transform = lambda value: (
+            dict(
+                exact(value),
+                choice="action",
+                action=["click", "--x", "10", "--y", "20", "--click-count", "2"],
+            )
+            if route.stage_indexes.get("reopened", 0) >= 3
+            else exact(value)
+        )
+        with patch.object(
+            driver, "NATIVE_SOURCE_SHA256", driver.sha(Path(job["native_source"]).read_bytes())
+        ):
+            result = route.run_trial()
+        self.assertIn("One retained-row double click maximum", result["outcome"]["cause"])
+        self.assertEqual(sum(action[-2:] == ["--click-count", "2"] for action in route.actions), 1)
+
+    def test_gameplay_named_save_change_at_final_ingress_refuses_before_input(self):
+        job, admission, route = self.gameplay_route()
+        path = route.owner.profiles.live / "Saves" / route.owner.config["resume_save"]["filename"]
+        route.before_poll = lambda: path.write_bytes(b"changed after visual decision")
+        with patch.object(
+            driver, "NATIVE_SOURCE_SHA256", driver.sha(Path(job["native_source"]).read_bytes())
+        ):
+            result = route.run_trial()
+        self.assertIn("Exact retained gameplay save changed", result["outcome"]["cause"])
+        self.assertEqual(route.actions, [])
+        self.assertFalse(route.owner.uncertain_input)
+        self.assertEqual(route.argv, [])
+
+    def test_gameplay_refuses_save_stages_before_any_provider_request(self):
+        job, admission, route = self.gameplay_route()
+        for stage in (
+            "world",
+            "filename",
+            "saved",
+            "quit",
+            "menu",
+            "returned",
+            "gui_select",
+            "gui_play",
+        ):
+            with (
+                self.subTest(stage=stage),
+                self.assertRaisesRegex(ControlRefused, "cannot start a scenario or save"),
+            ):
+                route.owner.decisions.stage(stage, "not granted")
+        self.assertEqual(route.stage_indexes, {})
+        frame = dict(window=dict(width=100, height=100))
+        for action in (
+            ["hotkey", "--key", "CmdOrCtrl+S"],
+            ["type-text", "--text", job["catalogue_menu"]["resume_save"]["token"]],
+        ):
+            with self.assertRaises(ControlRefused):
+                driver.validate_action(
+                    "action", action, frame, None, "owned_window", purpose=menu.GAMEPLAY_PURPOSE
+                )
+
     def test_real_229_entry_checks_current_evidence_and_complete_closure(self):
         job, admission = self.entry_contract(driver.CACHED_LOAD_PURPOSE)
         expected = dict(driver.PREINPUT_229)

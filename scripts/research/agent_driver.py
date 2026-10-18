@@ -39,6 +39,7 @@ CATALOGUE_MENU_PURPOSE = "ONE_AGENT_PACKAGED_CATALOGUE_MENU_V1"
 CACHED_MENU_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_MENU_V1"
 CACHED_LOAD_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_LOAD_V1"
 CACHED_SAVE_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_SAVE_REOPEN_V1"
+CACHED_GAMEPLAY_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_GAMEPLAY_V1"
 GUI_MENU_PURPOSE = "ONE_AGENT_NATIVE_GUI_CATALOGUE_MENU_V1"
 GUI_STAGES = ("gui_select", "gui_play", "gui_quit")
 TRANSPORT_WORK_SECONDS = 390
@@ -104,6 +105,7 @@ def admission_decisions(purpose):
         CACHED_MENU_PURPOSE: "AGENT_PACKAGED_CACHED_MENU",
         CACHED_LOAD_PURPOSE: "AGENT_PACKAGED_CACHED_LOAD",
         CACHED_SAVE_PURPOSE: "AGENT_PACKAGED_CACHED_SAVE_REOPEN",
+        CACHED_GAMEPLAY_PURPOSE: "AGENT_PACKAGED_CACHED_GAMEPLAY",
         GUI_MENU_PURPOSE: "AGENT_NATIVE_GUI_CATALOGUE_MENU",
     }
     require(purpose in names, "Fresh agent purpose required")
@@ -260,6 +262,11 @@ def validate_action(stage, action, frame, token, receiver, *, purpose=None):
         purpose != CACHED_LOAD_PURPOSE or stage in ("launcher", "world", "finished"),
         "LOAD stage cannot save, reopen or construct",
     )
+    require(
+        purpose != CACHED_GAMEPLAY_PURPOSE
+        or stage in ("launcher", "reopened", "action", "continued", "finished"),
+        "Retained-world gameplay cannot start a scenario or save",
+    )
     require(type(action) is list and all(type(x) is str for x in action), "Action grammar")
     require(stage in STAGES + MENU_STAGES and action, "Unknown action stage")
     if stage in ("quit", "finished"):
@@ -367,18 +374,30 @@ class AgentDecisions:
             "Unknown or repeated agent stage",
         )
         loading = owner.job["purpose"] == CACHED_LOAD_PURPOSE
+        gameplay = owner.job["purpose"] == CACHED_GAMEPLAY_PURPOSE
         require(
             not loading or stage in ("launcher", "world", "finished"),
             "LOAD stage cannot save, reopen or construct",
         )
+        require(
+            not gameplay or stage in ("launcher", "reopened", "action", "continued", "finished"),
+            "Retained-world gameplay cannot start a scenario or save",
+        )
         # LOAD entry intentionally carries no save intent. SAVE callers still
         # require their exact token; an absent intent must not become a default.
-        token = None if loading else owner.job["agent_save"]["token"]
+        token = (
+            owner.job["catalogue_menu"]["resume_save"]["token"]
+            if gameplay
+            else None
+            if loading
+            else owner.job["agent_save"]["token"]
+        )
         self.used_stages.add(stage)
         # Navigation can include startup animations and several observed menus.
         # All stages remain inside the original operation anchor; no renewal.
         deadline = owner.anchor + (390 if stage in GUI_STAGES else ACTION_SECONDS)
         menu_inputs = 0
+        gameplay_row_sent = False
         quit_inputs = 0
         play_sent = False
         previous_play = None
@@ -504,9 +523,13 @@ class AgentDecisions:
             require(time.monotonic() < reply_deadline, "Agent decision deadline expired")
             require(time.monotonic() < deadline, "Fixed agent stage deadline expired")
             if decision["choice"] == "partial":
-                if (owner.job["purpose"] == CACHED_LOAD_PURPOSE and stage == "world") or (
-                    owner.job["purpose"] == CACHED_SAVE_PURPOSE
-                    and stage in ("world", "filename", "reopened")
+                if (
+                    (owner.job["purpose"] == CACHED_LOAD_PURPOSE and stage == "world")
+                    or (
+                        owner.job["purpose"] == CACHED_SAVE_PURPOSE
+                        and stage in ("world", "filename", "reopened")
+                    )
+                    or (gameplay and stage in ("reopened", "action", "continued"))
                 ):
                     require(decision["action"] == [], "Partial load cannot carry input")
                     from catalogue_menu import MenuIncomplete
@@ -586,6 +609,15 @@ class AgentDecisions:
                     "human_confirmation": False,
                 }
             require(decision["choice"] == "action", "Unknown agent decision")
+            if (
+                gameplay
+                and stage == "reopened"
+                and decision["action"][-2:] == ["--click-count", "2"]
+            ):
+                require(
+                    decision["exact_token"] == token, "Exact retained row acknowledgement required"
+                )
+                require(not gameplay_row_sent, "One retained-row double click maximum")
             if stage in MENU_STAGES:
                 require(menu_inputs == 0, "One menu input per stage maximum")
                 menu_inputs += 1
@@ -624,6 +656,8 @@ class AgentDecisions:
                 if stage in MENU_STAGES:
                     menu_inputs -= 1
                 continue
+            if gameplay and stage == "reopened" and action[-2:] == ["--click-count", "2"]:
+                gameplay_row_sent = True
             if quitting:
                 quit_inputs += 1
             if return_after_input:
@@ -638,8 +672,10 @@ class AgentDecisions:
             owner, "transport_work_active", False
         ):
             raise TransportIncomplete("Finite transport stage action budget exhausted")
-        if (owner.job["purpose"] == CACHED_LOAD_PURPOSE and stage == "world") or (
-            owner.job["purpose"] == CACHED_SAVE_PURPOSE and stage in ("world", "filename")
+        if (
+            (owner.job["purpose"] == CACHED_LOAD_PURPOSE and stage == "world")
+            or (owner.job["purpose"] == CACHED_SAVE_PURPOSE and stage in ("world", "filename"))
+            or (gameplay and stage in ("reopened", "action", "continued"))
         ):
             from catalogue_menu import MenuIncomplete
 
@@ -1042,7 +1078,7 @@ def pilot_class(common):
                 # Options, new receivers and normal Quit keep their startup/exit paths.
                 require(
                     windows
-                    or self.job["purpose"] != CACHED_SAVE_PURPOSE
+                    or self.job["purpose"] not in (CACHED_SAVE_PURPOSE, CACHED_GAMEPLAY_PURPOSE)
                     or not getattr(self, "menu_work_active", False)
                     or getattr(self, "last_agent_window_startup", False)
                     or previous is None
@@ -1432,6 +1468,7 @@ def verify_entry(job, admission, job_sha):
         CACHED_MENU_PURPOSE,
         CACHED_LOAD_PURPOSE,
         CACHED_SAVE_PURPOSE,
+        CACHED_GAMEPLAY_PURPOSE,
         GUI_MENU_PURPOSE,
     ):
         from catalogue_menu import verify_config
@@ -1495,6 +1532,7 @@ def verify_entry(job, admission, job_sha):
         CACHED_MENU_PURPOSE,
         CACHED_LOAD_PURPOSE,
         CACHED_SAVE_PURPOSE,
+        CACHED_GAMEPLAY_PURPOSE,
         GUI_MENU_PURPOSE,
     ):
         needed.add(str(Path(__file__).with_name("catalogue_menu.py").resolve()))
@@ -1547,6 +1585,7 @@ def main():
         CACHED_MENU_PURPOSE,
         CACHED_LOAD_PURPOSE,
         CACHED_SAVE_PURPOSE,
+        CACHED_GAMEPLAY_PURPOSE,
         GUI_MENU_PURPOSE,
     ):
         from catalogue_menu import pilot_class as catalogue_pilot_class

@@ -9,6 +9,7 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import asdict
 import os
 import math
+import re
 from pathlib import Path
 from queue import Empty, Queue
 import shutil
@@ -29,6 +30,7 @@ PURPOSE = "ONE_AGENT_PACKAGED_CATALOGUE_MENU_V1"
 CACHED_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_MENU_V1"
 LOAD_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_LOAD_V1"
 SAVE_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_SAVE_REOPEN_V1"
+GAMEPLAY_PURPOSE = "ONE_AGENT_PACKAGED_CACHED_GAMEPLAY_V1"
 GUI_PURPOSE = "ONE_AGENT_NATIVE_GUI_CATALOGUE_MENU_V1"
 OWNED_AUTOSAVE = "Saves/Auto0.SMRailroadsSavedGame"
 
@@ -165,6 +167,18 @@ def autosave_origin(job):
 
 def target_files_unchanged(owner, root):
     before = owner.baseline["target_files"]
+    if owner.job.get("purpose") == GAMEPLAY_PURPOSE:
+        proof = gameplay_origin(owner.job)
+        archives = owner.gameplay_autosave_preimages
+        require(set(archives) == set(proof["autosaves"]), "Test autosave preimages incomplete")
+        before = dict(before)
+        for name, facts in proof["autosaves"].items():
+            actual = file_facts(archives[name])
+            require(
+                all(actual[k] == facts[k] for k in ("sha256", "bytes", "mode", "mtime_ns")),
+                "Test autosave preimage changed",
+            )
+            before.pop("Saves/" + name)
     archive = getattr(owner, "autosave_preimage", None)
     if owner.job.get("purpose") == SAVE_PURPOSE and archive is not None:
         proof = autosave_origin(owner.job)
@@ -181,19 +195,127 @@ def preserve_owned_autosave(owner, root):
     proof = autosave_origin(owner.job)
     source = root / OWNED_AUTOSAVE
     copy = owner.directory / "owned-Auto0-preimage"
+    return preserve_autosave_preimage(source, copy, proof["facts"])
+
+
+def preserve_autosave_preimage(source, copy, facts):
+    """Retain the exact concretely threatened test autosave before launching."""
     require(not copy.exists() and not copy.is_symlink(), "Autosave preimage collision")
-    require(file_facts(source) == proof["facts"], "Owned autosave changed before preservation")
+    require(file_facts(source) == facts, "Owned autosave changed before preservation")
     shutil.copy2(source, copy)
     with copy.open("r+b") as stream:
         os.fsync(stream.fileno())
     _fsync_dir(copy.parent)
-    require(file_facts(source) == proof["facts"], "Owned autosave changed while preserving")
+    require(file_facts(source) == facts, "Owned autosave changed while preserving")
     copied = file_facts(copy)
     require(
-        all(copied[k] == proof["facts"][k] for k in ("sha256", "bytes", "mode", "mtime_ns")),
+        all(copied[k] == facts[k] for k in ("sha256", "bytes", "mode", "mtime_ns")),
         "Owned autosave preimage differs",
     )
     return copy
+
+
+def gameplay_origin(job):
+    """Bind one retained test save and its proven autosaves, never a user-save exception."""
+    config = job["catalogue_menu"]
+    proof = config["resume_save"]
+    require(
+        set(proof)
+        == {"token", "filename", "facts", "autosaves", "origin_readback", "origin_sha256"}
+        and type(proof["token"]) is str
+        and re.fullmatch(r"[A-Za-z0-9]{19}", proof["token"])
+        and proof["filename"] == proof["token"] + ".SMRailroadsSavedGame",
+        "Exact retained test-save identity required",
+    )
+    raw = read_plain(proof["origin_readback"])
+    require(sha(raw) == proof["origin_sha256"], "Retained test-save origin changed")
+    require(
+        config["preservation"]["immutable"].get(proof["origin_readback"])
+        == file_facts(proof["origin_readback"]),
+        "Retained test-save origin must be in the immutable baseline",
+    )
+    origin = decode(raw)
+    services = origin["service_settled"]
+    exits = (origin["exact_normal_exit"], origin["second_observer"])
+    expected = dict(
+        (key, config["selection"][key]) for key in ("profile_id", "archive_sha256", "variant_id")
+    )
+    expected["game_executable_sha256"] = job["game_sha256"]
+    require(
+        origin["invocation"]["returncode"] == 0
+        and origin["lease_released"] is True
+        and origin["preservation_verified"] is True
+        and origin["terminal_finished"] is True
+        and origin["game_absent"] is True
+        and origin["first_normal_exit"] is True
+        and origin["final_normal_exit"] is True
+        and type(services) is list
+        and len(services) == 2
+        and all(
+            row["commit_sent"] is True
+            and row["eof_closed"] is True
+            and row["reaped"] is True
+            and row["returncode"] == 0
+            and row["pending"] is None
+            and row["commit_response"]["ok"] is True
+            and row["commit_response"]["data"]["target"] == expected
+            and row["commit_response"]["data"]["launched_profile_id"]
+            == config["target"]["profile_id"]
+            for row in services
+        )
+        and exits[0]["process"]["pid"] != exits[1]["process"]["pid"]
+        and all(
+            type(receipt["process"]["pid"]) is int
+            and receipt["process"]["pid"] > 0
+            and type(receipt["process"]["birth"]) is str
+            and receipt["process"]["birth"].isdigit()
+            and receipt["process"]["executable"] == exits[0]["process"]["executable"]
+            and Path(receipt["process"]["executable"]).is_absolute()
+            and receipt["job"] == origin["job"]
+            and receipt["result"]["state"] == "observed_exited"
+            and receipt["result"]["terminal"] is True
+            and receipt["result"]["stop_requested"] is False
+            and any(
+                row["pid"] == receipt["process"]["pid"]
+                and row["role"] == "game"
+                and row["positive_absence"] is True
+                for row in origin["owned_absences"]
+            )
+            for receipt in exits
+        ),
+        "Retained test save requires settled packaged launches and both normal exits",
+    )
+    old = config["preservation"]["target_files"]
+    named = "Saves/" + proof["filename"]
+    require(
+        type(proof["facts"]) is dict
+        and set(proof["facts"]) == {"sha256", "bytes", "inode", "mode", "mtime_ns"}
+        and type(proof["facts"]["bytes"]) is int
+        and 0 < proof["facts"]["bytes"] <= 512 * 1024**2
+        and proof["facts"]
+        == origin["exact_new_named_save"]
+        == origin["new_target_files_retained"].get(named)
+        == old.get(named),
+        "Retained named save changed or was not created by that trial",
+    )
+    slots = {f"Auto{i}.SMRailroadsSavedGame" for i in range(5)}
+    require(
+        type(proof["autosaves"]) is dict
+        and set(proof["autosaves"]).issubset(slots)
+        and {name for name in slots if "Saves/" + name in old} == set(proof["autosaves"]),
+        "Every pre-existing test autosave needs exact owned origin",
+    )
+    for name, facts in proof["autosaves"].items():
+        observed = (
+            origin["current_test_autosave"]
+            if name == "Auto0.SMRailroadsSavedGame"
+            else origin["new_target_files_retained"].get("Saves/" + name)
+        )
+        require(
+            facts == observed == old.get("Saves/" + name) and 0 < facts["bytes"] <= 512 * 1024**2,
+            "Test autosave was not retained from the exact settled trial",
+        )
+    return proof
 
 
 def sibling_saves(app, target_id, return_id):
@@ -224,10 +346,17 @@ def verify_config(job):
         verify_window_probe(job)
     target = config["target"]
     require(
-        job["purpose"] in (PURPOSE, CACHED_PURPOSE, LOAD_PURPOSE, SAVE_PURPOSE, GUI_PURPOSE),
+        job["purpose"]
+        in (PURPOSE, CACHED_PURPOSE, LOAD_PURPOSE, SAVE_PURPOSE, GAMEPLAY_PURPOSE, GUI_PURPOSE),
         "Closed catalogue purpose required",
     )
-    cached = job["purpose"] in (CACHED_PURPOSE, LOAD_PURPOSE, SAVE_PURPOSE)
+    cached = job["purpose"] in (CACHED_PURPOSE, LOAD_PURPOSE, SAVE_PURPOSE, GAMEPLAY_PURPOSE)
+    if job["purpose"] == GAMEPLAY_PURPOSE:
+        require(
+            "agent_save" not in job and "owned_autosave" not in config,
+            "Gameplay resumes one retained save without new-save intent",
+        )
+        gameplay_origin(job)
     if job["purpose"] in (LOAD_PURPOSE, SAVE_PURPOSE):
         title = config.get("scenario_title")
         require(
@@ -759,6 +888,7 @@ def pilot_class(common, agent_class):
             self.dispatch_settled = False
             self.preimages = []
             self.autosave_preimage = None
+            self.gameplay_autosave_preimages = {}
 
         def spawn_input(self, argv, *, deadline, before_spawn=None, **kwargs):
             def final_menu_guard():
@@ -957,6 +1087,8 @@ def pilot_class(common, agent_class):
                 self.app, target["profile_id"], self.job["return_profile"]
             )
             paths = [self.app.catalogue_file, self.app.originals / (record.archive_sha256 + ".7z")]
+            if self.job["purpose"] == GAMEPLAY_PURPOSE:
+                paths.append(Path(gameplay_origin(self.job)["origin_readback"]))
             if self.job["purpose"] == SAVE_PURPOSE and "owned_autosave" in self.config:
                 paths.append(Path(autosave_origin(self.job)["origin_readback"]))
             if self.config["prepare_compatibility"]:
@@ -989,6 +1121,16 @@ def pilot_class(common, agent_class):
                 "Archive drift",
             )
             self.baseline = baseline
+            if self.job["purpose"] == GAMEPLAY_PURPOSE:
+                proof = gameplay_origin(self.job)
+                self.gameplay_autosave_preimages = {
+                    name: preserve_autosave_preimage(
+                        root / "Saves" / name,
+                        self.directory / ("owned-" + name + "-preimage"),
+                        facts,
+                    )
+                    for name, facts in proof["autosaves"].items()
+                }
             if self.job["purpose"] == SAVE_PURPOSE and "owned_autosave" in self.config:
                 self.autosave_preimage = preserve_owned_autosave(self, root)
                 target_files_unchanged(self, root)
@@ -1016,6 +1158,16 @@ def pilot_class(common, agent_class):
                     target=target,
                     baseline=baseline,
                     mutable_preimages=self.preimages,
+                    **(
+                        {
+                            "owned_test_autosave_preimages": {
+                                name: str(path)
+                                for name, path in self.gameplay_autosave_preimages.items()
+                            }
+                        }
+                        if self.gameplay_autosave_preimages
+                        else {}
+                    ),
                     **(
                         {"owned_autosave_preimage": str(self.autosave_preimage)}
                         if self.autosave_preimage
@@ -1183,7 +1335,16 @@ def pilot_class(common, agent_class):
             require(self.observer.poll() is None, "Independent observer exited")
             self.sample()
 
+        def verify_gameplay_save(self):
+            proof = gameplay_origin(self.job)
+            require(
+                file_facts(self.profiles.live / "Saves" / proof["filename"]) == proof["facts"],
+                "Exact retained gameplay save changed",
+            )
+
         def observe(self):
+            if self.job["purpose"] == GAMEPLAY_PURPOSE:
+                return self.observe_gameplay()
             if self.job["purpose"] == SAVE_PURPOSE:
                 return self.observe_save_reopen()
             observations = {}
@@ -1236,6 +1397,56 @@ def pilot_class(common, agent_class):
                 save_reopen_credit=False,
                 evidence_kind="agent_visual_observations",
                 human_confirmation=False,
+                partial_reason=partial,
+                **observations,
+            )
+
+        def observe_gameplay(self):
+            """One packaged launch, exact owned test save, relevant play, normal quit."""
+            observations = {}
+            partial = None
+            proof = gameplay_origin(self.job)
+            self.menu_work_active = True
+            try:
+                self.verify_gameplay_save()
+                observations["reopened"] = self.decisions.stage(
+                    "reopened",
+                    "From the main menu use Load Game to open exactly "
+                    + repr(proof["token"])
+                    + " once. Verify the exact named row, matching saved world/HUD and a fresh paused banner. "
+                    "No new scenario, Start, Save, settings or overwrite. If uncertain, return partial with no input.",
+                    validate=self.verify_gameplay_save,
+                )
+                observations["action"] = self.decisions.stage(
+                    "action",
+                    "Use only the current world and the granted concrete gameplay plan. Verify actual source "
+                    "supply and destination demand before construction. Build the short connection/required "
+                    "station, purchase an available engine and the matching relevant cars only when supported "
+                    "by current observations. Record actual purchase/route and rendered car appearance. "
+                    "Do not infer a route, goods or purchase from an unpurchased configuration. "
+                    "No searching beyond the grant's discovery bound; otherwise partial with no input.",
+                    validate=self.verify_gameplay_save,
+                )
+                observations["continued"] = self.decisions.stage(
+                    "continued",
+                    "Run the established route within the original bound. Observe matching cars loaded, "
+                    "arrival and unloading/delivery separately. Movement or income alone does not prove cargo. "
+                    "No saving, new route search or extended play; partial with no input if evidence is unavailable.",
+                    validate=self.verify_gameplay_save,
+                )
+            except MenuIncomplete as exc:
+                partial = str(exc)
+            finally:
+                self.menu_work_active = False
+            self.normal_quit("finished", None)
+            return dict(
+                status="safety_stop",
+                cause="packaged_retained_test_world_gameplay_requires_review",
+                evidence_kind="agent_visual_observations",
+                human_confirmation=False,
+                gameplay_credit=False,
+                save_reopen_credit=False,
+                cargo_credit=False,
                 partial_reason=partial,
                 **observations,
             )

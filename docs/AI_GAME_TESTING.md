@@ -77,6 +77,40 @@ and restoration. Service exit or temporary game absence alone cannot authorize
 restoration after an uncertain dispatch. No packaged game pilot is admitted by
 these source checks; the existing source-backend driver remains unchanged.
 
+## Gameplay from an owned test save
+
+The separate `ONE_AGENT_PACKAGED_CACHED_GAMEPLAY_V1` purpose uses one packaged
+cached Play launch to reopen an exact retained test save and perform relevant
+train/car gameplay. It carries forward already observed save/reopen components;
+it does not repeat or grant credit for a new save cycle. Its granted stages
+exclude new scenarios, filename entry and saving; its owner refuses a second
+launch or retained-row double click. Rendered scene recognition remains the
+visual actor's responsibility, not a machine scene predicate.
+
+The private job binds the named save's token, complete file facts and a sealed
+root settlement receipt for its creating trial. Both prior packaged launches,
+both observed normal exits, positive exact game absences and preservation/lease
+settlement must match. The receipt must be in the job's immutable baseline.
+A successful controller exit, a filename match or an unbound observer alone is
+insufficient. The named save is rechecked by the existing final input delivery
+validator. A changed or replaced file refuses before input.
+
+Only the five existing named test autosave slots can be declared as mutable.
+Every pre-existing declared slot must have exact facts from that settled owned
+trial; user autosaves and unknown files receive no exception. The owner retains
+each threatened test-autosave preimage using the existing fsynced copy path,
+checks every copy before restoration, preserves all named saves, and retains
+new files. It does not import a checkpoint or register another profile.
+
+A runtime grant still needs a concrete short gameplay plan based on observed
+supply, demand and geometry, with bounded discovery. The actor must freshly
+recognize the reopened world and pause before that useful gameplay. Current
+input grammar, one-use admission, 16-decision stages, 390-second work cutoff,
+480-second action deadline and 900-second cleanup bound remain unchanged.
+A no-input partial takes the existing normal-quit path; unknown dispatch/input
+or ownership still holds restoration. No source test or individual observed
+component establishes gameplay, cargo delivery or full scenario compatibility.
+
 ## Finite visual execution
 
 Use the project's Python 3.12 environment for the driver and all authoritative
