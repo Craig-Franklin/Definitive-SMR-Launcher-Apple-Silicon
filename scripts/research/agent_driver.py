@@ -256,6 +256,10 @@ class AgentJobControl(ActiveJobControl):
 
 def validate_action(stage, action, frame, token, receiver, *, purpose=None):
     """Closed native input grammar; target selectors and focus recovery refuse."""
+    require(
+        purpose != CACHED_LOAD_PURPOSE or stage in ("launcher", "world", "finished"),
+        "LOAD stage cannot save, reopen or construct",
+    )
     require(type(action) is list and all(type(x) is str for x in action), "Action grammar")
     require(stage in STAGES + MENU_STAGES and action, "Unknown action stage")
     if stage in ("quit", "finished"):
@@ -362,6 +366,14 @@ class AgentDecisions:
             stage in STAGES + MENU_STAGES + GUI_STAGES and stage not in self.used_stages,
             "Unknown or repeated agent stage",
         )
+        loading = owner.job["purpose"] == CACHED_LOAD_PURPOSE
+        require(
+            not loading or stage in ("launcher", "world", "finished"),
+            "LOAD stage cannot save, reopen or construct",
+        )
+        # LOAD entry intentionally carries no save intent. SAVE callers still
+        # require their exact token; an absent intent must not become a default.
+        token = None if loading else owner.job["agent_save"]["token"]
         self.used_stages.add(stage)
         # Navigation can include startup animations and several observed menus.
         # All stages remain inside the original operation anchor; no renewal.
@@ -403,8 +415,9 @@ class AgentDecisions:
                         stage,
                         ["click", "--element-index", str(frame["play_index"])],
                         frame,
-                        owner.job["agent_save"]["token"],
+                        token,
                         "owned_window",
+                        purpose=owner.job["purpose"],
                     )
                     try:
                         delivered = owner.agent_input(
@@ -542,7 +555,7 @@ class AgentDecisions:
                         "filename",
                         decision["action"],
                         frame,
-                        owner.job["agent_save"]["token"],
+                        token,
                         decision["receiver"],
                     )
                     try:
@@ -556,7 +569,7 @@ class AgentDecisions:
                         continue
                 if stage in ("filename", "reopened"):
                     require(
-                        decision["exact_token"] == owner.job["agent_save"]["token"],
+                        decision["exact_token"] == token,
                         "Exact visual save token required",
                     )
                 if stage == "filename":
@@ -583,7 +596,7 @@ class AgentDecisions:
                     stage,
                     decision["action"],
                     frame,
-                    owner.job["agent_save"]["token"],
+                    token,
                     decision["receiver"],
                     purpose=owner.job["purpose"],
                 )

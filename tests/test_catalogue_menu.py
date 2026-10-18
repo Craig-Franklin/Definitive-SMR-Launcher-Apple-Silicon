@@ -15,6 +15,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "src"), str(ROOT / "scripts/research")]
 from test_agent_driver import ChildFailed, Completion, Process
+import test_agent_driver as route_fixtures
 import catalogue_menu as menu
 import agent_driver as driver
 import test_application
@@ -528,6 +529,49 @@ class CatalogueRestoreTests(unittest.TestCase):
         job["closure"][0]["sha256"] = "0" * 64
         with self.assertRaisesRegex(ControlRefused, "source closure drift"):
             driver.verify_entry(job, admission, "a" * 64)
+
+    def test_real_load_entry_to_actual_decisions_and_catalogue_quit_without_save_intent(self):
+        route = route_fixtures.AgentRouteTests()
+        route.setUp()
+        self.addCleanup(route.doCleanups)
+        owner = route.owner
+        parent = type(owner)
+        owner.__class__ = menu.pilot_class(route.common, parent)
+        # Keep the actual catalogue workflow/decisions/guards. Physical launch,
+        # stop and restore remain the existing closed synthetic lifecycle.
+        for name in ("prepare", "launch", "stop", "restore"):
+            setattr(owner, name, getattr(parent, name).__get__(owner))
+        job, admission = self.entry_contract(driver.CACHED_LOAD_PURPOSE)
+        job["job"] = "synthetic-load-entry-through-quit"
+        job["orca"] = "/synthetic/orca"
+        job["root"]["session"] = "synthetic-root"
+        job["actor_binding"]["provider_runtime_id"] = "synthetic-runtime"
+        owner.job = job
+        owner.config = job["catalogue_menu"]
+        owner.diagnostic = owner.config["target"]["profile_id"]
+        self.assertNotIn("agent_save", owner.job)
+        driver.verify_entry(owner.job, admission, "a" * 64)
+        route.quit_confirmation = True
+        with patch.object(
+            driver, "NATIVE_SOURCE_SHA256", driver.sha(Path(job["native_source"]).read_bytes())
+        ):
+            result = route.run_trial()
+        self.assertEqual(result["errors"], [])
+        self.assertTrue(result["stopped"] and result["restored"] and result["terminal_finished"])
+        self.assertEqual(result["outcome"]["world_loaded"], "agent_observed")
+        self.assertFalse(result["outcome"]["gameplay_credit"])
+        self.assertFalse(result["outcome"]["save_reopen_credit"])
+        self.assertEqual(
+            route.actions,
+            [
+                ["click", "--element-index", "18"],
+                ["click", "--x", "10", "--y", "20"],
+                ["hotkey", "--key", "CmdOrCtrl+Q"],
+                ["press-key", "--key", "Return"],
+            ],
+        )
+        self.assertEqual(set(route.stage_indexes), {"launcher", "world", "finished"})
+        self.assertEqual(owner.events[-3:], ["exact_stop", "restore", "finish"])
 
     def test_real_save_entry_requires_exact_intent(self):
         job, admission = self.entry_contract(driver.CACHED_SAVE_PURPOSE)

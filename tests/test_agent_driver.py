@@ -353,7 +353,7 @@ class AgentRouteTests(unittest.TestCase):
                     ["hotkey", "--key", "CmdOrCtrl+S"],
                     click,
                     ["hotkey", "--key", "CmdOrCtrl+A"],
-                    ["type-text", "--text", self.owner.job["agent_save"]["token"]],
+                    ["type-text", "--text", self.owner.job.get("agent_save", {}).get("token")],
                 ],
                 "saved": [["press-key", "--key", "Return"]],
                 "quit": [["hotkey", "--key", "CmdOrCtrl+Q"]],
@@ -371,7 +371,7 @@ class AgentRouteTests(unittest.TestCase):
                 "action": action,
                 "receiver": "filename_field" if stage == "filename" else "owned_window",
                 "observation": "Synthetic visual decision; no game or detector evidence.",
-                "exact_token": self.owner.job["agent_save"]["token"],
+                "exact_token": self.owner.job.get("agent_save", {}).get("token"),
                 "overwrite_visible": False,
             }
             write_once(decision_path, self.reply_transform(response))
@@ -642,6 +642,53 @@ class AgentRouteTests(unittest.TestCase):
         self.owner.normal_quit("finished", None)
         self.assertEqual(self.actions, [["hotkey", "--key", "CmdOrCtrl+Q"]])
         self.assertFalse(self.owner.running)
+
+    def test_load_without_save_intent_runs_actual_actions_and_confirmed_normal_quit(self):
+        self.owner.launch()
+        self.owner.job["purpose"] = driver.CACHED_LOAD_PURPOSE
+        del self.owner.job["agent_save"]
+        self.owner.decisions.stage("world", "Observe the actual loaded world")
+        self.quit_confirmation = True
+        self.owner.normal_quit("finished", None)
+        self.assertEqual(
+            self.actions,
+            [
+                ["click", "--x", "10", "--y", "20"],
+                ["hotkey", "--key", "CmdOrCtrl+Q"],
+                ["press-key", "--key", "Return"],
+            ],
+        )
+        self.assertFalse(self.owner.running)
+
+    def test_load_without_save_intent_submits_semantic_play_once(self):
+        self.owner.launch()
+        self.owner.job["purpose"] = driver.CACHED_LOAD_PURPOSE
+        del self.owner.job["agent_save"]
+        original = self.owner.agent_frame
+        titles = [True, True, False]
+
+        def frame(label, deadline):
+            receipt, value, window = original(label, deadline)
+            value["play_index"] = 18
+            value["window"]["title"] = (
+                "Sid Meier's Railroads! Options" if titles.pop(0) else "Main Menu"
+            )
+            return receipt, value, window
+
+        self.owner.agent_frame = frame
+        self.reply_transform = lambda value: dict(value, choice="observed", action=[])
+        self.owner.decisions.stage("launcher", "Observe main menu after unique Play")
+        self.assertEqual(self.actions, [["click", "--element-index", "18"]])
+        self.assertEqual(titles, [])
+
+    def test_load_rejects_save_and_construction_stages_before_frame_or_input(self):
+        self.owner.job["purpose"] = driver.CACHED_LOAD_PURPOSE
+        del self.owner.job["agent_save"]
+        for stage in ("filename", "saved", "reopened", "action", "continued"):
+            with self.subTest(stage=stage), self.assertRaisesRegex(ControlRefused, "LOAD stage"):
+                self.owner.decisions.stage(stage, "Not authorized by LOAD purpose")
+        self.assertEqual(self.actions, [])
+        self.assertEqual(list(self.directory.glob("*-request.json")), [])
 
     def test_cached_load_partial_with_input_refuses(self):
         self.owner.launch()
