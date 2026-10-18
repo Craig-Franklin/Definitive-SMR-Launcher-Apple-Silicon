@@ -121,11 +121,30 @@ def _finalize(
         raise UpdateError("Previous app bundle is missing after exchange")
     completed = dict(record, state="installed", backup=str(backup))
     token = candidate.parent.name[len(".smr-update-") :]
-    if re.fullmatch(r"[0-9a-f]{32}", token):
+    if (
+        re.fullmatch(r"[0-9a-f]{32}", token)
+        and "archive_sha256" in completed
+        and "archive_size" in completed
+    ):
         history = record_path.parent / "completed"
-        _assert_no_symlink_ancestor(history)
-        history.mkdir(mode=0o700, exist_ok=True)
-        _atomic_json(history / (token + ".json"), completed)
+        receipt = history / (token + ".json")
+        _completed_projection(receipt, completed, record_path.parent, target, team, new_version)
+        marker = Path(completed["helper_bundle"]).parent / ".archive.json"
+        _assert_no_symlink_ancestor(marker)
+        # Older installed launchers do not produce retention provenance. Finish
+        # their verified exchange, but leave its artifacts outside automatic cleanup.
+        if marker.exists():
+            try:
+                provenance = json.loads(marker.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise UpdateError("Completed helper archive provenance cannot be read") from exc
+            if provenance != dict(
+                sha256=completed["archive_sha256"], size=completed["archive_size"]
+            ):
+                raise UpdateError("Completed helper archive provenance differs")
+            _assert_no_symlink_ancestor(history)
+            history.mkdir(mode=0o700, exist_ok=True)
+            _atomic_json(receipt, completed)
     _atomic_json(record_path, completed)
 
 
