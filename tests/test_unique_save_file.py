@@ -62,6 +62,21 @@ class SaveFixture(unittest.TestCase):
 
 
 class UniqueSaveFileTests(SaveFixture):
+    def test_explicit_scratch_slot_may_first_appear_after_binding(self):
+        bound = self.bound()
+        auto = self.directory / "Auto0.SMRailroadsSavedGame"
+        auto.write_bytes(b"first autosave generated on reopen")
+        with self.assertRaises(save.SaveFileRefused):
+            save.verify_reopen(bound, self.scope, deadline=110)
+        checked = save.verify_reopen(
+            bound, self.scope, deadline=110, scratch_autosaves=(auto.name,)
+        )
+        self.assertEqual(checked["exact_target"]["identity"][1], self.target.stat().st_ino)
+        self.assertEqual(self.keep.read_bytes(), self.original)
+        self.keep.write_bytes(b"changed prior named file")
+        with self.assertRaises(save.SaveFileRefused):
+            save.verify_reopen(bound, self.scope, deadline=110, scratch_autosaves=(auto.name,))
+
     def test_explicit_scratch_autosave_rotation_keeps_exact_target_and_other_files_strict(self):
         auto = self.directory / "Auto0.SMRailroadsSavedGame"
         auto.write_bytes(b"prior scratch autosave")

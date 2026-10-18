@@ -328,7 +328,8 @@ def verify_reopen(bound, scope, *, deadline, mapping=None, scratch_autosaves=())
     Explicit owned directory relocation may change the path. Copies, including
     byte-identical copies, cannot become this job's exact-file authority.
     An authenticated diagnostic-copy owner may explicitly allow its five known
-    scratch autosave slots to rotate. The target and every other file stay strict.
+    scratch autosave slots to appear or rotate. Previously observed files cannot
+    disappear. The target and every other file stay strict.
     """
     need(
         finite(deadline) and deadline == bound.deadline,
@@ -364,7 +365,8 @@ def verify_reopen(bound, scope, *, deadline, mapping=None, scratch_autosaves=())
     need(current.complete < deadline, "Original save-cycle deadline expired during read")
     need(
         directory_identity(current.root) == directory_identity(expected.root)
-        and set(now) == set(previous)
+        and set(previous).issubset(now)
+        and (set(now) - set(previous)).issubset(scratch_autosaves)
         and all(
             now[name] == row for name, row in previous.items() if name not in scratch_autosaves
         ),

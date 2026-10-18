@@ -874,6 +874,26 @@ class AgentRouteTests(unittest.TestCase):
         self.assertEqual(self.actions.count(["hotkey", "--key", "CmdOrCtrl+Q"]), 2)
         self.assertTrue((self.directory / "save-after-reopen-identity.json").exists())
 
+    def test_catalogue_save_first_autosave_after_reopen_reaches_both_normal_exits(self):
+        self.cached_save_owner()
+        slot = self.owner.profiles.live / "Saves/Auto0.SMRailroadsSavedGame"
+        created = [False]
+
+        def reply(value):
+            if self.stage_indexes.get("reopened", 0) >= 3 and not created[0]:
+                slot.write_bytes(b"first scratch autosave after exact row reopened")
+                created[0] = True
+            return value
+
+        self.reply_transform = reply
+        result = self.run_trial()
+        self.assertEqual(result["errors"], [])
+        self.assertTrue(created[0] and result["stopped"] and result["restored"])
+        self.assertEqual(self.actions.count(["hotkey", "--key", "CmdOrCtrl+Q"]), 2)
+        self.assertTrue((self.directory / "save-after-reopen-identity.json").is_file())
+        self.assertEqual(self.keep.read_bytes(), b"preserved original synthetic save")
+        self.assertFalse(result["outcome"]["save_reopen_credit"])
+
     def test_catalogue_save_reopens_when_new_scratch_slot_rotates_inside_owned_invocation(self):
         self.cached_save_owner()
         slot = self.owner.profiles.live / "Saves/Auto1.SMRailroadsSavedGame"
