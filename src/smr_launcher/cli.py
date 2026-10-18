@@ -6,9 +6,11 @@ from dataclasses import asdict
 from pathlib import Path
 import argparse
 import json
+import os
 import sys
 
 from .application import LauncherApplication
+from .activation import _assert_no_symlink_ancestor
 
 
 def _status(app: LauncherApplication) -> dict:
@@ -64,6 +66,17 @@ def run(argv: list[str] | None = None) -> dict:
     import_action.add_argument("archive")
     play = actions.add_parser("play")
     play.add_argument("profile_id")
+    compact = actions.add_parser(
+        "compact-plan", help="Write a private, read-only compact-library proposal"
+    )
+    compact.add_argument("--output", required=True)
+    compact.add_argument("--exclude", action="append", default=[])
+    compact.add_argument("--include-profile", action="append", default=[])
+    for name in ("compact-apply", "compact-rollback"):
+        operation = actions.add_parser(name)
+        operation.add_argument("--plan", required=True)
+    prepare = actions.add_parser("prepare-map", help="Prepare one map without launching it")
+    prepare.add_argument("profile_id")
     bank = actions.add_parser("inspect-bank", help="Read-only bank source applicability")
     bank.add_argument("profile_id")
     for name in ("scenario", "industry", "model"):
@@ -84,6 +97,34 @@ def run(argv: list[str] | None = None) -> dict:
         app = LauncherApplication.choose_steam_library(Path(args.steamapps))
         return _status(app)
     app = LauncherApplication.discover()
+    if args.action == "compact-plan":
+        output = Path(args.output).expanduser()
+        if not output.is_absolute():
+            raise ValueError("Use an absolute private plan path")
+        _assert_no_symlink_ancestor(output)
+        proposal = app.plan_compaction(exclude=args.exclude, include_profiles=args.include_profile)
+        # Never overwrite an existing receipt, source file, or user-selected path.
+        with output.open("x", encoding="utf-8") as stream:
+            json.dump(proposal, stream, sort_keys=True, separators=(",", ":"))
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        return dict(planned=True, trees=len(proposal["trees"]), excluded=len(proposal["excluded"]))
+    if args.action in ("compact-apply", "compact-rollback"):
+        path = Path(args.plan).expanduser()
+        _assert_no_symlink_ancestor(path)
+        proposal = json.loads(path.read_bytes())
+        operation = (
+            app.compact_library if args.action == "compact-apply" else app.rollback_compaction
+        )
+        operation(proposal)
+        return dict(completed=True, operation=args.action)
+    if args.action == "prepare-map":
+        matches = [r for r in app.catalogue() if r.profile_id == args.profile_id]
+        if len(matches) != 1:
+            raise ValueError("Choose one current library map")
+        app.prepare_map(matches[0])
+        return dict(prepared=True, profile_id=args.profile_id)
     if args.action == "inspect-bank":
         return asdict(
             app.inspect_bank_candidate(

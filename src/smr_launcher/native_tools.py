@@ -10,6 +10,12 @@ from pathlib import Path
 from threading import Event, Lock
 from uuid import uuid4
 import subprocess
+import hashlib
+import re
+
+from .activation import _atomic_json, _assert_no_symlink_ancestor
+from .cold_storage import ColdStorageError, _canonical, _checkpoint
+from .compact_library import _read
 
 from . import APP_VERSION
 from .application import LauncherApplication
@@ -33,6 +39,7 @@ class NativeTools:
         self.job = {}
         self.candidates = ()
         self.crash_counts = {}
+        self.compact_proposal = {}
 
     def status(self, job_id=None):
         with self.lock:
@@ -43,6 +50,7 @@ class NativeTools:
         release = owner.available_update
         return dict(
             job=job,
+            compact_proposal=dict(self.compact_proposal),
             version=APP_VERSION,
             available=owner.app is not None,
             enrolled=owner.app is not None and owner.app.profiles.state_file.exists(),
@@ -172,6 +180,107 @@ class NativeTools:
         owner = self.owner
         app = owner.app
         noop = lambda value: None
+        if action in (
+            "library.compact.plan",
+            "library.compact.apply",
+            "library.compact.rollback",
+            "library.prepare",
+        ):
+            if app is None or not app.profiles.state_file.exists():
+                raise ValueError("Complete setup before preparing stored maps")
+            proposal = None
+            if action == "library.compact.plan":
+                for field in ("exclude", "include_profiles"):
+                    values = params.get(field, [])
+                    if (
+                        not isinstance(values, list)
+                        or len(values) > 10000
+                        or any(not isinstance(value, str) or len(value) > 1024 for value in values)
+                    ):
+                        raise ValueError("Choose explicit bounded storage preservation identities")
+            else:
+                self.consent(params)
+            if action in ("library.compact.apply", "library.compact.rollback"):
+                seal = params.get("plan_sha256")
+                if not isinstance(seal, str) or not re.fullmatch("[0-9a-f]{64}", seal):
+                    raise ValueError("An exact reviewed storage proposal identity is required")
+                proposal = app.library / "compact-proposals" / (seal + ".json")
+            if action == "library.prepare":
+                matches = [
+                    record
+                    for record in app.catalogue()
+                    if record.profile_id == params.get("profile_id")
+                ]
+                if len(matches) != 1:
+                    raise ValueError("Choose one current library map")
+                record = matches[0]
+
+            def progress(*values):
+                # File/member names remain in private manifests, never job projections.
+                self._phase("Preparing stored map data…")
+
+            def operation():
+                try:
+                    _checkpoint(self.cancelled.is_set)
+                    if action == "library.compact.plan":
+                        self._phase("Reading stored map data and preservation constraints…")
+                        candidate = app.plan_compaction(
+                            exclude=params.get("exclude", ()),
+                            include_profiles=params.get("include_profiles", ()),
+                            cancelled=self.cancelled.is_set,
+                            progress=progress,
+                        )
+                        seal = hashlib.sha256(_canonical(candidate)).hexdigest()
+                        directory = app.library / "compact-proposals"
+                        _assert_no_symlink_ancestor(directory)
+                        directory.mkdir(exist_ok=True)
+                        destination = directory / (seal + ".json")
+                        _assert_no_symlink_ancestor(destination)
+                        if destination.exists():
+                            if _read(destination) != candidate:
+                                raise ValueError("Stored storage proposal identity differs")
+                        else:
+                            _atomic_json(destination, candidate)
+                        return dict(
+                            message="Storage proposal ready for review.",
+                            proposal=dict(
+                                sha256=seal,
+                                trees=len(candidate["trees"]),
+                                excluded=len(candidate["excluded"]),
+                                excluded_logical_bytes=sum(
+                                    item["logical_bytes"] for item in candidate["excluded"]
+                                ),
+                            ),
+                        )
+                    if action == "library.prepare":
+                        app.prepare_map(record, cancelled=self.cancelled.is_set, progress=progress)
+                        return dict(message="Selected map is ready. No game was launched.")
+                    candidate = _read(proposal)
+                    if hashlib.sha256(_canonical(candidate)).hexdigest() != params["plan_sha256"]:
+                        raise ValueError("Stored storage proposal identity differs")
+                    function = (
+                        app.compact_library
+                        if action == "library.compact.apply"
+                        else app.rollback_compaction
+                    )
+                    function(candidate, cancelled=self.cancelled.is_set, progress=progress)
+                    return dict(
+                        message="Stored map preparation completed. Game behavior remains unverified."
+                    )
+                except ColdStorageError as exc:
+                    if self.cancelled.is_set() and str(exc) == "Storage preparation cancelled":
+                        return dict(
+                            cancelled=True,
+                            message="Preparation cancelled. Stored data retained; resume or roll back its exact proposal if recovery is pending.",
+                        )
+                    raise
+
+            def completed(value):
+                if "proposal" in value:
+                    self.compact_proposal = value["proposal"]
+                owner._render_gallery()
+
+            return operation, completed, True, ()
         if action == "update.check":
             if owner.pending_update is not None:
                 raise ValueError(
