@@ -20,7 +20,210 @@ import catalogue_menu as menu
 import agent_driver as driver
 import test_application
 from active_job_control import ControlRefused
+from smr_launcher.activation import ActivationError
 from smr_launcher.launch_preferences import prepare_settings
+
+
+class FreshOriginalPrepareTests(unittest.TestCase):
+    """Use maintained setup/import and the real preservation consumer."""
+
+    def setUp(self):
+        fixture = test_application.ApplicationTests()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        self.fixture = fixture
+        app = fixture.application
+        app.setup()
+        target = app.import_archive(fixture.archive)
+        profiles = app.profiles
+        root = profiles._profile_path(target.profile_id)
+        (root / "Logs").mkdir(exist_ok=True)
+        self.original = profiles._profile_path("original-game")
+        self.assertFalse(self.original.exists())
+        self.assertEqual(profiles._state()["active"], "original-game")
+        immutable = [app.catalogue_file, app.originals / (target.archive_sha256 + ".7z")]
+        for base in (
+            app.imports / target.imported_directory,
+            app.prepared / target.prepared_directory,
+        ):
+            immutable.extend(base / name for name in menu.tree_files(base))
+        config = dict(
+            package=dict(bundle=str(fixture.root / "Synthetic.app")),
+            target=dict(
+                profile_id=target.profile_id,
+                archive_sha256=target.archive_sha256,
+                variant_id=target.variant_id,
+                scenarios=list(target.scenarios),
+                assets_sha256=profiles._asset_hash(root),
+            ),
+            prepare_compatibility=False,
+            preservation=dict(
+                return_files=menu.tree_files(profiles.live),
+                target_files=menu.tree_files(root),
+                sibling_saves=menu.sibling_saves(app, target.profile_id, "original-game"),
+                immutable={str(path): menu.file_facts(path) for path in immutable},
+            ),
+            mutable_preimages={},
+        )
+        fixture.installation.support_root = fixture.root
+        preferences = fixture.root / "Preferences Data"
+        preferences.write_bytes(b"synthetic preferences")
+        self.global_preferences = (
+            fixture.root / "Library/Preferences/com.feralinteractive.railroads.plist"
+        )
+        self.global_preferences.parent.mkdir(parents=True)
+        self.global_preferences.write_bytes(b"synthetic global preferences")
+        for role, path in (
+            ("settings", root / "Settings.ini"),
+            ("feral", preferences),
+            ("global", self.global_preferences),
+        ):
+            config["mutable_preimages"][role] = menu.file_facts(path)
+        directory = fixture.root / "evidence"
+        directory.mkdir()
+        owner_type = menu.pilot_class(None, type("SyntheticOuterOwner", (), {}))
+        self.owner = owner_type.__new__(owner_type)
+        self.owner.__dict__.update(
+            app=app,
+            profiles=profiles,
+            config=config,
+            directory=directory,
+            job=dict(
+                return_profile="original-game",
+                game_sha256=fixture.installation.executable_sha256,
+                actor_binding={},
+                purpose=menu.DIRECT_LOAD_PURPOSE,
+            ),
+            verify_available=lambda: None,
+            verify_cleanup_owner=lambda: None,
+            verify_code=lambda: None,
+            require_stopped=lambda: None,
+            preimages=[],
+            phases={},
+            gameplay_autosave_preimages={},
+            autosave_preimage=None,
+            write=lambda *args: None,
+        )
+
+    def prepare(self):
+        with (
+            patch(
+                "agent_actor_binding.collect_actor",
+                return_value=dict(
+                    model="gpt-6.1-sol",
+                    effort="high",
+                    approval_policy="never",
+                    sandbox="danger-full-access",
+                ),
+            ),
+            patch.object(menu.subprocess, "run"),
+            patch.object(Path, "home", return_value=self.fixture.root),
+        ):
+            self.owner.prepare()
+
+    def test_actual_fresh_setup_one_import_prepare_preserves_live_original(self):
+        before = menu.tree_files(self.owner.profiles.live)
+        self.prepare()
+        self.assertEqual(self.owner.baseline["return_files"], before)
+        self.assertEqual(menu.tree_files(self.owner.profiles.live), before)
+        self.assertFalse(self.original.exists())
+        self.assertEqual(len(self.owner.preimages), 3)
+
+    def test_fresh_original_real_switch_and_restore_keeps_return_exact(self):
+        self.prepare()
+        owner = self.owner
+        owner.__dict__.update(
+            dispatch_settled=True,
+            open_attempted=True,
+            service=None,
+            anchor=time.monotonic(),
+            journal=SimpleNamespace(append=lambda *args: None),
+            require_settled_input=lambda: None,
+            control=SimpleNamespace(cleanup_guard=nullcontext),
+        )
+        owner.app.activate(owner.config["target"]["profile_id"])
+        (owner.profiles.live / "Saves/new.sav").write_bytes(b"new target save")
+        self.assertTrue(menu.restore_catalogue(owner))
+        self.assertEqual(owner.profiles._state()["active"], "original-game")
+        self.assertEqual(menu.tree_files(owner.profiles.live), owner.baseline["return_files"])
+        self.assertFalse(self.original.exists())
+        target = owner.profiles._profile_path(owner.config["target"]["profile_id"])
+        self.assertEqual((target / "Saves/new.sav").read_bytes(), b"new target save")
+
+    def test_live_return_drift_refuses_before_copy(self):
+        (self.owner.profiles.live / "Saves/stock.sav").write_bytes(b"changed")
+        with self.assertRaisesRegex(ControlRefused, "Fresh catalogue baseline drift"):
+            self.prepare()
+        self.assertFalse(self.owner.preimages)
+
+    def test_duplicate_stored_original_refuses_before_copy(self):
+        self.original.mkdir()
+        with self.assertRaisesRegex(ControlRefused, "Active Original also has stored profile"):
+            self.prepare()
+        self.assertFalse(self.owner.preimages)
+
+    def test_live_marker_mismatch_refuses_before_copy(self):
+        marker = self.owner.profiles.live / ".smr-launcher-profile.json"
+        data = menu.decode(marker.read_bytes())
+        data["profile_id"] = self.owner.config["target"]["profile_id"]
+        marker.write_bytes(menu.canonical(data))
+        with self.assertRaisesRegex(ActivationError, "Unexpected profile"):
+            self.prepare()
+        self.assertFalse(self.owner.preimages)
+
+    def test_original_symlink_refuses_before_copy(self):
+        self.original.symlink_to(self.fixture.root / "absent", target_is_directory=True)
+        with self.assertRaisesRegex(ActivationError, "Symlink"):
+            self.prepare()
+        self.assertFalse(self.owner.preimages)
+
+    def test_unreadable_original_probe_is_not_treated_as_absent(self):
+        original_lstat = Path.lstat
+
+        def denied(path, *args, **kwargs):
+            if path == self.original:
+                raise PermissionError("synthetic denied Original")
+            return original_lstat(path, *args, **kwargs)
+
+        with patch.object(Path, "lstat", denied):
+            with self.assertRaises(PermissionError):
+                self.prepare()
+        self.assertFalse(self.owner.preimages)
+
+    def test_nonactive_original_remains_immutable_and_required(self):
+        # A second imported return exercises the existing stored Original case.
+        archive = self.fixture.root / "Return.tar"
+        with tarfile.open(archive, "w") as stream:
+            data = b"<Scenario/>"
+            entry = tarfile.TarInfo("UserMaps/Return/RRT_Scenario_User_Return.xml")
+            entry.size = len(data)
+            stream.addfile(entry, BytesIO(data))
+        app, profiles = self.owner.app, self.owner.profiles
+        returned = app.import_archive(archive)
+        app.activate(returned.profile_id)
+        self.owner.job["return_profile"] = returned.profile_id
+        baseline = self.owner.config["preservation"]
+        baseline.update(
+            return_files=menu.tree_files(profiles.live),
+            sibling_saves=menu.sibling_saves(
+                app, self.owner.config["target"]["profile_id"], returned.profile_id
+            ),
+        )
+        baseline["immutable"][str(app.catalogue_file)] = menu.file_facts(app.catalogue_file)
+        baseline["immutable"].update(
+            {
+                str(self.original / name): facts
+                for name, facts in menu.tree_files(self.original).items()
+            }
+        )
+        self.prepare()
+        self.assertIn(str(self.original / "Settings.ini"), self.owner.baseline["immutable"])
+        (self.original / "Settings.ini").write_bytes(b"changed Original")
+        with self.assertRaisesRegex(ControlRefused, "Fresh catalogue baseline drift"):
+            self.prepare()
+        self.original.rename(self.original.with_name("preserved-original"))
+        with self.assertRaisesRegex(ControlRefused, "Nonactive Original stored profile missing"):
+            self.prepare()
 
 
 class CatalogueRestoreTests(unittest.TestCase):

@@ -1377,6 +1377,23 @@ def pilot_class(common, agent_class):
                 not p.journal.exists() and not p.journal.is_symlink(), "Activation journal hold"
             )
             require(p._state()["active"] == self.job["return_profile"], "Current return changed")
+            p._marker(p.live, self.job["return_profile"])
+            stored_original = p._profile_path("original-game")
+            try:
+                stored_original.lstat()
+            except FileNotFoundError:
+                require(
+                    self.job["return_profile"] == "original-game",
+                    "Nonactive Original stored profile missing",
+                )
+                original_roots = ()
+            else:
+                require(
+                    self.job["return_profile"] != "original-game",
+                    "Active Original also has stored profile",
+                )
+                p._marker(stored_original, "original-game")
+                original_roots = (stored_original,)
             require(
                 self.app.installation.executable_sha256 == self.job["game_sha256"],
                 "Game build changed",
@@ -1432,7 +1449,7 @@ def pilot_class(common, agent_class):
             for base in (
                 self.app.imports / record.imported_directory,
                 self.app.prepared / record.prepared_directory,
-                p._profile_path("original-game"),
+                *original_roots,
             ):
                 paths.extend(base / name for name in tree_files(base))
             baseline["immutable"] = {str(path): file_facts(path) for path in paths}
