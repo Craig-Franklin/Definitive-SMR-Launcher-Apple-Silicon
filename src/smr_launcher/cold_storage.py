@@ -30,11 +30,32 @@ from .activation import (
     _fsync_dir,
     _fsync_tree,
 )
-from .extraction import _unfreeze_directories, _publish_exclusive
+from .extraction import _unfreeze_directories
 
 
 class ColdStorageError(RuntimeError):
     """Cold data needs inspection; original or recoverable bytes remain retained."""
+
+
+def _publish_exclusive(source, destination):
+    """Rename cold siblings without touching their recorded permissions/metadata.
+
+    Callers fsync the parent immediately afterward. Unlike prepared extraction,
+    cold publication cannot temporarily chmod a root: macOS may change provenance.
+    Refuse an OS permission failure rather than changing the source to retry.
+    """
+    if sys.platform != "darwin" or source.parent != destination.parent:
+        raise ColdStorageError("Cold publication requires a same-parent macOS rename")
+    _assert_no_symlink_ancestor(source)
+    _assert_no_symlink_ancestor(destination)
+    function = ctypes.CDLL(None, use_errno=True).renamex_np
+    function.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+    function.restype = ctypes.c_int
+    if function(os.fsencode(source), os.fsencode(destination), 0x00000004):  # RENAME_EXCL
+        error = ctypes.get_errno()
+        if error == errno.EEXIST:
+            raise ColdStorageError("Cold destination already exists")
+        raise OSError(error, os.strerror(error), str(source), str(destination))
 
 
 def _relative(value):
