@@ -67,8 +67,24 @@ Before publishing a materialized copy, a private receipt binds its exact observe
 provenance to the original manifest digest and directory creation identity. Original entries still
 pin every other field. Recovery and rollback require this creation-bound readback
 for known restored copies and refuse later provenance edits or replacement paths.
-Original/source preflight and backup/disposal checks remain strict for all metadata,
-including provenance; the restored-copy exception never applies to those trees.
+Original/source preflight remains strict for all metadata, including provenance;
+the restored-copy exception never applies to original trees.
+
+New compact transactions may declare one root-only provenance transition before
+renaming the original to its backup. A purpose/version-checked declaration binds
+the completed creation-owned check's exact measured root label to the original
+manifest digest, creation identity and unique backup destination. Original raw
+entries and their digest remain unchanged. Before the first durable observation,
+the owned backup must match the complete original manifest and identity, allowing
+only its root provenance to equal the original or exact predeclared target value.
+That same prior proof permits settlement after process death following rename.
+The first accepted observation is pinned immutably; all later backup and partial
+disposal reads must match that endpoint, even if the other declared value appears.
+Explicit label absence differs from a missing declaration or observation. Missing,
+malformed or stale declarations grant no allowance; legacy backups retain exact
+original-metadata checks. No sibling label or later observation can retroactively
+authorize a transition. Quarantine, other xattrs, ACLs, modes, times, payloads,
+topology and creation identity retain their existing strict preservation checks.
 
 The whole-library journal records the exact plan and completed trees. A cancellation
 may leave that journal pending: resume or roll back the same proposal before ordinary

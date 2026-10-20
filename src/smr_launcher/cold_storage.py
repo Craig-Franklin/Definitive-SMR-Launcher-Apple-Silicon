@@ -14,6 +14,7 @@ import ctypes
 import errno
 import hashlib
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -194,6 +195,18 @@ def _provenance(entries):
         for name, entry in entries.items()
         if "com.apple.provenance" in entry["xattrs"]
     }
+
+
+def _root_provenance(entries, label):
+    """Derive a backup view; never alter the recorded original entries/digest."""
+    xattrs = dict(entries["."]["xattrs"])
+    if label is None:
+        xattrs.pop("com.apple.provenance", None)
+    else:
+        xattrs["com.apple.provenance"] = label
+    result = dict(entries)
+    result["."] = dict(entries["."], xattrs=xattrs)
+    return result
 
 
 def _restored_entries_equal(actual, expected):
@@ -552,9 +565,98 @@ class ColdStorage:
                         raise ValueError("file size")
             if sum(e.get("size", 0) for e in entries.values()) > 256 * 1024**3:
                 raise ValueError("tree size")
+            if "rename_transition" in value:
+                record = value["rename_transition"]
+                # Purpose/version precede all purpose-specific fields. Legacy
+                # manifests have no declaration and retain exact original checks.
+                if (
+                    not isinstance(record, dict)
+                    or record.get("purpose") != "cold-root-rename-provenance"
+                    or type(record.get("version")) is not int
+                    or record["version"] != 1
+                ):
+                    raise ValueError("rename transition purpose/version")
+                if (
+                    value["phase"] == "checking"
+                    or (value["disposal_started"] and value["phase"] != "verified")
+                    or value["backup_identity"] is None
+                    or record["path"] != value["path"]
+                    or record["backup"] != value["backup"]
+                    or record["source_sha256"] != value["sha256"]
+                    or record["source_identity"] != value["backup_identity"]
+                ):
+                    raise ValueError("rename transition binding")
+                measured = record["measurement"]
+                identity = measured["identity"]
+                if (
+                    not isinstance(identity, dict)
+                    or any(
+                        type(identity[k]) is not int or identity[k] < 0 for k in ("device", "inode")
+                    )
+                    or type(identity["birth"]) not in (int, float)
+                    or not math.isfinite(identity["birth"])
+                    or identity["birth"] < 0
+                    or identity["device"] != value["backup_identity"]["device"]
+                    or _same_inode(identity, value["backup_identity"])
+                ):
+                    raise ValueError("rename measurement identity")
+                for label in (
+                    measured["provenance"],
+                    *([record["observed"]] if "observed" in record else []),
+                ):
+                    if label is not None:
+                        if not isinstance(label, str):
+                            raise ValueError("rename label type")
+                        base64.b64decode(label, validate=True)
+                if "observed" in record:
+                    if record["observed"] not in (
+                        entries["."]["xattrs"].get("com.apple.provenance"),
+                        measured["provenance"],
+                    ):
+                        raise ValueError("rename observation outside declaration")
+                elif value["phase"] == "verified" or value["disposal_started"]:
+                    raise ValueError("unobserved backup cannot be verified/disposed")
             return value
-        except (KeyError, TypeError, ValueError) as exc:
+        except (KeyError, TypeError, ValueError, OverflowError) as exc:
             raise ColdStorageError("Cold-tree manifest needs inspection") from exc
+
+    @staticmethod
+    def _backup_entries(value):
+        record = value.get("rename_transition")
+        if record is None:
+            return value["entries"]
+        if "observed" not in record:
+            raise ColdStorageError("Backup transition has no pinned observation")
+        return _root_provenance(value["entries"], record["observed"])
+
+    def _observe_backup(self, root, backup, value):
+        """Settle only an already-declared endpoint on the recorded original inode."""
+        if _identity(backup) != value["backup_identity"]:
+            raise ColdStorageError("Backup identity changed; retained")
+        actual = self.inspect(backup)
+        record = value.get("rename_transition")
+        if record is None or "observed" in record:
+            expected = self._backup_entries(value)
+        else:
+            label = actual["."]["xattrs"].get("com.apple.provenance")
+            if label not in (
+                value["entries"]["."]["xattrs"].get("com.apple.provenance"),
+                record["measurement"]["provenance"],
+            ):
+                raise ColdStorageError("Backup root label outside declared transition; retained")
+            expected = _root_provenance(value["entries"], label)
+        if (
+            actual != expected
+            or self.inspect(backup) != actual
+            or _identity(backup) != value["backup_identity"]
+        ):
+            raise ColdStorageError("Backup readback changed; retained")
+        if record is not None and "observed" not in record:
+            # Persist the accepted first snapshot, never a later re-read/adoption.
+            # Presence of observed=None means a pinned absence, not missing proof.
+            record["observed"] = label
+            _atomic_json(self._index(root), value)
+            self.fault_hook("after_backup_observation")
 
     def _restore(self, path, entries, *, cancelled=None, progress=None, created=None):
         required = sum(entry.get("size", 0) for entry in entries.values())
@@ -926,11 +1028,32 @@ class ColdStorage:
                 cancelled=cancelled,
                 created=self._scratch_callback(path, value, "check"),
             )
+            check = value["check"]
+            if (
+                check is None
+                or not check["complete"]
+                or "provenance" not in check
+                or _identity(temporary) != check["identity"]
+                or not self._scratch_matches(temporary, value, check)
+            ):
+                raise ColdStorageError("Rename target lacks completed creation-bound measurement")
+            measurement = dict(
+                identity=dict(check["identity"]), provenance=check["provenance"].get(".")
+            )
             if self.inspect(path, cancelled=cancelled) != expected:
                 raise ColdStorageError("Tree changed before compact commit")
         finally:
             self._clean_scratch(path, value, "check")
         _checkpoint(cancelled)
+        value["rename_transition"] = dict(
+            purpose="cold-root-rename-provenance",
+            version=1,
+            path=value["path"],
+            backup=value["backup"],
+            source_sha256=value["sha256"],
+            source_identity=dict(value["backup_identity"]),
+            measurement=measurement,
+        )
         value["phase"] = "prepared"
         _atomic_json(self._index(path), value)
         self.fault_hook("after_manifest")
@@ -958,6 +1081,8 @@ class ColdStorage:
             return
         if value["phase"] == "prepared":
             if path.exists() and not backup.exists():
+                if "observed" in value.get("rename_transition", {}):
+                    raise ColdStorageError("Observed backup reappeared at original path; retained")
                 if (
                     self.inspect(path) != value["entries"]
                     or _identity(path) != value["backup_identity"]
@@ -969,10 +1094,10 @@ class ColdStorage:
             if (
                 path.exists()
                 or not backup.is_dir()
-                or self.inspect(backup) != value["entries"]
                 or _identity(backup) != value["backup_identity"]
             ):
                 raise ColdStorageError("Ambiguous compact recovery; all trees retained")
+            self._observe_backup(path, backup, value)
             # Recheck blobs on recovery before granting backup disposal.
             self._verify_entries(value["entries"])
             value["phase"] = "verified"
@@ -984,15 +1109,17 @@ class ColdStorage:
             # Disposal may have been interrupted after its durable verified phase.
             self._verify_entries(value["entries"])
             if not value["disposal_started"]:
-                if (
-                    _identity(backup) != value["backup_identity"]
-                    or self.inspect(backup) != value["entries"]
-                ):
+                if _identity(backup) != value["backup_identity"] or self.inspect(
+                    backup
+                ) != self._backup_entries(value):
                     raise ColdStorageError("Verified backup changed before disposal; retained")
                 value["disposal_started"] = True
                 _atomic_json(self._index(path), value)
             self._discard(
-                backup, entries=value["entries"], identity=value["backup_identity"], partial=True
+                backup,
+                entries=self._backup_entries(value),
+                identity=value["backup_identity"],
+                partial=True,
             )
         if path.exists():
             temporary = path.with_name(".cold-restore-" + value["backup"][-32:])
