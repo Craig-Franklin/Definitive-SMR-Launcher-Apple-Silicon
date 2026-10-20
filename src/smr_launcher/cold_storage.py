@@ -2,6 +2,9 @@
 
 Callers own application/profile locks and stopped-state admission. This module never
 selects a tree, prunes blobs, follows links, or changes an active game profile.
+Original raw metadata stays recorded. Newly created macOS copies retain their
+OS-assigned com.apple.provenance, with exact observed metadata bound to creation
+identity for later recovery/rollback. Exact provenance reproduction is not promised.
 """
 
 from __future__ import annotations
@@ -164,10 +167,42 @@ def _metadata(path):
     )
 
 
+def _provenance(entries):
+    return {
+        name: entry["xattrs"]["com.apple.provenance"]
+        for name, entry in entries.items()
+        if "com.apple.provenance" in entry["xattrs"]
+    }
+
+
+def _restored_entries_equal(actual, expected):
+    """Only newly created copies may have a different macOS provenance label.
+
+    This host can assign that label despite a successful setxattr. Original
+    manifests retain it verbatim; inspect, source and backup checks remain exact.
+    No other xattr (including quarantine), ACL or metadata is normalized.
+    """
+
+    def portable(entries):
+        return {
+            name: dict(
+                entry,
+                xattrs={k: v for k, v in entry["xattrs"].items() if k != "com.apple.provenance"},
+            )
+            for name, entry in entries.items()
+        }
+
+    return actual == expected or (
+        sys.platform == "darwin" and portable(actual) == portable(expected)
+    )
+
+
 def _restore_metadata(path, entry):
     if (path.stat().st_uid, path.stat().st_gid) != (entry["uid"], entry["gid"]):
         os.chown(path, entry["uid"], entry["gid"])
     for name in _xattrs(path):
+        if sys.platform == "darwin" and name == "com.apple.provenance":
+            continue  # Creation-owned copies keep their OS-assigned label.
         if name in entry["xattrs"]:
             continue
         if sys.platform == "darwin":
@@ -177,6 +212,8 @@ def _restore_metadata(path, entry):
         else:
             os.removexattr(path, name, follow_symlinks=False)
     for name, data in entry["xattrs"].items():
+        if sys.platform == "darwin" and name == "com.apple.provenance":
+            continue
         _set_xattr(path, name, base64.b64decode(data, validate=True))
     os.chmod(path, entry["mode"])
     if entry["acl"] is not None:
@@ -542,11 +579,13 @@ class ColdStorage:
             _restore_metadata(path if name == "." else path / name, entry)
         if created:
             created(path, True)
-        if self.inspect(path, cancelled=cancelled) != entries:
+        if not _restored_entries_equal(self.inspect(path, cancelled=cancelled), entries):
             raise ColdStorageError("Restored tree does not match its exact manifest")
         _fsync_tree(path)
 
-    def _discard(self, path, *, entries=None, identity=None, partial=False, scratch=False):
+    def _discard(
+        self, path, *, entries=None, identity=None, partial=False, scratch=False, provenance=None
+    ):
         """Remove only a creation-bound tree whose survivors contain no new bytes."""
         if identity is None or entries is None:
             raise ColdStorageError("Cleanup lacks directory creation evidence")
@@ -554,6 +593,13 @@ class ColdStorage:
         if _identity(path) != identity:
             raise ColdStorageError("Cleanup directory identity changed; retained")
         current = self.inspect(path)
+        if (
+            scratch
+            and provenance is not None
+            and _provenance(current)
+            != {name: label for name, label in provenance.items() if name in current}
+        ):
+            raise ColdStorageError("Completed scratch provenance changed; retained")
         if not partial and current != entries:
             raise ColdStorageError("Cleanup tree changed; retained")
         if partial:
@@ -615,9 +661,24 @@ class ColdStorage:
             value[key] = dict(
                 identity=identity, complete=complete, cleaning=False, metadata_birth=metadata_birth
             )
+            if complete:
+                actual = self.inspect(path)
+                if _restored_entries_equal(actual, value["entries"]):
+                    # Bind future checks to this readback, including provenance.
+                    value[key]["provenance"] = _provenance(actual)
             _atomic_json(self._index(root), value)
 
         return recorded
+
+    def _scratch_matches(self, path, value, record):
+        actual = self.inspect(path)
+        if "provenance" in record:
+            return _provenance(actual) == record["provenance"] and _restored_entries_equal(
+                actual, value["entries"]
+            )
+        # Legacy checking journals and death before complete readback have no
+        # snapshot. Caller must first verify the recorded creation identity.
+        return _restored_entries_equal(actual, value["entries"])
 
     def _clean_scratch(self, root, value, key):
         name = ".cold-check-" if key == "check" else ".cold-restore-"
@@ -632,7 +693,7 @@ class ColdStorage:
                 if (
                     not _same_inode(actual_identity, record["identity"])
                     or actual_identity["birth"] != record["metadata_birth"]
-                    or self.inspect(path) != value["entries"]
+                    or not self._scratch_matches(path, value, record)
                 ):
                     raise ColdStorageError(
                         "Scratch identity changed outside planned metadata; retained"
@@ -643,8 +704,18 @@ class ColdStorage:
                 record["complete"] = True
                 _atomic_json(self._index(root), value)
             if record["complete"] and not record["cleaning"]:
-                if _identity(path) != record["identity"] or self.inspect(path) != value["entries"]:
+                if _identity(path) != record["identity"] or not self._scratch_matches(
+                    path, value, record
+                ):
                     raise ColdStorageError("Completed scratch changed; retained")
+                actual = self.inspect(path)
+                observed = _provenance(actual)
+                if not _restored_entries_equal(actual, value["entries"]) or (
+                    "provenance" in record and observed != record["provenance"]
+                ):
+                    raise ColdStorageError("Completed scratch readback changed; retained")
+                # Only legacy records lack a snapshot. Never replace a completed one.
+                record.setdefault("provenance", observed)
                 record["cleaning"] = True
                 _atomic_json(self._index(root), value)
             self._discard(
@@ -653,10 +724,74 @@ class ColdStorage:
                 identity=record["identity"],
                 partial=True,
                 scratch=True,
+                provenance=record.get("provenance"),
             )
         if record is not None:
             value[key] = None
             _atomic_json(self._index(root), value)
+
+    def _restored_index(self, path):
+        key = self._path(path).relative_to(self.library).as_posix()
+        result = self.library / "cold-storage/restored" / (_sha(key.encode()) + ".json")
+        _assert_no_symlink_ancestor(result)
+        return result
+
+    def _record_restored(self, root, path, value):
+        """Persist exact observed copy metadata before publication/index removal."""
+        record = value["restore"]
+        if (
+            record is None
+            or not record["complete"]
+            or record["cleaning"]
+            or _identity(path) != record["identity"]
+            or not self._scratch_matches(path, value, record)
+        ):
+            raise ColdStorageError("Materialized copy lost its creation evidence")
+        actual = self.inspect(path)
+        observed = _provenance(actual)
+        if not _restored_entries_equal(actual, value["entries"]) or (
+            "provenance" in record and observed != record["provenance"]
+        ):
+            raise ColdStorageError("Materialized copy readback changed; retained")
+        receipt = self._restored_index(root)
+        receipt.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_json(
+            receipt,
+            dict(
+                schema=1,
+                path=value["path"],
+                source_sha256=value["sha256"],
+                identity=record["identity"],
+                provenance=observed,
+            ),
+        )
+
+    def matches_restored(self, path, expected):
+        """Rollback accepts a known restored copy only at its exact saved readback."""
+        actual = self.inspect(path)
+        receipt = self._restored_index(path)
+        if not receipt.exists():
+            return actual == expected
+        if (
+            not receipt.is_file()
+            or receipt.stat().st_nlink != 1
+            or receipt.stat().st_size > 128 * 1024**2
+        ):
+            raise ColdStorageError("Invalid restored-copy receipt")
+        try:
+            value = json.loads(receipt.read_bytes())
+            if value["schema"] != 1 or value["path"] != path.relative_to(self.library).as_posix():
+                return False
+            if value["source_sha256"] != _sha(_canonical(expected)):
+                # A receipt for an older producer manifest grants no allowance.
+                return actual == expected
+            return (
+                value["identity"] == _identity(path)
+                and value["provenance"] == _provenance(actual)
+                and _restored_entries_equal(actual, expected)
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ColdStorageError("Restored-copy receipt needs inspection") from exc
 
     def register_profile(self, source, destination, marker, *, saved_games=None):
         """Publish a new inactive writable profile without cloning its complete tree."""
@@ -838,12 +973,15 @@ class ColdStorage:
             self._discard(
                 backup, entries=value["entries"], identity=value["backup_identity"], partial=True
             )
-        self._clean_scratch(path, value, "restore")
         if path.exists():
-            if self.inspect(path) != value["entries"]:
-                raise ColdStorageError("Materialized tree changed during recovery")
+            temporary = path.with_name(".cold-restore-" + value["backup"][-32:])
+            if temporary.exists():
+                raise ColdStorageError("Conflicting materialization scratch; retained")
+            self._record_restored(path, path, value)
             self._index(path).unlink()
             _fsync_dir(path.parent)
+        else:
+            self._clean_scratch(path, value, "restore")
 
     def materialize(self, path, *, cancelled=None, progress=None):
         path = self._path(path)
@@ -865,13 +1003,14 @@ class ColdStorage:
             _checkpoint(cancelled)
             if path.exists():
                 raise ColdStorageError("Materialization destination already exists")
+            self._record_restored(path, temporary, value)
             _publish_exclusive(temporary, path)
             _fsync_dir(path.parent)
             self.fault_hook("after_materialize")
             self._index(path).unlink()
             _fsync_dir(path.parent)
         finally:
-            if self.is_cold(path):
+            if self.is_cold(path) and temporary.exists():
                 self._clean_scratch(path, value, "restore")
 
     def assets_manifest_hash(self, path):

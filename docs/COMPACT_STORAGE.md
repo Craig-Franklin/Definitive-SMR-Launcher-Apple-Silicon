@@ -15,6 +15,12 @@ regular files, including saves with identical content. Birth/access times, inode
 and filesystem change times are not preservation identities. Unsupported file flags,
 special modes, links, hardlinks and volume crossings refuse conversion.
 
+Manifests retain original raw extended attributes, including `com.apple.provenance`.
+On macOS, newly created restored copies keep their OS-assigned provenance label;
+reproducing that label exactly is not promised. Only this label may differ from the
+original manifest. Bytes and all other metadata remain exact, including quarantine,
+custom or unknown extended attributes, ACLs, ownership, modes and modification times.
+
 Verified original payloads reference retained canonical archives. The production reader
 inspects archive membership, streams member bytes, verifies their SHA-256 and size, and
 rechecks the canonical archive's content identity. It never assumes imports match an
@@ -45,7 +51,8 @@ included unmatched profiles must pass the existing profile identity/asset valida
 The active live profile is never a compact target.
 
 Before a hot tree is disposed, compressed/archive-backed bytes are restored to private
-scratch and compared against the exact manifest. After exclusive directory creation,
+scratch and compared against the manifest, allowing only the restored-copy provenance
+exception above. After exclusive directory creation,
 the schema-2 per-tree journal durably records its device, inode and creation time.
 A crash before that record leaves unknown scratch intact. Names alone never grant
 cleanup ownership. Before backup disposal, recovery verifies directory identity and
@@ -54,10 +61,21 @@ transition permits a safe partial deletion to resume. Scratch cleanup additional
 bounds every remaining path and file to the planned payload or its verified prefix;
 unknown, replaced or changed scratch remains intact for inspection.
 
+Completed scratch records pin the observed provenance label. Later readbacks must
+match that saved label before publication or disposal; they cannot replace it.
+Before publishing a materialized copy, a private receipt binds its exact observed
+provenance to the original manifest digest and directory creation identity. Original entries still
+pin every other field. Recovery and rollback require this creation-bound readback
+for known restored copies and refuse later provenance edits or replacement paths.
+Original/source preflight and backup/disposal checks remain strict for all metadata,
+including provenance; the restored-copy exception never applies to those trees.
+
 The whole-library journal records the exact plan and completed trees. A cancellation
 may leave that journal pending: resume or roll back the same proposal before ordinary
-mutations. Rollback restores exact initial trees and refuses changed catalogue, active
-identity or later file edits. It never overwrites a newer save to force rollback.
+mutations. Rollback restores initial paths, bytes and metadata with only the
+OS-assigned provenance exception above, using the creation-bound exact observed
+receipt for restored copies. It refuses changed catalogue, active identity or later
+file/metadata edits. It never overwrites a newer save to force rollback.
 
 After migration, ordinary imports publish a cold writable profile directly from verified
 prepared bytes and retained saves. Incoming canonical references are streamed and

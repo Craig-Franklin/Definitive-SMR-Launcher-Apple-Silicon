@@ -218,7 +218,10 @@ def migrate(app, candidate, *, cancelled=None, progress=None):
 
 
 def rollback(app, candidate, *, cancelled=None, progress=None):
-    """Restore exact pre-migration trees; refuse later edits or changed active state."""
+    """Restore pre-migration bytes/portable metadata; refuse later edits/active changes.
+
+    macOS provenance on restored copies uses creation-bound exact readback receipts.
+    """
     journal = app.library / JOURNAL
     _assert_no_symlink_ancestor(journal)
     if journal.exists():
@@ -246,13 +249,13 @@ def rollback(app, candidate, *, cancelled=None, progress=None):
         if app.cold_storage.is_cold(path):
             if app.cold_storage._load(path)["entries"] != tree["entries"]:
                 raise ColdStorageError("Cold tree differs from rollback manifest")
-        elif app.cold_storage.inspect(path) != tree["entries"]:
+        elif not app.cold_storage.matches_restored(path, tree["entries"]):
             raise ColdStorageError("Working tree changed since migration; rollback refused")
     _atomic_json(journal, dict(schema=1, plan=candidate, direction="rollback"))
     for tree in candidate["trees"]:
         path = app.library / tree["path"]
         app.cold_storage.materialize(path, cancelled=cancelled, progress=progress)
-        if app.cold_storage.inspect(path) != tree["entries"]:
+        if not app.cold_storage.matches_restored(path, tree["entries"]):
             raise ColdStorageError("Rollback readback differs from its approved manifest")
     policy = app.library / CONFIG
     _assert_no_symlink_ancestor(policy)
