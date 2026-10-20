@@ -11,6 +11,15 @@ the owner's `.handoff/START_HERE.md`; it supplies the current Run, source closur
 queue/start helper and return-state evidence. A skill invocation does not resume
 a pause or supply missing runtime admission.
 
+For a missing/deleted worker checkout, first use the guide's
+[checkout recovery and offline preflight](../../../docs/AI_GAME_TESTING.md#recover-a-checkout-before-preparing-a-trial).
+Reusable queue/lifecycle code is tracked beside the driver. Private directories
+supply reviewed configuration and evidence, not imported Python support. Resume
+the same native session/Run through supported host tooling, verify current caller
+and preservation, and create fresh reviewed bindings. Historical jobs, profile
+IDs and grants are never recovery defaults. Remove settled worker checkouts only
+after required reusable code is tracked and owned cleanup is independently settled.
+
 Before preparing a job, check the [complete operator path](../../../docs/AI_GAME_TESTING.md#before-preparing-a-trial),
 including installed input capabilities, observation, final quit and restoration.
 Include preparation and review in the existing Task's elapsed-time assessment;

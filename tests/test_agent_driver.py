@@ -3,6 +3,8 @@
 from contextlib import contextmanager
 from dataclasses import dataclass
 import json
+import os
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -1318,38 +1320,35 @@ class AgentRouteTests(unittest.TestCase):
                 self.owner.decisions.stage("action", "Synthetic unsafe pairing")
         self.assertEqual(self.actions, [])
 
-    def test_historical_launch_route_refuses_before_actor_or_admission_work(self):
-        root = self.directory / "historical-owner"
-        root.mkdir()
-        (root / "agent_calibration.py").write_bytes(b"synthetic historical profiles.play route")
-        with self.assertRaisesRegex(ControlRefused, "reviewed launcher backend composition"):
-            driver.verify_entry(
-                {"purpose": driver.WINDOW_PURPOSE, "common_root": str(root)}, {}, "unused"
-            )
+    def test_source_pin_refuses_before_actor_or_admission_work(self):
+        with patch.object(driver, "LAUNCHER_CALIBRATION_SHA256", "0" * 64):
+            with self.assertRaisesRegex(ControlRefused, "reviewed launcher backend composition"):
+                driver.verify_entry(
+                    {"purpose": driver.WINDOW_PURPOSE, "common_root": "/absent/private"},
+                    {},
+                    "unused",
+                )
         self.assertEqual(self.actions, [])
         self.assertEqual(self.owner.events, [])
         self.assertFalse(self.owner.running)
 
-    def test_backend_route_pin_and_maintained_module_must_both_match(self):
-        root = self.directory / "reviewed-owner"
+    def test_backend_uses_tracked_source_and_rejects_foreign_module(self):
+        root = self.directory / "private-data"
         root.mkdir()
         path = root / "agent_calibration.py"
-        raw = b"synthetic reviewed app.play route"
-        path.write_bytes(raw)
-        with patch.object(driver, "LAUNCHER_CALIBRATION_SHA256", driver.sha(raw)):
-            driver.verify_launch_backend(root)
-            with patch.object(
-                driver.importlib,
-                "import_module",
-                return_value=SimpleNamespace(__file__=str(root / "application.py")),
-            ):
-                with self.assertRaisesRegex(ControlRefused, "backend path drift"):
-                    driver.verify_launch_backend(root)
-            path.write_bytes(raw + b" changed")
-            with self.assertRaisesRegex(ControlRefused, "reviewed launcher backend composition"):
+        path.write_bytes(b"raise AssertionError('private code must never run')")
+        driver.verify_launch_backend(root)
+        path.unlink()
+        driver.verify_launch_backend(root)
+        with patch.object(
+            driver.importlib,
+            "import_module",
+            return_value=SimpleNamespace(__file__=str(root / "application.py")),
+        ):
+            with self.assertRaisesRegex(ControlRefused, "backend path drift"):
                 driver.verify_launch_backend(root)
-            path.unlink()
-            with self.assertRaises((ControlRefused, OSError)):
+        with patch.object(driver, "LAUNCHER_CALIBRATION_SHA256", "0" * 64):
+            with self.assertRaisesRegex(ControlRefused, "reviewed launcher backend composition"):
                 driver.verify_launch_backend(root)
         self.assertEqual(self.actions, [])
 
@@ -1992,6 +1991,33 @@ class NativePreinput229Tests(unittest.TestCase):
                 del changed[key]
                 with self.assertRaisesRegex(ControlRefused, "Exact prospective"):
                     driver.verify_preinput_229({**self.job, "preinput_refusal_contract": changed})
+
+
+class OfflineEntryTests(unittest.TestCase):
+    def test_offline_entry_missing_private_inputs_is_actionable_and_writes_nothing(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.directory = Path(temporary.name).resolve()
+        environment = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
+        for arguments in (
+            ["--preflight"],
+            ["--preflight", "absent-job", "absent-admission", "0" * 64],
+        ):
+            result = subprocess.run(
+                [sys.executable, "-B", str(ROOT / "scripts/research/agent_driver.py"), *arguments],
+                cwd=self.directory,
+                env=environment,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 2)
+            receipt = json.loads(result.stderr)
+            self.assertEqual(receipt["status"], "refused")
+            self.assertFalse(receipt["runtime_admitted"])
+            self.assertIn("Setup", receipt["reason"])
+            self.assertNotIn("ModuleNotFoundError", result.stderr)
+        self.assertFalse((self.directory / "queue.json").exists())
+        self.assertEqual(list(self.directory.iterdir()), [])
 
 
 if __name__ == "__main__":

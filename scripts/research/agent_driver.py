@@ -8,6 +8,7 @@ Agent decisions and provider receipts never become human or detector evidence.
 
 from contextlib import contextmanager
 from dataclasses import asdict
+import argparse
 import importlib
 import json
 import os
@@ -16,6 +17,7 @@ import re
 import subprocess
 import sys
 import time
+import tempfile
 import uuid
 
 from active_job_control import (
@@ -50,7 +52,7 @@ MENU_STAGES = ("launcher", "menu", "returned")
 ACTION_SECONDS = 480
 FRAME_SECONDS = 60
 NATIVE_SOURCE_SHA256 = "1eabe4e19f52bc6684c0b58e6cbc2c92ccf8b8d95d160205e3164432e9951601"
-LAUNCHER_CALIBRATION_SHA256 = "cfa6ec9095af74e7230e2f87a281988e958b1a97a4f6dc57750f2f3812df352c"
+LAUNCHER_CALIBRATION_SHA256 = "be03dc93673338ce437c6ab8ff064eada67e97246875147c2573d6a2e778250f"
 CLICK_SOURCE_SHA256 = "7beb128e95a8e4ed0f18e188a7a97231d6fd70a9e130ca1a4c6adff5eda395eb"
 PREINPUT_229 = {
     "schema": 1,
@@ -1503,7 +1505,8 @@ def pilot_class(common):
 def verify_launch_backend(common_root):
     """Bind the reviewed app-launch route before queue or owner construction."""
     require(
-        sha(read_plain(Path(common_root) / "agent_calibration.py")) == LAUNCHER_CALIBRATION_SHA256,
+        sha(read_plain(Path(__file__).with_name("agent_calibration.py")))
+        == LAUNCHER_CALIBRATION_SHA256,
         "Exact reviewed launcher backend composition required",
     )
     # Load the maintained service before private frozen support paths can win.
@@ -1577,6 +1580,10 @@ def verify_entry(job, admission, job_sha):
             },
             "Exact Alternate UK source required",
         )
+    require(
+        job["queue_module"] == str(Path(__file__).with_name("game_queue.py").resolve()),
+        "Use the current checkout game_queue.py and freshly review its closure",
+    )
     paths = set()
     for row in job["closure"]:
         raw = read_plain(row["path"])
@@ -1589,9 +1596,9 @@ def verify_entry(job, admission, job_sha):
         {
             str(Path(__file__).resolve()),
             str(Path(__file__).with_name("agent_actor_binding.py").resolve()),
-            job["queue_module"],
-            str(Path(job["common_root"]) / "agent_calibration.py"),
-            str(Path(job["common_root"]) / "stop-helper/agent_host.py"),
+            str(Path(__file__).with_name("game_queue.py").resolve()),
+            str(Path(__file__).with_name("agent_calibration.py").resolve()),
+            str(Path(__file__).with_name("individual_stop_support") / "host.py"),
         }.issubset(paths),
         "Driver/common/queue closure required",
     )
@@ -1613,6 +1620,24 @@ def verify_entry(job, admission, job_sha):
             "unique_save_file.py",
             "runner_journal.py",
         )
+    )
+    needed.update(
+        str(Path(__file__).with_name(name).resolve())
+        for name in (
+            "agent_calibration.py",
+            "game_queue.py",
+            "scene_contract.py",
+            "crop_observations.py",
+            "sample_fence.py",
+            "image_correspondence.py",
+        )
+    )
+    needed.update(
+        str(p.resolve()) for p in Path(__file__).with_name("individual_stop_support").glob("*.py")
+    )
+    needed.update(
+        str(Path(__file__).with_name("individual_stop_support") / name)
+        for name in ("pins.json", "proposal.json")
     )
     needed.add(job["native_source"])
     if preinput_229(job):
@@ -1645,26 +1670,40 @@ def verify_entry(job, admission, job_sha):
     )
 
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Finite visual driver; fresh private owner/job/admission required."
+    )
+    parser.add_argument(
+        "--preflight",
+        action="store_true",
+        help="Validate source/admission without constructing an owner or launching.",
+    )
+    parser.add_argument("inputs", nargs="*", metavar="JOB_ADMISSION_SHA")
+    args = parser.parse_args(argv)
     require(sys.version_info[:2] == (3, 12) and not sys.flags.optimize, "Python 3.12 required")
-    require(len(sys.argv) == 4, "job admission admission-sha256 required")
-    raw_job, raw_admission = read_plain(sys.argv[1]), read_plain(sys.argv[2])
-    require(sha(raw_admission) == sys.argv[3], "Explicit admission pin required")
+    require(
+        len(args.inputs) == 3,
+        "Setup required: supply a fresh reviewed JOB, ADMISSION and admission SHA256; see docs/AI_GAME_TESTING.md. No historical jobs or authority defaults.",
+    )
+    raw_job, raw_admission = read_plain(args.inputs[0]), read_plain(args.inputs[1])
+    require(sha(raw_admission) == args.inputs[2], "Explicit admission pin required")
     job, admission = decode(raw_job), decode(raw_admission)
     verify_entry(job, admission, sha(raw_job))
     common_root = Path(job["common_root"])
     # The new composition explicitly selects the delegated actor dependency.
     # The frozen V4 tree and its root-only collector remain intact.
     sys.modules["actor_binding"] = importlib.import_module("agent_actor_binding")
-    sys.path[:0] = [
-        str(common_root),
-        str(common_root / "frozen-code/src"),
-        str(common_root / "frozen-code/scripts/research"),
-        str(common_root / "stop-helper"),
-        str(Path(job["queue_module"]).parent),
-    ]
+    sys.path.insert(0, str(Path(__file__).with_name("individual_stop_support")))
     common = importlib.import_module("agent_calibration")
     from game_queue import GameQueue
+
+    if args.preflight:
+        # Exercise real private-code staging without an owner, queue writer or game process.
+        with tempfile.TemporaryDirectory() as temporary:
+            common.stage_stop_support(Path(temporary).resolve() / "stop-support", job["closure"])
+        print(json.dumps({"status": "source_admission_preflight_pass", "runtime_admitted": False}))
+        return 0
 
     queue = GameQueue(admission["queue_path"])
     lease = admission["lease"]
@@ -1697,4 +1736,17 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except (ControlRefused, OSError, KeyError, TypeError, ValueError) as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "refused",
+                    "reason": "Setup/preflight refused: " + str(exc),
+                    "runtime_admitted": False,
+                }
+            ),
+            file=sys.stderr,
+        )
+        raise SystemExit(2)

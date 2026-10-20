@@ -30,6 +30,57 @@ A new scene or successful input dispatch alone does not resolve a previously
 intermittent observation failure. Report that trial's result without claiming a
 general repair or automatically repeating it.
 
+## Recover a checkout before preparing a trial
+
+Reusable code ships in `scripts/research`: the finite driver, visual lifecycle,
+cooperative `game_queue.py`, scene helpers and `individual_stop_support`. Resolve
+these from the current checkout. Do not import Python code from a worker worktree
+or the private data directory. A deleted worker checkout must not remove the only
+copy of reusable execution code.
+
+From a clean checkout and the Python 3.12 development environment, run:
+
+```sh
+PYTHONPATH=src python -B scripts/research/agent_driver.py --preflight
+```
+
+With no private inputs this exits 2 with an actionable setup refusal. It creates
+no owner, queue ledger, profile or process. For the real source/admission checks,
+supply the existing owner's fresh reviewed inputs:
+
+```sh
+PYTHONPATH=src python -B scripts/research/agent_driver.py --preflight \
+  /absolute/fresh-job.json /absolute/ADMISSION.json ADMISSION_SHA256
+```
+
+A supplied-input preflight also stages the reviewed tracked stop-helper bytes in a
+temporary private 0700 directory and removes that copy afterward. Runtime uses the
+same byte-checked staging under its owned operation directory; Git directory modes
+never replace the helper's private-code/packet requirements. Existing copies must
+match exactly and unknown or changed members refuse.
+
+A passing preflight validates source and admission bindings only. It does not
+claim current game availability, runtime admission, cleanup or compatibility.
+The normal three-argument entry below retains its independent live owner/queue
+checks before mutation.
+
+The owner must supply current installation/provider capabilities, source closure,
+private configuration/reviews, one-use job/admission, queue ledger and current
+post-play or post-reset preservation. `common_root` selects private configuration
+and evidence; it no longer supplies imported lifecycle code. Its reviewed
+`source-manifest.json` remains mandatory. Native proof files and scene binding
+JSON remain explicit private inputs. `queue_module` must name the current
+checkout's `scripts/research/game_queue.py`; old workspace paths refuse.
+
+Recover an existing native session through supported host tooling in a managed
+checkout, then rebind/read back its existing Run and verify the actual caller.
+Regenerate and independently review the exact current closure and runtime state.
+Never replay historical jobs, grants, profile IDs or preservation baselines.
+Keep active or uncertain queue ownership until independent exact process,
+restoration and terminal settlement succeeds. Before removing a worker checkout,
+verify that required reusable source is tracked and its session/owned cleanup is
+settled; preserve private receipts and current user data separately.
+
 ## Launcher entry points
 
 The existing command bridge already provides structured status and launch:

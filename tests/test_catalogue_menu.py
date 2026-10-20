@@ -606,14 +606,15 @@ class CatalogueRestoreTests(unittest.TestCase):
             authority_sha256=driver.sha(authority.read_bytes()),
             actor_binding=dict(driver_actor=actor),
             root=root,
-            queue_module=str(common / "queue.py"),
+            queue_module=str(ROOT / "scripts/research/game_queue.py"),
             native_source=str(common / "native.swift"),
             source_manifest_sha256=driver.sha((common / "source-manifest.json").read_bytes()),
         )
-        for key in ("queue_module", "native_source"):
+        for key in ("native_source",):
             Path(job[key]).write_bytes(b"synthetic")
         paths = set((ROOT / "src").rglob("*.py"))
         paths.update((ROOT / "scripts/research").rglob("*.py"))
+        paths.update((ROOT / "scripts/research/individual_stop_support").glob("*.json"))
         paths.update(p for p in common.rglob("*") if p.is_file())
         job["closure"] = [
             dict(path=str(p), bytes=p.stat().st_size, sha256=driver.sha(p.read_bytes()))
@@ -650,14 +651,45 @@ class CatalogueRestoreTests(unittest.TestCase):
                 },
             )
         )
-        self.enterContext(
-            patch.object(
-                driver,
-                "LAUNCHER_CALIBRATION_SHA256",
-                driver.sha((common / "agent_calibration.py").read_bytes()),
-            )
-        )
         return job, admission
+
+    def test_real_offline_entry_validates_exact_admission_without_owner_construction(self):
+        job, admission = self.direct_load_entry()
+        raw_job = menu.canonical(job)
+        admission["job_sha256"] = driver.sha(raw_job)
+        review_path = Path(admission["review"]["path"])
+        review = menu.decode(review_path.read_bytes())
+        review["job_sha256"] = admission["job_sha256"]
+        review_path.write_bytes(menu.canonical(review))
+        admission["review"]["sha256"] = driver.sha(review_path.read_bytes())
+        job_path = self.owner.directory / "fresh-job.json"
+        admission_path = self.owner.directory / "admission.json"
+        job_path.write_bytes(raw_job)
+        admission_path.write_bytes(menu.canonical(admission))
+        with patch.object(driver, "pilot_class", side_effect=AssertionError("owner constructed")):
+            self.assertEqual(
+                driver.main(
+                    [
+                        "--preflight",
+                        str(job_path),
+                        str(admission_path),
+                        driver.sha(admission_path.read_bytes()),
+                    ]
+                ),
+                0,
+            )
+        # A changed owner/admission still refuses through the real entry consumer.
+        admission["runtime_owner"] = "wrong-owner"
+        admission_path.write_bytes(menu.canonical(admission))
+        with self.assertRaisesRegex(ControlRefused, "Exact root grant required"):
+            driver.main(
+                [
+                    "--preflight",
+                    str(job_path),
+                    str(admission_path),
+                    driver.sha(admission_path.read_bytes()),
+                ]
+            )
 
     def gameplay_config(self, job=None):
         job = self.save_config(empty=True) if job is None else job
