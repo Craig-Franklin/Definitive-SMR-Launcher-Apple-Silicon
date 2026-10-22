@@ -151,6 +151,15 @@ explicitly supplied archive or directory. A directory timestamp change can
 invalidate a launcher report because native metadata effects remain unresolved.
 None of this awards gameplay verification or applies repairs.
 
+The native launcher's **More → Inspect Map Directory…** action inspects a newly
+customized directory through this same engine, without import or activation.
+The report shows its observation time, analyzer source identity, stock identity,
+exact input/build identities, findings and coverage limits. It is a snapshot;
+**Recheck Directory** reads current bytes again. A failed recheck clears the prior
+observation. An executable differing from the launcher's selected installation
+identity requires installation reverification. This action does not enroll the
+directory, create an edition or apply a repair.
+
 The five finding categories have distinct meanings:
 
 - `confirmed_invalid_condition`: a condition supported strongly enough for the

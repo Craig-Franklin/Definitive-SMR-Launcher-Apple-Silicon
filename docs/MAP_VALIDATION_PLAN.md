@@ -32,7 +32,7 @@ completed trials restored independently; no automatic repair is eligible yet.
 | M1 | Better evidence coverage and launcher import reports | Complete for source/backend integration and private packaged acceptance. Unknown native selection remains explicit. Installed-app deployment and visual acceptance remain separate from these checks. |
 | M2 | One positively identified industry error class | Active. Bind effective definition, placement, construction and identity consumer; distinguish unused definitions, inherited fields and failed construction. Independently specified valid, defective and counterexample controls plus held-out real-map checks must support exact applicability. |
 | M3 | One feature-preserving repair through native acceptance | Pending. Prove the correction and its complete reference/default closure. Prepare a separate edition, compare authored features, and verify load, representative play, relevant objectives/events, unique save, clean quit, exact reopen, continued play and restoration. No automatic repair promotion before these results. |
-| M4 | Import automation and customized-map workflow | Pending. Automatically validate all imports. Apply only eligible verified transformations to separate editions; explain ambiguous corrections. Revalidate customized directories and invalidate stale evidence after content/build/dependency changes. The import and authoring paths must use the same rule implementation. |
+| M4 | Import automation and customized-map workflow | Authoring slice in progress alongside M2.4; verified transformations remain pending M3. Automatically validate all imports. Apply only eligible verified transformations to separate editions; explain ambiguous corrections. Revalidate customized directories and invalidate stale evidence after content/build/dependency changes. The import and authoring paths must use the same rule implementation. |
 
 ### M1 acceptance checklist
 
@@ -83,6 +83,23 @@ specific question, rather than silently expanding into a new platform.
 - [ ] **M2.4 — Accept the bounded rule.** Bind supported preconditions, independent
   valid/negative/counterexamples and held-out checks. State exclusions. Prepare
   M3 only when an unambiguous feature-preserving candidate is justified.
+
+### M4 acceptance checklist
+
+- [x] **M4.1 — Inspect customized directories.** Complete for development/backend
+  and isolated synthetic native-UI acceptance; installed deployment remains M4.3.
+  Expose a read-only directory
+  inspection action through the existing native launcher and shared inspection
+  engine. Show exact inputs, build/analyzer provenance, categories and missing
+  coverage. Recheck actual edited bytes; clear the prior observation if rechecking
+  fails. Do not require import, activation or an enrolled catalogue record.
+- [ ] **M4.2 — Promote eligible transformations.** Integrate only M3-eligible
+  verified transformations into import on separate editions, retaining source,
+  output, dependency/build identities and feature-preservation evidence. Changed
+  or ambiguous inputs must withhold promotion. No arbitrary industry aliases.
+- [ ] **M4.3 — Verify the complete workflow.** Exercise import and authoring
+  consumers, changed-input refusal, preservation and visible presentation. Keep
+  synthetic/source/package checks distinct from M3's complete native acceptance.
 
 ## How work stays on this plan
 
@@ -348,3 +365,27 @@ or inspection success is a universal compatibility certificate.
   M3 still requires an independently justified feature-preserving separate edition
   and every gameplay/objective/event/save/reopen/restoration requirement. No new
   rule category, verified repair or automatic transformation is promoted.
+
+- **22 October 2026 — Parallel M4 authoring slice.** Candidate naming/default
+  questions keep M2.4/M3 open. Continue the independent read-only authoring path
+  rather than repeat an unchanged loading trial. The native launcher directory
+  action calls the same engine as CLI/import inspection, without a catalogue
+  record, import or activation. It displays a snapshot and offers explicit
+  rechecking; failed rechecks clear the earlier observation. Source checks and
+  review/visible verification are in progress. This advances M4.1 only; it does
+  not waive repair eligibility, deployed-app acceptance or any M3 requirement.
+
+- **22 October 2026 — M4.1 development/visible checkpoint.** The shared authoring
+  service and native request need no import or enrolled catalogue record. Five
+  synthetic integration controls passed; 129 focused tests passed. Full suite:
+  1,831 tests, 26 skipped, no failures; quality passed and all native Swift sources
+  typechecked. Independent review accepted the exact source candidate. Production
+  views/model/bridge in an isolated synthetic app visibly showed report provenance,
+  unknown-build/missing-input/coverage distinctions and changed-input rechecking.
+  A changed synthetic executable caused refusal and removed the prior report.
+  The second finite GUI trial quit normally and its service exited. A private
+  fixture-entry compile error, a stale parent-window observation and the first
+  GUI deadline remain recorded. No game or live-library service was available to
+  that closed fixture. This proves a development/synthetic UI path; the installed
+  launcher was not replaced and packaged/installed acceptance remains distinct.
+  M2.4/M3 and eligible verified transformations remain open; no automatic repair.

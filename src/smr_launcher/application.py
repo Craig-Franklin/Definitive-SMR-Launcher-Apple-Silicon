@@ -609,6 +609,19 @@ class LauncherApplication:
             == record.variant_id
         )
 
+    def inspect_map_directory(self, source: Path) -> dict:
+        """Inspect an author's directory without importing or activating it."""
+        source = Path(source)
+        if source.is_symlink() or not source.is_dir():
+            raise ApplicationError("Choose a nonlinked map directory")
+        report = inspect_map(source, Path(self.installation.executable).parents[2])
+        executable = report["game"]["executable"]
+        if not executable or executable["sha256"] != self.installation.executable_sha256:
+            raise ApplicationError(
+                "Game executable changed; reverify the installation before inspection"
+            )
+        return report
+
     def _import_check_inputs(self, record: MapRecord):
         """Bind authored assets, consumed executable/stock and shared analyzer."""
         root = self._prepared_root(record)
