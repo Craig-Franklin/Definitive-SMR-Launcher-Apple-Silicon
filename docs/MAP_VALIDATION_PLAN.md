@@ -402,3 +402,24 @@ or inspection success is a universal compatibility certificate.
   1,831 tests ran: 1,805 passed and 26 skipped. Isolated synthetic native GUI checked
   reporting, edited-input invalidation and failed-recheck clearing. Installed-app
   deployment and the complete M4 workflow remain open.
+
+- **22 October 2026 — Controlled M3 lifecycle exposed a new blocker.** The separately
+  corrected edition equals its sealed intended reference in all four authored
+  files. Its defective counterpart reached the memory guard with sampled frames
+  in the industry allocation consumer; the corrected edition loaded, retained the
+  named food works and production presentation, and fired its authored ownership
+  objective after purchase. A continuation purchased and operated a passenger/mail
+  train, recorded delivery revenue, observed the distinctive authored mail event,
+  created an explicitly named manual save, quit normally, and selected that exact
+  hash-bound save in a fresh process. The reopened world appeared, then opening
+  the Industries report caused a native text-format bounds exception. This fails
+  M3 acceptance. The event's exact numerical modifier/duration, connection
+  objective, continued play after reopening and final normal quit are not accepted.
+  Independent restoration matched all 70 protected roots and two preferences.
+  The earlier corrected session's deadline stop remains a separate partial result.
+  A literal display-name template may leave a city argument unconsumed before the
+  report formats industry size; this is a supported hypothesis, not proof of save
+  corruption or an Apple Silicon engine defect. Next: a fresh report-only test
+  before saving, followed by a separately sealed author-defined reference if the
+  discriminator supports it. Preserve the failed reference and every authored
+  feature; no automatic repair is promoted and all milestone requirements remain.
