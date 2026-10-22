@@ -114,6 +114,26 @@ class InspectionImportIntegrationTests(unittest.TestCase):
         window._show.assert_called_once_with("maps")
         self.assertIn("static findings", window.status.set.call_args.args[0])
 
+    def test_reimport_with_stale_checks_does_not_report_inspection_success(self):
+        (self.stock / "goods.xml").write_text("<RRTGoods><Good/></RRTGoods>")
+        record = self.app.import_archive(self.fixture.archive)
+        self.assertEqual(record, self.record)
+        self.assertIsNone(self.app.import_checks(record))
+        window = NativeBackendWindow.__new__(NativeBackendWindow)
+        window.app = self.app
+        window.close_when_idle = window.closed = False
+        window.status = Mock()
+        window._show = Mock()
+        window._submit = lambda message, operation, callback, **kwargs: callback(operation())
+
+        window._imported(record)
+
+        message = window.status.set.call_args.args[0]
+        self.assertIn("missing or stale", message)
+        self.assertIn("Recheck", message)
+        window._show.assert_called_once_with("maps")
+        self.assertIsNone(self.app.verification_for(record))
+
     def test_cached_admission_refuses_map_change_during_stock_inventory(self):
         acquisition = map_inspection.acquisition
         original = acquisition.inventory

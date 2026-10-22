@@ -525,3 +525,19 @@ or inspection success is a universal compatibility certificate.
   total duration, full expiry/reset and completed decay remain directly unobserved.
   Representative delivery, the connection objective, remaining feature closure and
   full M3/M4 acceptance remain open. No generic event or repair rule is promoted.
+
+- **22 October 2026 — Runtime timing hold and import-report correction.** Two
+  further finite trials quit before loading a map because observed host/control
+  latency left insufficient work time. Both restored independently. The latest
+  first startup observation took about 82 seconds before any large screenshot;
+  smaller screenshots alone are not an established solution. No crash, construction
+  or gameplay acceptance follows. Hold unchanged game trials pending a workable
+  timing path, while pursuing independent resource/default analysis and M4 work.
+  The real reimport consumer also exposed a reporting gap: when changed stock
+  dependencies invalidate a cached inspection, import completion must explicitly
+  say checks are missing or stale and request rechecking. A synthetic changed-stock
+  regression failed before the wording correction and passes afterward. Eight
+  focused integration tests and quality checks pass. This is source evidence only;
+  it neither refreshes a duplicate import automatically nor promotes a repair.
+  Automatic duplicate-import revalidation remains part of M4.3, alongside eligible
+  transformations, installed workflow acceptance and all remaining M3 requirements.

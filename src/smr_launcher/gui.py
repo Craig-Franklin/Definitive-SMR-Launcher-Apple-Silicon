@@ -3174,6 +3174,13 @@ class LauncherWindow:
         app = self.app
 
         def checked(report):
+            if report is None:
+                self.status.set(
+                    result.name + " imported; import checks are missing or stale. "
+                    "Recheck in Map Details → Import Checks. Gameplay is not verified."
+                )
+                self._show("maps")
+                return
             findings = len(report.get("findings", report.get("warnings", []))) if report else 0
             self.status.set(
                 result.name
