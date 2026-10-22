@@ -9,13 +9,13 @@ explains findings and missing coverage, and applies only independently verified,
 feature-preserving fixes to separate editions. The same inspection service must
 work on newly customized map directories without requiring import or activation.
 
-**Current step:** M2.4, establish causal applicability and accept the bounded
-industry rule using the retained controls, real-map evidence and exclusions.
+**Current step:** M3, complete the controlled, feature-preserving correction's
+native acceptance. M2.4 is accepted at the conditional mechanism scope below;
+exact live Liverpool/Manchester object attribution remains unresolved.
 M1 development/backend acceptance is complete. The installed launcher has not
 been replaced, and no new visual or game acceptance is claimed.
 
-**Immediate M2 step:** close the repair eligibility questions exposed by the
-industry-identity intervention. A separate one-key Liverpool and Manchester 2
+**Retained M2 limits:** a separate one-key Liverpool and Manchester 2
 diagnostic now loads a visible world; its original reached the six-GiB guard with
 sampled frames in the inspected allocation consumer. This supports causal
 relevance of the key. Exact live object key/index and effective provider remain
@@ -30,8 +30,8 @@ completed trials restored independently; no automatic repair is eligible yet.
 | --- | --- | --- |
 | M0 | Independent baseline and read-only CLI | Complete foundation. Independent research, exact-build controls, CLI and 221-original collection scan are retained. This does not establish verified repairs or universal compatibility. |
 | M1 | Better evidence coverage and launcher import reports | Complete for source/backend integration and private packaged acceptance. Unknown native selection remains explicit. Installed-app deployment and visual acceptance remain separate from these checks. |
-| M2 | One positively identified industry error class | Active. Bind effective definition, placement, construction and identity consumer; distinguish unused definitions, inherited fields and failed construction. Independently specified valid, defective and counterexample controls plus held-out real-map checks must support exact applicability. |
-| M3 | One feature-preserving repair through native acceptance | Pending. Prove the correction and its complete reference/default closure. Prepare a separate edition, compare authored features, and verify load, representative play, relevant objectives/events, unique save, clean quit, exact reopen, continued play and restoration. No automatic repair promotion before these results. |
+| M2 | One positively identified industry error class | Complete at the bounded conditional native-mechanism scope. Required construction/grouping predicates, independent controls, held-out intervention and loading counterexamples are recorded. Effective live key/index/provider attribution remains unresolved; a static registry miss alone is not confirmed map invalidity. |
+| M3 | One feature-preserving repair through native acceptance | Active, incomplete. Prove the correction and its complete reference/default closure. Prepare a separate edition, compare authored features, and verify load, representative play, relevant objectives/events, unique save, clean quit, exact reopen, continued play and restoration. No automatic repair promotion before these results. |
 | M4 | Import automation and customized-map workflow | Authoring slice complete at development/backend and isolated synthetic GUI scope; verified transformations remain pending M3. Automatically validate all imports. Apply only eligible verified transformations to separate editions; explain ambiguous corrections. Revalidate customized directories and invalidate stale evidence after content/build/dependency changes. The import and authoring paths must use the same rule implementation. |
 
 ### M1 acceptance checklist
@@ -80,9 +80,21 @@ specific question, rather than silently expanding into a new platform.
   Westeros loads; held-out Liverpool and Manchester 2 samples the allocation
   consumer during loading growth. Exact live key/index attribution remains open
   for the M2.4 intervention; this is not confirmed per-map repair applicability.
-- [ ] **M2.4 — Accept the bounded rule.** Bind supported preconditions, independent
+- [x] **M2.4 — Accept the bounded rule.** Bind supported preconditions, independent
   valid/negative/counterexamples and held-out checks. State exclusions. Prepare
   M3 only when an unambiguous feature-preserving candidate is justified.
+
+M2.4 acceptance is conditional on a surviving placed industry-kind1 object,
+successful nonnull animation-proxy construction, a missing exact registry ordinal
+and entry into the inspected grouping consumer on the matched executable/slice.
+Canonical, placed-padding and unused-padding controls, fresh scene-construction
+exclusions, the held-out loading intervention and original Westeros counterexample
+support this scope. A model filename alone does not establish construction. Unknown
+effective providers/defaults, pruning, failed construction, duplicate identities,
+other readers/builds and unread live object attribution remain exclusions or gaps.
+This does not promote a generic trim or alias correction. The controlled M3
+candidate instead reverts an intentionally injected single-key defect to its own
+previously sealed author-intent oracle; every remaining M3 requirement still applies.
 
 ### M4 acceptance checklist
 
@@ -423,3 +435,30 @@ or inspection success is a universal compatibility certificate.
   before saving, followed by a separately sealed author-defined reference if the
   discriminator supports it. Preserve the failed reference and every authored
   feature; no automatic repair is promoted and all milestone requirements remain.
+
+- **22 October 2026 — M2.4 accepted at bounded mechanism scope.** Independent
+  review accepted the explicit precondition/exclusion/evidence matrix against the
+  retained controls and held-out results. Exact live Liverpool/Manchester key,
+  ordinal, proxy and provider remain unread. This closes the conditional error
+  class, not per-map diagnosis or automatic repair eligibility. Reference03 has
+  its own sealed author intent; its correction equals that oracle. The controlled02
+  allocation sample supports the mechanism class. Defective03 has not run, and no
+  native reproduction is claimed for it. The display-template change between
+  references is a new author choice, not a repair of the earlier authored name.
+  Private acceptance record and exact-hash independent review are
+  `M2_RULE_ACCEPTANCE_01.md` and `M2_RULE_ACCEPTANCE_REVIEW_01.md` in the existing case.
+
+- **22 October 2026 — Reference03 remains partially verified.** Its populated
+  owned-industry report worked before and after selecting its first exact manual
+  save. Continued gameplay later reached the second-launch deadline; that normal
+  final quit was not completed. A subsequent continuation observed the authored
+  mail-event notification and a moving train, but an empty consist supplies no
+  delivery evidence. It reached its first-launch guard while the manual-save dialog
+  was still awaiting confirmation. The intended save is absent and no reopen
+  occurred. All failures remain; independent restoration matched 76 protected
+  roots and two preferences. No spontaneous crash is inferred from either guard.
+  Repeated operator timing failures require changing the next discriminator:
+  save and normal quit immediately after loading retained state, before optional
+  gameplay, then exact manual-save reopen, brief persistence/movement checks and
+  early normal quit. This narrow lifecycle test cannot waive remaining delivery,
+  connection-objective, numerical-effect or feature-preservation requirements.
