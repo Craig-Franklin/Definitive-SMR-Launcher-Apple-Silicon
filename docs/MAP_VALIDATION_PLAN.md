@@ -32,7 +32,7 @@ completed trials restored independently; no automatic repair is eligible yet.
 | M1 | Better evidence coverage and launcher import reports | Complete for source/backend integration and private packaged acceptance. Unknown native selection remains explicit. Installed-app deployment and visual acceptance remain separate from these checks. |
 | M2 | One positively identified industry error class | Active. Bind effective definition, placement, construction and identity consumer; distinguish unused definitions, inherited fields and failed construction. Independently specified valid, defective and counterexample controls plus held-out real-map checks must support exact applicability. |
 | M3 | One feature-preserving repair through native acceptance | Pending. Prove the correction and its complete reference/default closure. Prepare a separate edition, compare authored features, and verify load, representative play, relevant objectives/events, unique save, clean quit, exact reopen, continued play and restoration. No automatic repair promotion before these results. |
-| M4 | Import automation and customized-map workflow | Authoring slice in progress alongside M2.4; verified transformations remain pending M3. Automatically validate all imports. Apply only eligible verified transformations to separate editions; explain ambiguous corrections. Revalidate customized directories and invalidate stale evidence after content/build/dependency changes. The import and authoring paths must use the same rule implementation. |
+| M4 | Import automation and customized-map workflow | Authoring slice complete at development/backend and isolated synthetic GUI scope; verified transformations remain pending M3. Automatically validate all imports. Apply only eligible verified transformations to separate editions; explain ambiguous corrections. Revalidate customized directories and invalidate stale evidence after content/build/dependency changes. The import and authoring paths must use the same rule implementation. |
 
 ### M1 acceptance checklist
 
@@ -389,3 +389,16 @@ or inspection success is a universal compatibility certificate.
   that closed fixture. This proves a development/synthetic UI path; the installed
   launcher was not replaced and packaged/installed acceptance remains distinct.
   M2.4/M3 and eligible verified transformations remain open; no automatic repair.
+
+- **22 October 2026 — Controlled M3 reference approved.** Craig selected a controlled
+  custom map with an independently specified correct version for the first complete
+  repair acceptance. Seal the intended reference before injecting a bounded defect.
+  Compare the separate correction against that oracle, including all authored
+  models, production, placements, names, references, objectives, events and effects.
+  This does not promote Liverpool and Manchester 2's alias, reduce M2.4's causal
+  requirements or establish any collection-wide fix. All native gameplay, unique
+  save, clean quit, exact reopen, continued play and restoration requirements stay.
+  M4.1's signed source checkpoint is `268cf844566eba8f429ab157b863fdb33fe8c99c`;
+  1,831 tests ran: 1,805 passed and 26 skipped. Isolated synthetic native GUI checked
+  reporting, edited-input invalidation and failed-recheck clearing. Installed-app
+  deployment and the complete M4 workflow remain open.
