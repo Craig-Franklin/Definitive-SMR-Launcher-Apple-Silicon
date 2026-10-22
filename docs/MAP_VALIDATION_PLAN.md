@@ -9,8 +9,8 @@ explains findings and missing coverage, and applies only independently verified,
 feature-preserving fixes to separate editions. The same inspection service must
 work on newly customized map directories without requiring import or activation.
 
-**Current step:** M2, bind the existing positive/negative industry controls and
-one exact real-map placement to the actual native identity/construction consumer.
+**Current step:** M2.4, establish causal applicability and accept the bounded
+industry rule using the retained controls, real-map evidence and exclusions.
 M1 development/backend acceptance is complete. The installed launcher has not
 been replaced, and no new visual or game acceptance is claimed.
 
@@ -109,6 +109,41 @@ recurring automation. No raw game/map assets, diagnostics or fixtures go into Gi
 Preserve the installed game, originals, saves, profiles, previous research and
 Ghidra projects. Existing mechanical preservation and edition helpers may be
 reused; old semantic policies and recipes require independent evidence.
+
+### Amendment to stale native goal wording
+
+Craig explicitly reaffirmed continuation of this same programme on 22 October
+2026. Preserve the existing persistent goal's identity, creation history and usage
+accounting. The native objective still contains two stale clauses:
+
+- **“Start M1”** is historical. M1 and M2.1–M2.3 are complete only at their recorded
+  verification scopes. Continue from M2.4. Do not restart the independent baseline,
+  completed decompilation or 221-map scan without a changed evidence need.
+- **“No publication, uploads”** is superseded only for signed commits and pushes
+  of reviewed original source, synthetic tests and documentation. Binaries,
+  assets, extracted data, pseudocode, disassembly, databases, raw diagnostics,
+  real-map fixtures, profiles, saves and Ghidra projects remain private and outside
+  Git. No PR, release or external raw-artifact upload is authorized.
+
+All remaining acceptance stays intact. M2.4 must establish causal applicability,
+preconditions, counterexamples and exclusions; the exact live key/index remains
+unobserved, and original Westeros remains a loading counterexample. M3 requires an
+independently justified separate edition preserving authored models, production,
+placements, names, references, objectives, events and effects, followed by loading,
+representative gameplay, relevant objective/event checks, an explicitly named
+unique save, clean quit, exact-save reopen, continued play and restoration. M4
+must integrate only eligible verified transformations into imports and use the
+same inspection service for customized directories, retaining provenance,
+changed-input invalidation and distinct finding/coverage categories.
+
+The installed host protocol treats a different objective as a replacement that
+resets usage accounting. Therefore retain the native objective and apply this
+amendment through this authoritative plan and the private resume record. Resume
+the same goal with a status-only operation, omitting objective and budget changes;
+verify its returned status and unchanged identity/history. A saved “active” label
+is not proof of live resumption. See the
+[host goal protocol](https://learn.chatgpt.com/docs/app-server#manage-a-thread-goal).
+No checkpoint, test, review, commit or successful load completes the programme.
 
 ## Repair promotion rules
 
