@@ -496,3 +496,32 @@ or inspection success is a universal compatibility certificate.
   and GUI-timing failures require their actual causes addressed. This exception
   does not authorize new paid services, broader recurring automation or relaxing
   any preservation, privacy, signing, runtime or repair acceptance requirement.
+
+- **22 October 2026 — Packaged authoring inspection.** A fresh private development
+  app, built with existing prerequisites, exercised the production native frontend
+  and bundled inspection service against the installed game and the sealed
+  controlled edition. The visible report identified the input, executable, analyzer
+  and stock identities, unresolved references and unimplemented checks, with runtime
+  acceptance explicitly untested. Normal quit and independent checks preserved all
+  78 protected roots, catalogue and active-profile state. The installed app was not
+  replaced. This advances M4.1 package evidence; M4.2 eligible repairs and M4.3's
+  complete import/deployed workflow remain open.
+- **22 October 2026 — Remaining gameplay obstacle narrowed.** Two fresh, closed
+  controlled-edition continuations retained useful cargo observations but completed
+  no delivery or Allentown connection. Both quit normally and restored independently;
+  their timing misses remain recorded. The later run created its uniquely named
+  manual save. The Mac port's enabled arrow/WASD swap explains one navigation key
+  selecting a construction tool; the corresponding movement key visibly panned the
+  camera while paused. Use this observed control in the next bounded construction
+  procedure. Do not repeat ineffective zoom/minimap-preview navigation or treat an
+  operator deadline or input problem as a map crash.
+- **22 October 2026 — Mail numerical-state evidence.** Bounded native parser,
+  marketplace consumer and save/load traces were checked against installed bytes.
+  Independently decoded retained native saves show an applied Mail multiplier and
+  a decreasing remaining counter across the exact manual reopen and subsequent
+  autosaves. Whole-save hashes and the second process interval bind these reads.
+  The authored headline alone would not establish an effect; the retained numerical
+  state supplies stronger application and persistence evidence. Original sampled
+  total duration, full expiry/reset and completed decay remain directly unobserved.
+  Representative delivery, the connection objective, remaining feature closure and
+  full M3/M4 acceptance remain open. No generic event or repair rule is promoted.
