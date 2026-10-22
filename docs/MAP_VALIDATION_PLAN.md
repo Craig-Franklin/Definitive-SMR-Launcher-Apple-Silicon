@@ -13,7 +13,8 @@ work on newly customized map directories without requiring import or activation.
 native acceptance. M2.4 is accepted at the conditional mechanism scope below;
 exact live Liverpool/Manchester object attribution remains unresolved.
 M1 development/backend acceptance is complete. The installed launcher has not
-been replaced, and no new visual or game acceptance is claimed.
+been replaced. M3's recorded native observations and narrow lifecycle pass remain
+separate from complete repair acceptance.
 
 **Retained M2 limits:** a separate one-key Liverpool and Manchester 2
 diagnostic now loads a visible world; its original reached the six-GiB guard with
@@ -462,3 +463,36 @@ or inspection success is a universal compatibility certificate.
   gameplay, then exact manual-save reopen, brief persistence/movement checks and
   early normal quit. This narrow lifecycle test cannot waive remaining delivery,
   connection-objective, numerical-effect or feature-preservation requirements.
+
+- **22 October 2026 — Reference03 narrow lifecycle passed.** A fresh binding
+  changed the procedure to save before optional gameplay. The explicitly named
+  manual save was created, hashed and followed by a normal quit after about
+  130 seconds. After 58.5 seconds of observed absence, a fresh process selected
+  that exact manual save. The railway, depot and train persisted; the train moved
+  in both directions as the date advanced. The populated owned-industry report
+  retained its authored name, model and Grain-to-Food presentation. Final normal
+  quit completed after about 292 seconds, beyond the 240-second operational target
+  but within the unchanged 600-second guard. No guard-stop signal was needed.
+  Independent restoration matched 77 protected roots and both preferences; manual
+  save bytes remained unchanged. A missing execution argument initially caused
+  refusal before preflight; that invocation and its corrected-argument successor
+  remain separate records. This closes the narrow save/quit/exact-reopen/continued-
+  movement discriminator, not M3. Delivery/revenue, the New York–Trenton objective,
+  numerical event effects and full feature/default/reference closure remain open.
+  Do not repeat this lifecycle merely because older checkpoints call it the next
+  step. Survey actual supply, demand and a costed connection route before the next
+  gameplay trial; preserve the sealed map and reserve save/quit time explicitly.
+
+- **22 October 2026 — Bounded advisory exception.** Craig authorized a separate
+  lightweight watchdog and at most one active GPT-6 Astra specialist when needed.
+  The primary agent retains sole source, application, runtime, Ghidra, goal and
+  acceptance ownership. Watchdog advice is assessed against current evidence at
+  safe boundaries and is not acceptance evidence. Use an existing suitable
+  specialist where available; no duplicate reviewers or worker swarms. Native
+  uncertainty should receive one bounded question, exact evidence, counterevidence
+  and a discriminating next step. Verify actual requested model/effort through host
+  metadata. After two unsuccessful reasoning attempts or roughly fifteen minutes
+  without a decision-changing result, change approach or escalate. Tool, permission
+  and GUI-timing failures require their actual causes addressed. This exception
+  does not authorize new paid services, broader recurring automation or relaxing
+  any preservation, privacy, signing, runtime or repair acceptance requirement.
