@@ -541,3 +541,22 @@ or inspection success is a universal compatibility certificate.
   it neither refreshes a duplicate import automatically nor promotes a repair.
   Automatic duplicate-import revalidation remains part of M4.3, alongside eligible
   transformations, installed workflow acceptance and all remaining M3 requirements.
+
+- **22 October 2026 — Bounded default/merge evidence.** Installed-byte checks
+  distinguish empty selected tree/clutter fields from failed resources: the native
+  wrappers attempt their defaults first; successful resolution remains separate.
+  The controlled industry's nonempty production, name and placement lists replace
+  inherited lists at the inspected branches. Four omitted scalar settings retain
+  inherited values; the inspected loose default supplies constructor defaults,
+  while its effective provider remains unproved. An explicit icon reference also
+  does not prove successful texture replacement. These bounded findings narrow
+  feature closure without promoting a general merge rule or automatic repair.
+- **22 October 2026 — Direct-turn trial closed.** Removing avoidable observation
+  turns reached the exact saved world in about 70 seconds. A visible route quote
+  exceeded available funds; no construction occurred. The uniquely named manual
+  continuation save was created, then normal quit completed after about 300 seconds.
+  That save has not been reopened. Independent restoration matched 82 protected
+  roots and both preferences. Initial accessibility-diff and screenshot-format
+  assumptions failed and were corrected without using invalid dimensions for input.
+  The next discriminator is quoted in-game financing and an affordable track/depot
+  connection on a fresh bounded continuation. Full M3/M4 acceptance remains open.
