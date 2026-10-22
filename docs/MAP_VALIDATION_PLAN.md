@@ -14,14 +14,14 @@ one exact real-map placement to the actual native identity/construction consumer
 M1 development/backend acceptance is complete. The installed launcher has not
 been replaced, and no new visual or game acceptance is claimed.
 
-**Immediate M2 step:** bind a held-out case with an explicit animation model and
-city placement. Exact original Westeros reached a visible world; retain that native
-counterexample rather than treating registry nonmembership as a loading failure.
-Its paired-name candidate remains preserved and imported, but unexecuted and
-unpromoted. The bounded observer handled the actual exit transition, and independent
-restoration checks passed. Next investigate existing shortlist collection 105,
-Liverpool and Manchester 2, after matching its input, model and city dependencies.
-Its failure and any feature-preserving correction remain hypotheses.
+**Immediate M2 step:** establish a discriminating industry-identity intervention
+without changing inherited defaults, authored production, placements, references or
+presentation. Exact original Liverpool and Manchester 2 reached the six-GiB guard
+during loading; a native sample places its game thread in the inspected industry
+animation-group allocation consumer. The exact live object key/index was not read,
+so attribution to its unregistered definition still needs intervention evidence.
+Original Westeros remains the native loading counterexample. Both trials restored
+independently; no correction or automatic repair is promoted.
 
 ## Milestones and observable acceptance
 
@@ -72,10 +72,13 @@ specific question, rather than silently expanding into a new platform.
   complete-model placed/unused controls. Observe native results through a fresh
   bounded controller; preserve ownership, memory limits and restoration. Existing
   canonical evidence can be reused after correspondence checks.
-- [ ] **M2.3 — Establish real-map applicability.** Resolve the selected definition,
+- [x] **M2.3 — Establish real-map applicability.** Resolve the selected definition,
   omitted fields, placement and construction far enough to identify the actual
   failing consumer or retain a specific unresolved question. A table miss alone
-  is insufficient; record any change of held-out case and its reason.
+  is insufficient; record any change of held-out case and its reason. Original
+  Westeros loads; held-out Liverpool and Manchester 2 samples the allocation
+  consumer during loading growth. Exact live key/index attribution remains open
+  for the M2.4 intervention; this is not confirmed per-map repair applicability.
 - [ ] **M2.4 — Accept the bounded rule.** Bind supported preconditions, independent
   valid/negative/counterexamples and held-out checks. State exclusions. Prepare
   M3 only when an unambiguous feature-preserving candidate is justified.
@@ -269,3 +272,22 @@ or inspection success is a universal compatibility certificate.
   next failing-case hypothesis because it declares an animation model, city flag
   and placements. Bind its exact resources and construction first. This changes
   the held-out case within M2.3, not the milestone or repair acceptance criteria.
+
+- **22 October 2026 — M2.3 native consumer located.** All 121 original archive
+  files and 119 game assets of Liverpool and Manchester 2 matched before its fresh
+  trial. Selected setup: 1832–1930, Investor, Hard routing, zero AI. Loading growth
+  reached 6,503,041,480 observed footprint bytes before the six-GiB guard stopped
+  the owned process. One unprivileged native sample completed successfully. Its
+  matched-UUID, explicitly image-relative frames map to the inspected animation
+  grouping function, including the allocation and vector-growth return sites.
+  The report identifies x86-64 execution through Rosetta; unknown translated frames
+  remain unmapped. This identifies the actual native consumer, not the exact live
+  key/index or a spontaneous crash. Independent restoration matched 55 protected
+  roots and both preferences; Original is active, no game/transaction remains,
+  and scratch saves are absent. Pre-launch review caught sampler cleanup and
+  fresh-observation memory-limit gaps; failing controls, bounded corrections and
+  accepted correction review are retained. Four additional native functions
+  establish the checked default filename initializer; provider selection and
+  alias inheritance remain conditional. M2.3 is complete at its consumer-location
+  scope. Next M2.4: discriminate the suspected identity while preserving defaults,
+  references and presentation. No repair, gameplay or save/reopen acceptance.
