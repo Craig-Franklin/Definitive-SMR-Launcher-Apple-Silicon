@@ -14,12 +14,14 @@ one exact real-map placement to the actual native identity/construction consumer
 M1 development/backend acceptance is complete. The installed launcher has not
 been replaced, and no new visual or game acceptance is claimed.
 
-**Immediate M2 step:** establish real-map construction/default applicability. The
-complete-model padded placed control failed loading with guarded memory growth;
-the unused padded control reached a visible world. Both are restored and checked.
-Westeros has omitted model fields, so its animation failure remains conditional.
-The new trial did not capture an allocation-site sample. Correct the observer exit
-transition before any future launch; no normalization or repair is promoted.
+**Immediate M2 step:** compare the exact original real map with a separate candidate
+after integrating and checking the bounded process observer in a fresh controller.
+Static construction research limits the animation hazard to eligible actors; the
+selected real map's omitted model fields keep that diagnosis conditional. Reference
+research found a linked ownership objective: the prepared candidate changes both
+typed names and preserves all 19 conditions and both affected placements. It has
+not been imported, activated or run. Native provider selection, actual failure and
+feature preservation remain unresolved; no repair is promoted.
 
 ## Milestones and observable acceptance
 
@@ -223,3 +225,29 @@ or inspection success is a universal compatibility certificate.
   Checkpoint the existing coherent CLI/import implementation on its feature
   branch with configured signing and verified target identity. Preserve review,
   test and package limits; a pushed checkpoint does not complete the programme.
+
+- **22 October 2026 — First signed source checkpoint pushed.** Commit
+  `51a70ea2dd07f3bc257e7f8d7ef3028609fd4db3` is on
+  `codex/map-validator-cli-20261022`; GitHub reports a valid Verified signature.
+  The rebased source passed 1,826 tests with 26 skipped and the quality check.
+  The feature push did not trigger the main/PR workflow. No PR, release or
+  installed-app replacement occurred. Private evidence remains local.
+
+- **22 October 2026 — M2.3 reference closure checkpoint.** Fresh-scene construction
+  does not establish the actor-manager prerequisite of the controlled animation
+  hazard. The selected real map therefore remains a conditional diagnosis.
+  Ownership objectives compare typed industry names without ASCII case sensitivity;
+  the fixed registry uses exact spelling. Renaming only the definition would break
+  the retained padded objective reference. A separate prepared candidate changes
+  exactly two typed values in two of 14 files, preserving all 19 conditions and
+  both affected placements. Six additional native functions, 1,487 instructions
+  and 6,463 printed bytes matched the installed executable; a primary import check
+  independently confirmed the comparator identity. Save/load keeps the objective
+  identity fields; no existing-save migration is claimed. Independent review found
+  a preparer source race. A negative mutation control reproduced it, and the
+  corrected verified-read/fence implementation refused the changed input. The same
+  reviewer checked the bounded correction and candidate hashes. A read-only
+  observer primitive passed seven controls; caller integration/native behavior
+  remain untested. Next: fresh controller integration, then exact original and
+  candidate native loading comparison. No source rule change, new game run or
+  verified repair occurred at this checkpoint.
