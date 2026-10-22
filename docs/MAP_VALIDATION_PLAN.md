@@ -14,14 +14,14 @@ one exact real-map placement to the actual native identity/construction consumer
 M1 development/backend acceptance is complete. The installed launcher has not
 been replaced, and no new visual or game acceptance is claimed.
 
-**Immediate M2 step:** compare the exact original real map with a separate candidate
-after integrating and checking the bounded process observer in a fresh controller.
-Static construction research limits the animation hazard to eligible actors; the
-selected real map's omitted model fields keep that diagnosis conditional. Reference
-research found a linked ownership objective: the prepared candidate changes both
-typed names and preserves all 19 conditions and both affected placements. It has
-not been imported, activated or run. Native provider selection, actual failure and
-feature preservation remain unresolved; no repair is promoted.
+**Immediate M2 step:** bind a held-out case with an explicit animation model and
+city placement. Exact original Westeros reached a visible world; retain that native
+counterexample rather than treating registry nonmembership as a loading failure.
+Its paired-name candidate remains preserved and imported, but unexecuted and
+unpromoted. The bounded observer handled the actual exit transition, and independent
+restoration checks passed. Next investigate existing shortlist collection 105,
+Liverpool and Manchester 2, after matching its input, model and city dependencies.
+Its failure and any feature-preserving correction remain hypotheses.
 
 ## Milestones and observable acceptance
 
@@ -251,3 +251,21 @@ or inspection success is a universal compatibility certificate.
   remain untested. Next: fresh controller integration, then exact original and
   candidate native loading comparison. No source rule change, new game run or
   verified repair occurred at this checkpoint.
+
+- **22 October 2026 — M2.3 native counterexample and case-selection decision.**
+  Exact original Westeros reached a visible world in January 1830 at the selected
+  1830–1970, Investor, Hard routing, zero-AI setup. Sampled maximum footprint was
+  1,490,168,424 bytes. It exited after normal Quit confirmation. The bounded
+  observer resolved one unreadable exit identity to independently observed absence
+  on its next attempt, about 57 milliseconds later. Post-quit capture failed;
+  that failure remains, without repeated input or permission changes. Controller
+  restoration completed; independent readback matched 51 protected roots and both
+  preferences. Original is active, no game/transaction remains, and this scratch
+  save inventory is empty. Loading does not establish intact industries,
+  objectives/events, gameplay or save/reopen compatibility. The paired-name
+  candidate is preserved/imported and unexecuted; it is not an established loading
+  repair. Keep this map as a native counterexample to the overbroad registry rule.
+  Select existing shortlist collection 105, Liverpool and Manchester 2, for the
+  next failing-case hypothesis because it declares an animation model, city flag
+  and placements. Bind its exact resources and construction first. This changes
+  the held-out case within M2.3, not the milestone or repair acceptance criteria.
