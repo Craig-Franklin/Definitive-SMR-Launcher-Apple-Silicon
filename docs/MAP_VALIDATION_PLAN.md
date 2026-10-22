@@ -14,14 +14,15 @@ industry rule using the retained controls, real-map evidence and exclusions.
 M1 development/backend acceptance is complete. The installed launcher has not
 been replaced, and no new visual or game acceptance is claimed.
 
-**Immediate M2 step:** establish a discriminating industry-identity intervention
-without changing inherited defaults, authored production, placements, references or
-presentation. Exact original Liverpool and Manchester 2 reached the six-GiB guard
-during loading; a native sample places its game thread in the inspected industry
-animation-group allocation consumer. The exact live object key/index was not read,
-so attribution to its unregistered definition still needs intervention evidence.
-Original Westeros remains the native loading counterexample. Both trials restored
-independently; no correction or automatic repair is promoted.
+**Immediate M2 step:** close the repair eligibility questions exposed by the
+industry-identity intervention. A separate one-key Liverpool and Manchester 2
+diagnostic now loads a visible world; its original reached the six-GiB guard with
+sampled frames in the inspected allocation consumer. This supports causal
+relevance of the key. Exact live object key/index and effective provider remain
+unobserved. Keeping authored display templates does not establish generic-menu
+name preservation. Resolve defaults, references and presentation before promoting
+a correction. Original Westeros remains the native loading counterexample. All
+completed trials restored independently; no automatic repair is eligible yet.
 
 ## Milestones and observable acceptance
 
@@ -326,3 +327,24 @@ or inspection success is a universal compatibility certificate.
   alias inheritance remain conditional. M2.3 is complete at its consumer-location
   scope. Next M2.4: discriminate the suspected identity while preserving defaults,
   references and presentation. No repair, gameplay or save/reopen acceptance.
+
+- **22 October 2026 — M2.4 one-key intervention loaded.** The separate diagnostic
+  changed one definition identity; 120 other files, all directory membership and
+  original trial settings matched. At the same selected scenario setup it reached
+  a rendered world in January 1832, with maximum observed footprint 1,522,285,016
+  bytes. Original loading reached 6,503,041,480 bytes before its guard stop. The
+  diagnostic exited through normal Quit confirmation. Independent readback matched
+  60 protected roots and both preferences; Original is active, no game/transaction
+  remains, and no scratch save exists. A first attempt expired at setup before
+  loading input; that orchestration failure and its restoration remain recorded.
+  A fresh reviewed binding and immediate setup changed the retry approach without
+  extending the four-minute or six-GiB bounds. Post-quit capture failure remains.
+  This intervention supports the key's causal relevance but does not directly
+  observe its live ordinal/provider or prove alias equivalence.
+  Further checked native consumers distinguish internal identity, authored display
+  templates and serialized fields. Generic build-menu text consumes the internal
+  key; preserving display templates alone cannot discharge authored-name
+  preservation. M2.4 remains open while eligibility and exclusions are reviewed;
+  M3 still requires an independently justified feature-preserving separate edition
+  and every gameplay/objective/event/save/reopen/restoration requirement. No new
+  rule category, verified repair or automatic transformation is promoted.
