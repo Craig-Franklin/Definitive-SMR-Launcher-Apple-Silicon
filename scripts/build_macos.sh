@@ -41,6 +41,14 @@ print -r -- "{\"schema\":1,\"team_id\":\"${SMR_APPLE_TEAM_ID:-}\",\"repository\"
   --add-binary "$PWD/build/smr-translate:." \
   --add-data "$PWD/Definitive-SMR-Launcher/DSMRL_data/RRT_Difficulty.xml:Definitive-SMR-Launcher/DSMRL_data" \
   --add-data "$PWD/build/release-policy.json:." \
+  --add-data "$PWD/src/smr_launcher/map_inspection.py:smr_launcher" \
+  --add-data "$PWD/src/smr_launcher/inspection_io.py:smr_launcher" \
+  --add-data "$PWD/src/smr_launcher/map_inspect.py:smr_launcher" \
+  --add-data "$PWD/src/smr_launcher/industry_registry.py:smr_launcher" \
+  --add-data "$PWD/src/smr_launcher/model_checks.py:smr_launcher" \
+  --add-data "$PWD/src/smr_launcher/resource_identity.py:smr_launcher" \
+  --add-data "$PWD/src/smr_launcher/packages.py:smr_launcher" \
+  --add-data "$PWD/src/smr_launcher/extraction.py:smr_launcher" \
   "${signing[@]}" \
   --distpath "$dist_root" --workpath build/pyinstaller --specpath build/spec \
   scripts/launcher_entry.py

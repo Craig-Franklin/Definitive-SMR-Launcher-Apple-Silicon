@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 import test_application as fixtures
-from smr_launcher import import_checks, model_checks
+from smr_launcher import map_inspection
 
 
 class ImportCheckFreshnessTests(unittest.TestCase):
@@ -17,17 +17,17 @@ class ImportCheckFreshnessTests(unittest.TestCase):
         self.fixture.setUp()
         self.addCleanup(self.fixture.doCleanups)
         self.app = self.fixture.application
-        executable = self.fixture.root / "game/Game.app/Contents/MacOS/game"
+        executable = self.fixture.root / "game/Game.app/Contents/MacOS/Sid Meiers Railroads"
         executable.parent.mkdir(parents=True)
         executable.write_bytes(b"test game")
         self.fixture.installation.executable = executable
-        self.stock = executable.parents[1] / "Resources"
-        self.stock.mkdir()
+        self.stock = executable.parents[3] / "SMRailroadsData/assets"
+        self.stock.mkdir(parents=True)
         with tarfile.open(self.fixture.archive, "w") as stream:
             for name, data in (
                 (
                     "UserMaps/Example/RRT_Scenario_User_Example.xml",
-                    b"<Scenario><Reference>invented-stock.xml</Reference></Scenario>",
+                    b"<RRTScenario><GoodsXMLFile>invented-stock.xml</GoodsXMLFile></RRTScenario>",
                 ),
                 ("CustomAssets/Example.txt", b"map asset"),
             ):
@@ -57,16 +57,22 @@ class ImportCheckFreshnessTests(unittest.TestCase):
 
     def test_stock_name_change_invalidates_then_recheck_updates_warning(self):
         initial = self.app.import_checks(self.record)
-        self.assertIn("invented-stock.xml", "\n".join(initial["warnings"]))
+        self.assertEqual(
+            initial["scenarios"][0]["reference_fields"][0]["reason"], "no_loose_candidate"
+        )
         stock = self.stock / "invented-stock.xml"
         stock.write_bytes(b"<InventedStock/>")
         self.assertIsNone(self.app.import_checks(self.record))
         current = self.app.import_checks(self.record, refresh=True)
-        self.assertNotIn("invented-stock.xml", "\n".join(current["warnings"]))
+        self.assertEqual(
+            current["scenarios"][0]["reference_fields"][0]["reason"], "unique_loose_candidate"
+        )
         stock.unlink()
         self.assertIsNone(self.app.import_checks(self.record))
         final = self.app.import_checks(self.record, refresh=True)
-        self.assertIn("invented-stock.xml", "\n".join(final["warnings"]))
+        self.assertEqual(
+            final["scenarios"][0]["reference_fields"][0]["reason"], "no_loose_candidate"
+        )
 
     def test_missing_or_changed_contract_binding_is_not_current(self):
         original = self.report_path.read_bytes()
@@ -77,7 +83,7 @@ class ImportCheckFreshnessTests(unittest.TestCase):
         self.assertIsNone(self.app.import_checks(self.record))
         self.assertEqual(self.report_path.read_bytes(), before)
         self.report_path.write_bytes(original)
-        with patch.object(import_checks, "IMPORT_CHECKS_VERSION", "different-contract"):
+        with patch.object(map_inspection, "VERSION", "different-contract"):
             self.assertIsNone(self.app.import_checks(self.record))
         self.assertEqual(self.report_path.read_bytes(), original)
 
@@ -87,10 +93,10 @@ class ImportCheckFreshnessTests(unittest.TestCase):
         (profile / "Saves/current.sav").write_bytes(b"invented current save")
         (profile / "Saves/future.sav").write_bytes(b"invented future save")
         preserved = self.fixture.snapshot_files(profile)
-        scanner = import_checks.inspect_map
+        scanner = map_inspection.inspect_map
 
-        def change_stock_after_scan(*args):
-            result = scanner(*args)
+        def change_stock_after_scan(*args, **kwargs):
+            result = scanner(*args, **kwargs)
             (self.stock / "appeared.xml").write_bytes(b"<Invented/>")
             return result
 
@@ -100,34 +106,37 @@ class ImportCheckFreshnessTests(unittest.TestCase):
         self.assertEqual(self.report_path.read_bytes(), before)
         self.assertEqual(self.fixture.snapshot_files(profile), preserved)
 
-    def test_directory_membership_binds_model_budget_but_directory_mtime_does_not(self):
+    def test_directory_metadata_and_membership_bind_scoped_inventory_budget(self):
         custom = self.app._prepared_root(self.record) / "CustomAssets"
         custom.chmod(0o700)
-        with patch.object(model_checks, "MAX_TREE_ENTRIES", 3):
+        limits = dict(
+            max_entries=5, max_total_bytes=1024 * 1024, max_file_bytes=1024 * 1024, max_depth=64
+        )
+        with patch.object(map_inspection, "inventory_limits", return_value=limits):
             initial = self.app.import_checks(self.record, refresh=True)
-            self.assertTrue(initial["model_headers"]["complete"])
             info = custom.stat()
             os.utime(custom, ns=(info.st_atime_ns, info.st_mtime_ns + 1_000_000_000))
-            self.assertEqual(self.app.import_checks(self.record), initial)
+            self.assertIsNone(self.app.import_checks(self.record))
+            current = self.app.import_checks(self.record, refresh=True)
+            self.assertNotEqual(initial["input_binding"], current["input_binding"])
+            before = self.report_path.read_bytes()
             empty = custom / "empty-directory"
             empty.mkdir()
-            self.assertIsNone(self.app.import_checks(self.record))
-            incomplete = self.app.import_checks(self.record, refresh=True)
-            self.assertFalse(incomplete["model_headers"]["complete"])
-            self.assertIn("Model scan incomplete", "\n".join(incomplete["warnings"]))
+            with self.assertRaisesRegex(RuntimeError, "entry limit"):
+                self.app.import_checks(self.record, refresh=True)
+            self.assertEqual(self.report_path.read_bytes(), before)
             empty.rmdir()
-            self.assertIsNone(self.app.import_checks(self.record))
-            complete = self.app.import_checks(self.record, refresh=True)
-            self.assertTrue(complete["model_headers"]["complete"])
+            restored = self.app.import_checks(self.record, refresh=True)
+            self.assertEqual(restored["status"], "completed")
 
     def test_directory_added_during_scan_preserves_prior_report(self):
         custom = self.app._prepared_root(self.record) / "CustomAssets"
         custom.chmod(0o700)
         before = self.report_path.read_bytes()
-        scanner = import_checks.inspect_map
+        scanner = map_inspection.inspect_map
 
-        def add_directory_after_scan(*args):
-            result = scanner(*args)
+        def add_directory_after_scan(*args, **kwargs):
+            result = scanner(*args, **kwargs)
             (custom / "appeared-during-scan").mkdir()
             return result
 

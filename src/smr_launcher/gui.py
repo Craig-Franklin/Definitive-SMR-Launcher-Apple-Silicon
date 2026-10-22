@@ -88,6 +88,10 @@ MAC_TEST_LABELS = dict(
 
 
 def _checks_text(report):
+    if report is not None and report.get("schema") == 2:
+        from .map_inspection import report_text
+
+        return report_text(report)
     if report is None:
         return "No current static report. Choose Run Import Checks. Gameplay remains unverified until a Mac play test is recorded."
     findings = report["warnings"]
@@ -3170,7 +3174,7 @@ class LauncherWindow:
         app = self.app
 
         def checked(report):
-            findings = len(report["warnings"]) if report else 0
+            findings = len(report.get("findings", report.get("warnings", []))) if report else 0
             self.status.set(
                 result.name
                 + (

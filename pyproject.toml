@@ -12,6 +12,9 @@ license = {file = "APPLE_SILICON_LICENSE.md"}
 authors = [{name = "Craig Franklin"}]
 dependencies = []
 
+[project.scripts]
+smr-map = "smr_launcher.map_inspect:main"
+
 [project.gui-scripts]
 smr-launcher-mac = "smr_launcher.gui:main"
 

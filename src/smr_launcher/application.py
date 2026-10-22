@@ -54,9 +54,9 @@ from .scenario_evidence import (
 )
 from .collection import RemoteMap
 from .map_metadata import MapMetadata, read_map_metadata, read_scenario_labels
-from . import import_checks, removal, compact_library
+from . import removal, compact_library
 from .cold_storage import ColdStorage, _checkpoint
-from .import_checks import inspect_map
+from .map_inspection import inspect_map, input_binding
 from .launch_preferences import prepare_settings
 from .resource_identity import ContentHashCache, fingerprint_resources
 from .map_issues import MapIssueStore
@@ -610,66 +610,36 @@ class LauncherApplication:
         )
 
     def _import_check_inputs(self, record: MapRecord):
-        """Bind supported checks; stock content/precedence is not inspected."""
+        """Bind authored assets, consumed executable/stock and shared analyzer."""
         root = self._prepared_root(record)
-        _assert_regular_tree(root)
         executable = getattr(self.installation, "executable", None)
-        stock_roots = (
-            (
-                executable.parents[1] / "Resources",
-                executable.parents[3] / "SMRailroadsData/assets/xml",
-            )
-            if executable
-            else ()
-        )
-        stock = {
-            p.name.casefold()
-            for root in stock_roots
-            for p in root.rglob("*")
-            if p.suffix.casefold() == ".xml" and p.is_file()
-        }
-        snapshot = fingerprint_resources(
-            {"custom_assets": root / "CustomAssets", "user_maps": root / "UserMaps"},
-            hash_cache=self._resource_hash_cache,
-        )
-        # The model scanner counts directory entries toward its budget. Bind
-        # their membership, but not directory mtimes that no check consumes.
-        map_inputs = [
-            dict(
-                role=scope["role"],
-                entries=[
-                    entry if entry["kind"] == "file" else dict(kind="directory", path=entry["path"])
-                    for entry in scope["entries"]
-                ],
-            )
-            for scope in snapshot["roots"]
-        ]
-        binding = dict(
-            analyzer=import_checks.IMPORT_CHECKS_VERSION,
-            map_resources_sha256=hashlib.sha256(
-                json.dumps(map_inputs, sort_keys=True, separators=(",", ":")).encode()
-            ).hexdigest(),
-            stock_xml_names_sha256=hashlib.sha256(
-                json.dumps(sorted(stock), separators=(",", ":")).encode()
-            ).hexdigest(),
-        )
-        return root, stock, binding
+        game = Path(executable).parents[2] if executable is not None else None
+        binding = input_binding(root, game, scopes=("CustomAssets", "UserMaps"))
+        return root, game, binding
 
     def _write_import_checks(self, record: MapRecord) -> dict:
         if record.game_executable_sha256 != self.installation.executable_sha256:
             raise ApplicationError(
                 "Import checks require a map prepared for the current game build"
             )
-        root, stock, binding = self._import_check_inputs(record)
-        report = inspect_map(root, stock)
+        root, game, binding = self._import_check_inputs(record)
+        if (
+            binding["executable"]
+            and binding["executable"]["sha256"] != self.installation.executable_sha256
+        ):
+            raise ApplicationError(
+                "Game executable changed; reverify the installation before inspection"
+            )
+        report = inspect_map(root, game, scopes=("CustomAssets", "UserMaps"))
         report.update(
+            schema=2,
             variant_id=record.variant_id,
             archive_sha256=record.archive_sha256,
             game_executable_sha256=record.game_executable_sha256,
             assets_sha256=self.profiles._asset_hash(root),
             checked_at=datetime.now(timezone.utc).isoformat(),
             input_binding=binding,
-            input_scope="Prepared map file bytes/timestamps, directory membership and loose stock XML basenames only; dependency coverage is partial, not native provider resolution.",
+            input_scope="Prepared CustomAssets/UserMaps only; excludes saves, settings and logs. Consumed executable, loose stock bytes/metadata and analyzer are bound. Candidate resources are not native provider resolution.",
         )
         if self._import_check_inputs(record)[2] != binding:
             raise ApplicationError("Import-check inputs changed during the scan; recheck required")
@@ -699,7 +669,9 @@ class LauncherApplication:
                 return None
             report = json.loads(path.read_text())
             if (
-                report.get("schema") != 1
+                report.get("schema") != 2
+                or report.get("schema_version") != 1
+                or report.get("status") != "completed"
                 or report.get("variant_id") != record.variant_id
                 or report.get("archive_sha256") != record.archive_sha256
                 or report.get("game_executable_sha256") != self.installation.executable_sha256
