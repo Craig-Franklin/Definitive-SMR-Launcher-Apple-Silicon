@@ -9,7 +9,9 @@ explains findings and missing coverage, and applies only independently verified,
 feature-preserving fixes to separate editions. The same inspection service must
 work on newly customized map directories without requiring import or activation.
 
-**Current step:** F3, the separately approved fresh-install follow-on below.
+**Current step:** F1–F5 accepted for the separately approved fresh-install
+follow-on below. This final documentation checkpoint records the audit; native
+goal completion follows its signed remote publication and status readback.
 The original M0–M4 programme is complete at its recorded scopes; its goal completion
 and signed source publication are retained. Craig approved a new persistent goal
 on 23 October 2026 for fresh-state GUI acceptance, PR/merge and the resulting
@@ -801,14 +803,14 @@ repeat the completed research, collection scan or native programme.
   import/reimport, ordinary original-India inspection and launcher quit/reopen.
   Preserve original test archives; confirm the exact separate controlled correction
   and honest untested status. No game activation or Play is required.
-- [ ] **F3 — Reviewed integration.** Create the authorized PR, pass exact-head
+- [x] **F3 — Reviewed integration.** Create the authorized PR, pass exact-head
   checks/review, and squash-merge linearly with signing and target safeguards.
   The approved merge may trigger the maintained public signed-release workflow.
-- [ ] **F4 — Exact release acceptance.** Verify the merged source, signed/notarized
+- [x] **F4 — Exact release acceptance.** Verify the merged source, signed/notarized
   release artifact and installed executable identities. Use another empty launcher
   state for a short real GUI import and persistence check; do not reuse rehearsal
   reports or verification history.
-- [ ] **F5 — Finish cleanly.** Verify excluded data and finite-job closure, leave the
+- [x] **F5 — Finish cleanly.** Verify excluded data and finite-job closure, leave the
   accepted release installed, report published state and remaining compatibility
   limits, and audit every follow-on requirement before completing its goal.
 
@@ -831,3 +833,50 @@ release F3/F4 artifact delivery 30%, installed release GUI acceptance/final audi
   normally; independent readback preserved captured external data and left Original
   active with empty new map save folders. No game was launched. F1/F2 are accepted;
   PR/merge, exact signed release and its fresh installed smoke test remain open.
+
+- **23 October 2026 — Reviewed integration accepted.** PR #250 was squash-merged
+  as `b60d7f9` after exact-head CI passed all planned gates. CI ran 1,857 synthetic
+  tests with 26 skips and ten research helper tests, then built and verified the
+  development package. The merge has one parent, the reviewed tree and a GitHub
+  Verified signature. The normal CLI stopped at its owner-only-rule precheck;
+  one normal server merge request used Craig’s existing owner permission without
+  changing rules. The separate linear-history rule remained enforced. The main
+  signed-release workflow is running; no release installation or acceptance is
+  claimed yet.
+
+- **23 October 2026 — Exact signed release accepted.** The maintained main workflow
+  published [v0.31.0](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/releases/tag/v0.31.0)
+  from exact squash source `b60d7f9`. Main CI passed 1,857 tests with 26 skips and
+  ten research helper tests. Downloaded ZIP and DMG checksums and attestations
+  matched the exact source, main ref and release workflow. Developer ID, ARM64,
+  strict signature, notarization, stapling and Gatekeeper checks passed. The signed
+  release replaced the private rehearsal only after those checks. Rehearsal data
+  and production preferences were reset for a second independently empty state.
+  Two finite GUI sessions completed fresh setup, normal archive import, visible
+  correction provenance, normal quit, exact-launcher reopen and persistent report
+  readback. The catalogue retained exactly the original controlled edition and its
+  restored edition. Independent checks matched all four restored authored files
+  to sealed intent, preserved the defective original, and found empty separate
+  save folders, no inherited play history and unchanged captured external data.
+  Both editions remain runtime-not-tested; no game or activation occurred.
+- **23 October 2026 — Installer failure retained and corrected.** The first release
+  installer stalled before its reset marker or any rename: an added check tried
+  to reacquire the profile lock already held by the helper. Only that owned helper
+  was stopped and reaped. The changed helper uses existing non-locking state and
+  marker validation under the lock. Independent review accepted the correction;
+  the changed attempt completed with the preservation checks intact. This was an
+  installer error, not evidence of a game or map failure. Failed evidence remains
+  private and was not overwritten or counted as successful acceptance.
+
+- **23 October 2026 — Follow-on final audit.** Independent readback and bounded
+  review found no missing F1–F5 acceptance requirement. The accepted signed
+  v0.31.0 remains installed, with only the two new controlled editions and empty
+  map save folders. Original Game is active; launcher/game owners are stopped,
+  maintained locks are free and no pending transactions remain. Captured live and
+  external preimages match, and retained Ghidra project pairs remain present.
+  Automatic updates and automatic crash reporting retain their fresh disabled
+  defaults. Original test archives and private research remain outside Git. The
+  final documentation uses configured signing and requires remote Verified
+  readback before native goal completion. This does not extend automatic repair
+  eligibility to India or other maps, award gameplay verification to a new import,
+  or resolve the documented native-provider and unimplemented-check limits.
