@@ -114,11 +114,16 @@ class InspectionImportIntegrationTests(unittest.TestCase):
         window._show.assert_called_once_with("maps")
         self.assertIn("static findings", window.status.set.call_args.args[0])
 
-    def test_reimport_with_stale_checks_does_not_report_inspection_success(self):
+    def test_reimport_refreshes_changed_stock_through_native_completion(self):
+        before = self.app.import_checks(self.record)
+        original = self.fixture.snapshot_files(self.app.profiles.live)
         (self.stock / "goods.xml").write_text("<RRTGoods><Good/></RRTGoods>")
         record = self.app.import_archive(self.fixture.archive)
         self.assertEqual(record, self.record)
-        self.assertIsNone(self.app.import_checks(record))
+        report = self.app.import_checks(record)
+        self.assertIsNotNone(report)
+        self.assertNotEqual(before["input_binding"], report["input_binding"])
+        self.assertEqual(self.fixture.snapshot_files(self.app.profiles.live), original)
         window = NativeBackendWindow.__new__(NativeBackendWindow)
         window.app = self.app
         window.close_when_idle = window.closed = False
@@ -129,10 +134,35 @@ class InspectionImportIntegrationTests(unittest.TestCase):
         window._imported(record)
 
         message = window.status.set.call_args.args[0]
-        self.assertIn("missing or stale", message)
-        self.assertIn("Recheck", message)
+        self.assertIn("static findings", message)
+        self.assertNotIn("missing or stale", message)
         window._show.assert_called_once_with("maps")
         self.assertIsNone(self.app.verification_for(record))
+
+    def test_reimport_scan_failure_retains_previous_report_and_source(self):
+        report_path = self.app.library / "import-checks" / (self.record.variant_id + ".json")
+        before = report_path.read_bytes()
+        archive = self.fixture.archive.read_bytes()
+        (self.stock / "goods.xml").write_text("<RRTGoods><Good/></RRTGoods>")
+        with patch("smr_launcher.application.inspect_map", side_effect=RuntimeError("scan failed")):
+            with self.assertRaisesRegex(RuntimeError, "scan failed"):
+                self.app.import_archive(self.fixture.archive)
+        self.assertEqual(report_path.read_bytes(), before)
+        self.assertEqual(self.fixture.archive.read_bytes(), archive)
+        self.assertIsNone(self.app.import_checks(self.record))
+
+    def test_native_completion_explains_missing_checks(self):
+        report_path = self.app.library / "import-checks" / (self.record.variant_id + ".json")
+        report_path.unlink()  # Only this disposable synthetic report.
+        window = NativeBackendWindow.__new__(NativeBackendWindow)
+        window.app = self.app
+        window.close_when_idle = window.closed = False
+        window.status = Mock()
+        window._show = Mock()
+        window._submit = lambda message, operation, callback, **kwargs: callback(operation())
+        window._imported(self.record)
+        self.assertIn("missing or stale", window.status.set.call_args.args[0])
+        self.assertIn("Recheck", window.status.set.call_args.args[0])
 
     def test_cached_admission_refuses_map_change_during_stock_inventory(self):
         acquisition = map_inspection.acquisition

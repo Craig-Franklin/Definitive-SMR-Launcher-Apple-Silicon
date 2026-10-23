@@ -560,3 +560,17 @@ or inspection success is a universal compatibility certificate.
   assumptions failed and were corrected without using invalid dimensions for input.
   The next discriminator is quoted in-game financing and an affordable track/depot
   connection on a fresh bounded continuation. Full M3/M4 acceptance remains open.
+
+- **22 October 2026 — M4 duplicate-import revalidation.** The duplicate-import
+  branch skipped the shared scanner, leaving changed dependencies without a
+  current report. Reimports now scan the selected original again. Compact storage
+  materializes that selected map through existing helpers and retains it as the
+  working set so the real report consumer can admit current inputs. New imports
+  likewise retain prepared assets for current inspection; their inactive profile
+  still registers cold without an eager clone. This intentionally changes the
+  earlier cold duplicate no-op contract. Other maps remain cold, offline imports
+  use retained archives, and ordinary cold browsing remains read-only. Synthetic
+  checks cover changed-stock reimport through native completion, scan failure
+  retaining the prior report/source, and compact-map save/original preservation.
+  No installed-app, visible-package, game or repair acceptance follows from this
+  source checkpoint. M4.2 and full M4.3 acceptance remain open.

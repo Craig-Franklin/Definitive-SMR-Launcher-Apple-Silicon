@@ -524,6 +524,9 @@ class LauncherApplication:
                 None,
             )
             if existing is not None:
+                self._warm_record(existing)
+                self._write_import_checks(existing)
+                self._cool_library(keep=existing)
                 result = self._record_source(existing, remote) if remote else existing
                 self._discard_committed_download(source, inspection.source_sha256, remote)
                 return result
@@ -583,7 +586,7 @@ class LauncherApplication:
                 self.catalogue_file, dict(schema=1, maps=[item.as_json() for item in records])
             )
             self._discard_committed_download(source, inspection.source_sha256, remote)
-            self._cool_library()
+            self._cool_library(keep=record)
             return record
 
     def _prepared_root(self, record: MapRecord) -> Path:

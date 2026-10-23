@@ -118,16 +118,36 @@ class CompactLibraryTests(unittest.TestCase):
         app.prepare_map(record)
         self.assertTrue(app.profiles._profile_path(record.profile_id).is_dir())
 
-    def test_future_import_is_cold_and_offline_duplicate_does_not_unpack_collection(self):
+    def test_offline_duplicate_prepares_only_selected_map_for_current_inspection(self):
+        from io import BytesIO
+        import tarfile
+
         record = self.compact()
         app = self.application
-        before = self.snapshot_files(app.library)
+        other_archive = self.archive.with_name("Other.tar")
+        with tarfile.open(other_archive, "w") as stream:
+            entry = tarfile.TarInfo("UserMaps/RRT_Scenario_Other.xml")
+            data = b"<RRTScenario/>"
+            entry.size = len(data)
+            stream.addfile(entry, BytesIO(data))
+        other = app.import_archive(other_archive)
+        self.assertIsNotNone(app.import_checks(other))
+        original = self.snapshot_files(app.profiles.live)
+        self.assertFalse(app._prepared_root(record).exists())
         self.assertEqual(app.import_archive(self.archive), record)
-        self.assertEqual(self.snapshot_files(app.library), before)
+        self.assertIsNotNone(app.import_checks(record))
+        self.assertEqual(self.snapshot_files(app.profiles.live), original)
+        self.assertEqual(
+            (app.profiles._profile_path(record.profile_id) / "Saves/future.sav").read_bytes(),
+            b"future" * 10000,
+        )
         self.archive.unlink()
         archive = app.originals / (record.archive_sha256 + ".7z")
         self.assertEqual(app.import_archive(archive), record)
-        self.assertFalse(app.profiles._profile_path(record.profile_id).exists())
+        self.assertIsNotNone(app.import_checks(record))
+        self.assertFalse(app._prepared_root(other).exists())
+        self.assertFalse(app.profiles._profile_path(other.profile_id).exists())
+        self.assertEqual(app.active(), ORIGINAL)
 
     def test_interrupted_compaction_resumes_exact_sealed_plan(self):
         app = self.application
@@ -254,6 +274,7 @@ class CompactLibraryTests(unittest.TestCase):
         ):
             rebuilt = app.import_archive(self.archive)
         self.assertFalse(app.profiles._profile_path(rebuilt.profile_id).exists())
+        self.assertIsNotNone(app.import_checks(rebuilt))
         app.activate(rebuilt.profile_id)
         self.assertEqual((app.profiles.live / "Saves/future.sav").read_bytes(), b"future" * 10000)
 
