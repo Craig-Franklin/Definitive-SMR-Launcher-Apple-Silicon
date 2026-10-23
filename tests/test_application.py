@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 import fcntl
 import hashlib
+import json
 import os
 import sys
 import tarfile
@@ -432,6 +433,83 @@ class ApplicationTests(unittest.TestCase):
         self.assertEqual(
             (self.installation.profile_root / "Saves/stock.sav").read_text(), "stock save"
         )
+
+    def test_fresh_library_enrolls_existing_original_without_changing_live_files(self):
+        self.application.setup()
+        before = self.snapshot_files(self.installation.profile_root)
+        self.application.library.rename(self.root / "previous-library")
+        fresh = LauncherApplication(self.installation, self.application.library)
+
+        self.assertEqual(fresh.setup(), ORIGINAL)
+        self.assertEqual(self.snapshot_files(self.installation.profile_root), before)
+        self.assertEqual(fresh.catalogue(), ())
+        expected = dict(before)
+        del expected[activation_module.MARKER]
+        self.assertEqual(self.snapshot_files(fresh.baseline), expected)
+        self.assertEqual(fresh.setup(), ORIGINAL)
+        self.assertEqual(self.snapshot_files(self.installation.profile_root), before)
+
+    def test_fresh_library_refuses_invalid_existing_original_marker(self):
+        self.application.setup()
+        marker = self.installation.profile_root / activation_module.MARKER
+        original = json.loads(marker.read_text())
+        for field, value in (
+            ("profile_id", "map-" + "a" * 64),
+            ("assets_sha256", "a" * 64),
+            ("schema", 999),
+        ):
+            with self.subTest(field=field):
+                marker.write_text(json.dumps(dict(original, **{field: value})))
+                before = self.snapshot_files(self.installation.profile_root)
+                fresh = LauncherApplication(self.installation, self.root / ("fresh-" + field))
+                with self.assertRaises(activation_module.RecoveryError):
+                    fresh.setup()
+                self.assertFalse(fresh.baseline.exists())
+                self.assertFalse(fresh.profiles.state_file.exists())
+                self.assertEqual(self.snapshot_files(self.installation.profile_root), before)
+
+    def test_fresh_library_refuses_original_with_missing_or_map_variant(self):
+        self.application.setup()
+        marker = self.installation.profile_root / activation_module.MARKER
+        original = json.loads(marker.read_text())
+        for variant in ("a" * 64, "missing"):
+            with self.subTest(variant=variant):
+                value = dict(original, variant_id=variant)
+                if variant == "missing":
+                    del value["variant_id"]
+                marker.write_text(json.dumps(value))
+                before = self.snapshot_files(self.installation.profile_root)
+                fresh = LauncherApplication(self.installation, self.root / ("fresh-" + variant))
+                with self.assertRaisesRegex(ApplicationError, "variant identity"):
+                    fresh.setup()
+                self.assertFalse(fresh.baseline.exists())
+                self.assertEqual(self.snapshot_files(self.installation.profile_root), before)
+
+    def test_fresh_library_retries_after_baseline_publication_interruption(self):
+        self.application.setup()
+        self.application.library.rename(self.root / "previous-library")
+        fresh = LauncherApplication(self.installation, self.application.library)
+        before = self.snapshot_files(self.installation.profile_root)
+        with patch.object(
+            fresh.profiles, "enroll_original", side_effect=RuntimeError("interrupted")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "interrupted"):
+                fresh.setup()
+        self.assertTrue(fresh.baseline.is_dir())
+        self.assertFalse((fresh.baseline / activation_module.MARKER).exists())
+        self.assertFalse(fresh.profiles.state_file.exists())
+        self.assertEqual(self.snapshot_files(self.installation.profile_root), before)
+        marker = self.installation.profile_root / activation_module.MARKER
+        value = json.loads(marker.read_text())
+        marker.write_text(json.dumps(dict(value, variant_id="a" * 64)))
+        changed = self.snapshot_files(self.installation.profile_root)
+        with self.assertRaisesRegex(ApplicationError, "variant identity"):
+            fresh.setup()
+        self.assertEqual(self.snapshot_files(self.installation.profile_root), changed)
+        self.assertFalse(fresh.profiles.state_file.exists())
+        marker.write_bytes(before[activation_module.MARKER])
+        self.assertEqual(fresh.setup(), ORIGINAL)
+        self.assertEqual(self.snapshot_files(self.installation.profile_root), before)
 
     def test_concurrent_different_imports_keep_both_catalogue_records(self):
         self.application.setup()

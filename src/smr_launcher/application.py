@@ -341,18 +341,20 @@ class LauncherApplication:
                 )
 
     def _copy_baseline(self) -> None:
+        enrolled = (self.installation.profile_root / MARKER).exists()
+        if enrolled:
+            marker = self.profiles._marker(self.profiles.live, ORIGINAL)
+            if "variant_id" not in marker or marker["variant_id"] is not None:
+                raise ApplicationError("Original profile has an unexpected variant identity")
         if self.baseline.exists():
             _assert_regular_tree(self.baseline)
             baseline_files, baseline_dirs = _tree_manifest(self.baseline)
             live_files, live_dirs = _tree_manifest(self.installation.profile_root)
-            if MARKER in live_files:
-                self.profiles._marker(self.profiles.live, ORIGINAL)
+            if enrolled:
                 del live_files[MARKER]
             if (baseline_files, baseline_dirs) != (live_files, live_dirs):
                 raise ApplicationError("Existing clean baseline differs from the game profile")
             return
-        if (self.installation.profile_root / MARKER).exists():
-            raise ApplicationError("Clean baseline is missing after profile enrollment began")
         _assert_no_symlink_ancestor(self.library)
         self.library.mkdir(parents=True, exist_ok=True)
         stage = Path(tempfile.mkdtemp(prefix=".baseline-", dir=self.library))
@@ -365,6 +367,13 @@ class LauncherApplication:
             )
             if _tree_manifest(stage) != _tree_manifest(self.installation.profile_root):
                 raise ApplicationError("Clean baseline changed during the independent copy")
+            if enrolled:
+                self.profiles._marker(stage, ORIGINAL)
+                (stage / MARKER).unlink()
+                live_files, live_dirs = _tree_manifest(self.installation.profile_root)
+                del live_files[MARKER]
+                if _tree_manifest(stage) != (live_files, live_dirs):
+                    raise ApplicationError("Clean baseline changed while excluding its marker")
             _freeze_tree(stage)
             _publish_exclusive(stage, self.baseline)
         finally:

@@ -9,13 +9,13 @@ explains findings and missing coverage, and applies only independently verified,
 feature-preserving fixes to separate editions. The same inspection service must
 work on newly customized map directories without requiring import or activation.
 
-**Current step:** final completion readback. Local M0–M4 acceptance and the signed
-source checkpoint are verified. Commit `b460da7` is published on the authorized
-feature branch with GitHub's Verified/valid signature result. The final audit
-retains all scope limits below; persistent-goal completion follows this final
-record's publication and readback. The existing notarized release remains
-preserved beside the clearly named development installation. Other maps and
-historical experimental recipes do not inherit automatic repair eligibility.
+**Current step:** F3, the separately approved fresh-install follow-on below.
+The original M0–M4 programme is complete at its recorded scopes; its goal completion
+and signed source publication are retained. Craig approved a new persistent goal
+on 23 October 2026 for fresh-state GUI acceptance, PR/merge and the resulting
+signed release. Old launcher-managed maps and saves are disposable. Research,
+Ghidra, the installed game and files outside the launcher reset remain preserved.
+Other maps and historical recipes do not inherit automatic repair eligibility.
 
 **Retained M2 limits:** a separate one-key Liverpool and Manchester 2
 diagnostic now loads a visible world; its original reached the six-GiB guard with
@@ -786,3 +786,48 @@ or inspection success is a universal compatibility certificate.
   This closes publication of the implementation; the final documentation record
   and exact goal completion readback follow. No scope is transferred to other
   maps, arbitrary aliases, unknown native providers or unimplemented checks.
+
+## Fresh-install follow-on — approved 23 October 2026
+
+This is the only active checklist. The private execution plan and compact resume
+provide operational details. Use existing helpers and candidate evidence; do not
+repeat the completed research, collection scan or native programme.
+
+- [x] **F1 — Admit the fresh-state test.** Bind the private candidate to reviewed
+  source, check stopped owners and exact reset boundaries, and resolve any setup
+  blocker before deletion. Reset only launcher apps, its own support root and
+  production preferences. No migration or old-library backup is required.
+- [x] **F2 — Private fresh GUI acceptance.** Exercise first-run setup, controlled
+  import/reimport, ordinary original-India inspection and launcher quit/reopen.
+  Preserve original test archives; confirm the exact separate controlled correction
+  and honest untested status. No game activation or Play is required.
+- [ ] **F3 — Reviewed integration.** Create the authorized PR, pass exact-head
+  checks/review, and squash-merge linearly with signing and target safeguards.
+  The approved merge may trigger the maintained public signed-release workflow.
+- [ ] **F4 — Exact release acceptance.** Verify the merged source, signed/notarized
+  release artifact and installed executable identities. Use another empty launcher
+  state for a short real GUI import and persistence check; do not reuse rehearsal
+  reports or verification history.
+- [ ] **F5 — Finish cleanly.** Verify excluded data and finite-job closure, leave the
+  accepted release installed, report published state and remaining compatibility
+  limits, and audit every follow-on requirement before completing its goal.
+
+Progress weighting: preparation F1 15%, private acceptance F2 35%, integration and
+release F3/F4 artifact delivery 30%, installed release GUI acceptance/final audit
+20%. Percentages are estimates; measured checks and GUI outcomes remain separate.
+
+- **23 October 2026 — Fresh-state private acceptance.** A genuine empty-library
+  rehearsal exposed a setup refusal when the live Original marker survived deletion
+  of launcher storage. The narrow correction validates Original and its null
+  variant identity before both baseline paths, excludes only the copied marker,
+  and preserves the live profile. Independent review caught and closed a retry
+  guard-placement gap. Four new synthetic tests cover clean reset, invalid marker
+  refusal and interruption/retry; the stable suite ran 1,857 tests with 26 skips
+  in 136.787 seconds, and quality passed. A rebuilt private candidate completed
+  real first-run GUI setup, controlled import/reimport with exactly two editions,
+  ordinary original-India inspection and launcher restart persistence. All four
+  corrected authored files equal the sealed intent. India remained unchanged with
+  explicit risks/unknowns and no automatic repair. Three finite sessions quit
+  normally; independent readback preserved captured external data and left Original
+  active with empty new map save folders. No game was launched. F1/F2 are accepted;
+  PR/merge, exact signed release and its fresh installed smoke test remain open.
