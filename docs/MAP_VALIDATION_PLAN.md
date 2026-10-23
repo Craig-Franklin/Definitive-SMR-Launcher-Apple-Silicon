@@ -574,3 +574,35 @@ or inspection success is a universal compatibility certificate.
   retaining the prior report/source, and compact-map save/original preservation.
   No installed-app, visible-package, game or repair acceptance follows from this
   source checkpoint. M4.2 and full M4.3 acceptance remain open.
+
+- **22 October 2026 — Controlled delivery and event continuation.** A fresh
+  continuation reopened the exact retained manual save and accepted a four-stop
+  train route using a return depot between the two supplying cities. Every stop
+  visibly retained the same Passenger/Mail car counts. The real train consumer
+  showed the route, and lifetime revenue increased from zero to 18,000, 54,000
+  and 79,000. Native Goods reports showed recorded delivery activity for both
+  goods. Installed-byte and disassembly checks exclude a sole-player zero-count
+  fallback in that report; its counters can still include zero-payment receipts
+  and earlier statistical periods. Exact per-good positive payment, quantity and
+  unloading location are not established by those percentages. No construction
+  or purchases occurred. The uniquely named continuation save was created, then
+  normal quit completed after about 672 seconds. Independent restoration matched
+  88 protected roots and both preferences; that new save has not been reopened.
+  The event lineage also reached neutral after expiry, then a later authored
+  event showed a new numerical ramp and plateau in retained saves. These are
+  bounded gameplay/event observations, not full M3 acceptance. Authored industry
+  production, the connection objective, remaining resource closure and the final
+  corresponding exact-save reopen/continued-play requirements remain open.
+
+- **22 October 2026 — M4 private GUI duplicate-import acceptance.** The current
+  private production package reimported an already enrolled original archive and
+  automatically regenerated its inspection report. No manual check action was
+  used. The real GUI displayed the fresh timestamp, exact build/input provenance,
+  eight static findings and explicit coverage/runtime limits. The shared current-
+  report consumer independently admitted the resulting report. Normal GUI quit
+  and frontend/backend absence were verified; 90 protected roots, catalogue and
+  profile state matched. No activation, new map record, authored asset or save
+  changed. An earlier direct-launch ownership mismatch remains recorded as a
+  failed attempt; the successful fresh trial used LaunchServices. This advances
+  M4.3's private package/import presentation scope. Installed deployment, eligible
+  transformations and complete M3/M4 acceptance remain open.
