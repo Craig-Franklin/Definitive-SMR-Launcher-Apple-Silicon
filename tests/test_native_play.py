@@ -431,7 +431,10 @@ class NativePlayTests(TestCase):
         with (
             patch.object(application, "compatibility_recipes", return_value=(choice,)),
             patch.object(recipe_service, "resolve_bundled_recipe", return_value=((rule,), binding)),
-            patch.dict(recipe_service._RECIPES, {binding.recipe_id: SimpleNamespace(additions=())}),
+            patch.dict(
+                recipe_service._RECIPES,
+                {binding.recipe_id: SimpleNamespace(additions=(), native_acceptance="")},
+            ),
         ):
             for index in (1, 2):
                 review = dispatch(library, application, "maptools.play_preflight", params)

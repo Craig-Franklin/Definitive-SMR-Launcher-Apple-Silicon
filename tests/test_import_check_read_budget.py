@@ -2,11 +2,12 @@
 
 from io import BytesIO
 from pathlib import Path
+import os
 import tempfile
 import unittest
 from unittest.mock import patch
 
-from smr_launcher import import_checks
+from smr_launcher import import_checks, resource_identity
 import test_import_check_freshness as fixtures
 
 
@@ -61,12 +62,24 @@ class ImportCheckReadBudgetTests(unittest.TestCase):
         root = fixture.app._prepared_root(fixture.record)
         target = root / "UserMaps/Example/RRT_Scenario_User_Example.xml"
         size = target.stat().st_size
-        data = b"<a>" + b" " * (size + 20) + b"</a>"
         requests = []
-        with self.controlled_stream(target, data, requests):
-            with self.assertRaisesRegex(OSError, "size changed"):
+        target_inode = target.stat().st_ino
+        original_read = os.read
+
+        def changed_stream(fd, count):
+            data = original_read(fd, count)
+            if os.fstat(fd).st_ino == target_inode:
+                requests.append(count)
+                if data:
+                    return data + b"extra unadmitted bytes"
+            return data
+
+        with patch.object(resource_identity.os, "read", side_effect=changed_stream):
+            with self.assertRaisesRegex(RuntimeError, "size changed"):
                 fixture.app.import_checks(fixture.record, refresh=True)
-        self.assertEqual(requests, [size + 1])
+        self.assertTrue(requests)
+        self.assertTrue(all(0 < n <= resource_identity.CHUNK_SIZE for n in requests))
+        self.assertEqual(target.stat().st_size, size)
         self.assertEqual(fixture.report_path.read_bytes(), before)
         self.assertIsNone(fixture.app.verification_for(fixture.record))
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from dataclasses import replace
 from datetime import datetime, timezone
 from contextlib import contextmanager, nullcontext
@@ -54,9 +54,9 @@ from .scenario_evidence import (
 )
 from .collection import RemoteMap
 from .map_metadata import MapMetadata, read_map_metadata, read_scenario_labels
-from . import import_checks, removal, compact_library
+from . import removal, compact_library
 from .cold_storage import ColdStorage, _checkpoint
-from .import_checks import inspect_map
+from .map_inspection import inspect_map, input_binding
 from .launch_preferences import prepare_settings
 from .resource_identity import ContentHashCache, fingerprint_resources
 from .map_issues import MapIssueStore
@@ -341,18 +341,20 @@ class LauncherApplication:
                 )
 
     def _copy_baseline(self) -> None:
+        enrolled = (self.installation.profile_root / MARKER).exists()
+        if enrolled:
+            marker = self.profiles._marker(self.profiles.live, ORIGINAL)
+            if "variant_id" not in marker or marker["variant_id"] is not None:
+                raise ApplicationError("Original profile has an unexpected variant identity")
         if self.baseline.exists():
             _assert_regular_tree(self.baseline)
             baseline_files, baseline_dirs = _tree_manifest(self.baseline)
             live_files, live_dirs = _tree_manifest(self.installation.profile_root)
-            if MARKER in live_files:
-                self.profiles._marker(self.profiles.live, ORIGINAL)
+            if enrolled:
                 del live_files[MARKER]
             if (baseline_files, baseline_dirs) != (live_files, live_dirs):
                 raise ApplicationError("Existing clean baseline differs from the game profile")
             return
-        if (self.installation.profile_root / MARKER).exists():
-            raise ApplicationError("Clean baseline is missing after profile enrollment began")
         _assert_no_symlink_ancestor(self.library)
         self.library.mkdir(parents=True, exist_ok=True)
         stage = Path(tempfile.mkdtemp(prefix=".baseline-", dir=self.library))
@@ -365,6 +367,13 @@ class LauncherApplication:
             )
             if _tree_manifest(stage) != _tree_manifest(self.installation.profile_root):
                 raise ApplicationError("Clean baseline changed during the independent copy")
+            if enrolled:
+                self.profiles._marker(stage, ORIGINAL)
+                (stage / MARKER).unlink()
+                live_files, live_dirs = _tree_manifest(self.installation.profile_root)
+                del live_files[MARKER]
+                if _tree_manifest(stage) != (live_files, live_dirs):
+                    raise ApplicationError("Clean baseline changed while excluding its marker")
             _freeze_tree(stage)
             _publish_exclusive(stage, self.baseline)
         finally:
@@ -524,8 +533,12 @@ class LauncherApplication:
                 None,
             )
             if existing is not None:
+                self._warm_record(existing)
+                self._write_import_checks(existing)
+                self._cool_library(keep=existing)
                 result = self._record_source(existing, remote) if remote else existing
                 self._discard_committed_download(source, inspection.source_sha256, remote)
+                self._restore_verified_import_locked(result)
                 return result
             archive = self._preserve_archive(source, inspection.source_sha256)
             if compact_library.config(self) is not None:
@@ -583,8 +596,37 @@ class LauncherApplication:
                 self.catalogue_file, dict(schema=1, maps=[item.as_json() for item in records])
             )
             self._discard_committed_download(source, inspection.source_sha256, remote)
-            self._cool_library()
+            self._cool_library(keep=record)
+            self._restore_verified_import_locked(record)
             return record
+
+    def _restore_verified_import_locked(self, record: MapRecord) -> None:
+        """Preserve the original first, then prepare only exact accepted recipes.
+
+        Caller owns the application lock. Experimental recipes never enter this
+        path, and each newly prepared edition retains its own untested status.
+        """
+        from .recipe_service import _RECIPES, recipe_choices, resolve_bundled_recipe
+        from .rules import RuleError
+
+        for choice in recipe_choices(record, self.installation.executable_sha256):
+            if not _RECIPES[choice.recipe_id].native_acceptance:
+                continue
+            self._warm_record(record)
+            try:
+                rules, binding = resolve_bundled_recipe(self, record, choice.recipe_id)
+                edition = self._create_compatibility_edition_locked(
+                    record,
+                    rules,
+                    label="sealed author intent",
+                    recipe_binding=binding,
+                    experimental=False,
+                )
+            except (RuleError, ApplicationError) as error:
+                raise ApplicationError(
+                    "Original imported and preserved; verified restoration withheld: " + str(error)
+                ) from error
+            self._cool_library(keep=edition)
 
     def _prepared_root(self, record: MapRecord) -> Path:
         return removal._leaf(self.prepared, record.prepared_directory, r"[0-9a-f]{32}")
@@ -609,67 +651,50 @@ class LauncherApplication:
             == record.variant_id
         )
 
+    def inspect_map_directory(self, source: Path) -> dict:
+        """Inspect an author's directory without importing or activating it."""
+        source = Path(source)
+        if source.is_symlink() or not source.is_dir():
+            raise ApplicationError("Choose a nonlinked map directory")
+        report = inspect_map(source, Path(self.installation.executable).parents[2])
+        executable = report["game"]["executable"]
+        if not executable or executable["sha256"] != self.installation.executable_sha256:
+            raise ApplicationError(
+                "Game executable changed; reverify the installation before inspection"
+            )
+        return report
+
     def _import_check_inputs(self, record: MapRecord):
-        """Bind supported checks; stock content/precedence is not inspected."""
+        """Bind authored assets, consumed executable/stock and shared analyzer."""
         root = self._prepared_root(record)
-        _assert_regular_tree(root)
         executable = getattr(self.installation, "executable", None)
-        stock_roots = (
-            (
-                executable.parents[1] / "Resources",
-                executable.parents[3] / "SMRailroadsData/assets/xml",
-            )
-            if executable
-            else ()
-        )
-        stock = {
-            p.name.casefold()
-            for root in stock_roots
-            for p in root.rglob("*")
-            if p.suffix.casefold() == ".xml" and p.is_file()
-        }
-        snapshot = fingerprint_resources(
-            {"custom_assets": root / "CustomAssets", "user_maps": root / "UserMaps"},
-            hash_cache=self._resource_hash_cache,
-        )
-        # The model scanner counts directory entries toward its budget. Bind
-        # their membership, but not directory mtimes that no check consumes.
-        map_inputs = [
-            dict(
-                role=scope["role"],
-                entries=[
-                    entry if entry["kind"] == "file" else dict(kind="directory", path=entry["path"])
-                    for entry in scope["entries"]
-                ],
-            )
-            for scope in snapshot["roots"]
-        ]
-        binding = dict(
-            analyzer=import_checks.IMPORT_CHECKS_VERSION,
-            map_resources_sha256=hashlib.sha256(
-                json.dumps(map_inputs, sort_keys=True, separators=(",", ":")).encode()
-            ).hexdigest(),
-            stock_xml_names_sha256=hashlib.sha256(
-                json.dumps(sorted(stock), separators=(",", ":")).encode()
-            ).hexdigest(),
-        )
-        return root, stock, binding
+        game = Path(executable).parents[2] if executable is not None else None
+        binding = input_binding(root, game, scopes=("CustomAssets", "UserMaps"))
+        return root, game, binding
 
     def _write_import_checks(self, record: MapRecord) -> dict:
         if record.game_executable_sha256 != self.installation.executable_sha256:
             raise ApplicationError(
                 "Import checks require a map prepared for the current game build"
             )
-        root, stock, binding = self._import_check_inputs(record)
-        report = inspect_map(root, stock)
+        root, game, binding = self._import_check_inputs(record)
+        if (
+            binding["executable"]
+            and binding["executable"]["sha256"] != self.installation.executable_sha256
+        ):
+            raise ApplicationError(
+                "Game executable changed; reverify the installation before inspection"
+            )
+        report = inspect_map(root, game, scopes=("CustomAssets", "UserMaps"))
         report.update(
+            schema=2,
             variant_id=record.variant_id,
             archive_sha256=record.archive_sha256,
             game_executable_sha256=record.game_executable_sha256,
             assets_sha256=self.profiles._asset_hash(root),
             checked_at=datetime.now(timezone.utc).isoformat(),
             input_binding=binding,
-            input_scope="Prepared map file bytes/timestamps, directory membership and loose stock XML basenames only; dependency coverage is partial, not native provider resolution.",
+            input_scope="Prepared CustomAssets/UserMaps only; excludes saves, settings and logs. Consumed executable, loose stock bytes/metadata and analyzer are bound. Candidate resources are not native provider resolution.",
         )
         if self._import_check_inputs(record)[2] != binding:
             raise ApplicationError("Import-check inputs changed during the scan; recheck required")
@@ -699,7 +724,9 @@ class LauncherApplication:
                 return None
             report = json.loads(path.read_text())
             if (
-                report.get("schema") != 1
+                report.get("schema") != 2
+                or report.get("schema_version") != 1
+                or report.get("status") != "completed"
                 or report.get("variant_id") != record.variant_id
                 or report.get("archive_sha256") != record.archive_sha256
                 or report.get("game_executable_sha256") != self.installation.executable_sha256
@@ -1173,6 +1200,7 @@ class LauncherApplication:
         label: str,
         recipe_binding=None,
         recover_pending: bool = True,
+        experimental: bool = True,
     ) -> MapRecord:
         """Shared preparation transaction; caller must hold the application lock.
 
@@ -1195,6 +1223,15 @@ class LauncherApplication:
             raise ApplicationError("Compatibility edition needs explicit reviewed rules")
         if recipe_binding is not None and not isinstance(recipe_binding, RecipePreparationBinding):
             raise ApplicationError("Compiled edition needs a valid recipe binding")
+        accepted_transformation = ""
+        if recipe_binding is not None:
+            from .recipe_service import _RECIPES
+
+            recipe = _RECIPES.get(recipe_binding.recipe_id)
+            if recipe is not None:
+                accepted_transformation = recipe.native_acceptance
+        if not experimental and not accepted_transformation:
+            raise ApplicationError("Restored edition requires explicit native acceptance")
         self._stopped()
         self.profiles.recover(recover_pending=recover_pending)
         records = list(self.catalogue())
@@ -1277,7 +1314,9 @@ class LauncherApplication:
                 )
         new = replace(
             record,
-            name=record.name + " — Experimental " + label.strip(),
+            name=record.name
+            + (" — Experimental " if experimental else " — Restored ")
+            + label.strip(),
             variant_id=variant.variant_id,
             profile_id=profile_id,
             prepared_directory=prepared_name,
@@ -1307,6 +1346,8 @@ class LauncherApplication:
         )
         if variant.recipe_binding is not None:
             receipt.update(schema=2, recipe_binding=variant.recipe_binding)
+            if accepted_transformation:
+                receipt["verified_transformation"] = accepted_transformation
             new = replace(new, recipe_receipt_sha256=self._recipe_receipt_hash(receipt))
         receipts = self.library / "compatibility-preparations"
         _assert_no_symlink_ancestor(receipts)
@@ -1389,6 +1430,26 @@ class LauncherApplication:
             ):
                 raise ValueError("receipt binding differs")
             binding = receipt["recipe_binding"]
+            from .recipe_service import _RECIPES, compiler_contract_digest
+
+            recipe = _RECIPES.get(binding.get("recipe_id"))
+            if (
+                recipe is not None
+                and recipe.native_acceptance
+                and (
+                    binding["compiler_sha256"] != compiler_contract_digest()
+                    or binding["recipe_sha256"]
+                    != hashlib.sha256(
+                        json.dumps(asdict(recipe), sort_keys=True, separators=(",", ":")).encode()
+                    ).hexdigest()
+                    or binding["stock_files_sha256"] != recipe.verified_stock_files_sha256
+                )
+            ):
+                raise ValueError("verified transformation contract differs")
+            if receipt.get("verified_transformation") and (
+                recipe is None or receipt["verified_transformation"] != recipe.native_acceptance
+            ):
+                raise ValueError("verified transformation acceptance differs")
             root = (
                 self.profiles.live
                 if self.profiles._state()["active"] == record.profile_id

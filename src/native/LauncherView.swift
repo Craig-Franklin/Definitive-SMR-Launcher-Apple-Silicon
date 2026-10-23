@@ -16,6 +16,9 @@ struct LauncherView: View {
     @ViewState private var pendingInspectorFocus = false
     @ViewState private var mountedInspectorID: String?
     @ViewState private var gridViewport = NativeLibraryViewport()
+    @ViewState private var directoryReport = ""
+    @ViewState private var inspectedDirectory = ""
+    @ViewState private var showingDirectoryReport = false
     private let destinations = ["Map Library", "Collection", "Original Game", "Activity", "Preferences"]
 
     var body: some View {
@@ -67,6 +70,7 @@ struct LauncherView: View {
                     Menu {
                         Button("Refresh Library") { Task { await model.refresh() } }
                         Button("Choose Steam Library…", action: openLibraryPreferences)
+                        Button("Inspect Map Directory…", action: inspectDirectory)
                         Divider()
                         Button("Map Compatibility & Editions…") { model.section = "Compatibility & Editions"; model.destination = "Map Library"; model.narrowDetail = true }.disabled(model.selected == nil)
                         Button("Collection") { model.destination = "Collection" }
@@ -78,6 +82,23 @@ struct LauncherView: View {
                 }
             }
             .modifier(NativePlayReviewModifier(model: model, tools: mapTools))
+            .sheet(isPresented: $showingDirectoryReport) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Map Directory Inspection").font(.title2)
+                    Text("Read-only snapshot. Recheck after editing the map or changing game inputs. Static checks do not establish gameplay acceptance.")
+                        .font(.callout).foregroundStyle(.secondary)
+                    ScrollView {
+                        Text(directoryReport).font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    HStack {
+                        Button("Recheck Directory") { inspectDirectory(at: inspectedDirectory) }
+                            .disabled(model.working || !model.connected)
+                        Spacer()
+                        Button("Close") { showingDirectoryReport = false }.keyboardShortcut(.cancelAction)
+                    }
+                }.padding(20).frame(minWidth: 680, idealWidth: 800, minHeight: 480, idealHeight: 620)
+            }
             .onChange(of: model.destination) { destination in
                 gridViewport.cancelPending()
                 if destination != "Map Library" { searchFocusRequest = nil; pendingInspectorFocus = false }
@@ -637,6 +658,25 @@ struct LauncherView: View {
         if panel.runModal() == .OK, let url = panel.url { Task { await model.workflow("import", extras: ["path": url.path]) } }
     }
     private func openLibraryPreferences() { model.preferenceCategory = "Library"; model.destination = "Preferences" }
+    private func inspectDirectory() {
+        guard !model.working, model.connected else { return }
+        if model.fixture { model.status = "Synthetic fixture: directory access disabled."; return }
+        let panel = NSOpenPanel(); panel.title = "Choose a custom map directory to inspect"
+        panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK, let url = panel.url { inspectDirectory(at: url.path) }
+    }
+    private func inspectDirectory(at path: String) {
+        guard !model.working, model.connected else { return }
+        // Clear the previous observation before a fresh scan, including failed rechecks.
+        directoryReport = ""; showingDirectoryReport = false
+        Task {
+            await model.request("inspection.directory", ["path": path]) { value in
+                inspectedDirectory = path
+                directoryReport = value.text("provenance_text") + "\n\n" + value.text("report_text")
+                showingDirectoryReport = true
+            }
+        }
+    }
     private func chooseLibrary() {
         openLibraryPreferences()
     }

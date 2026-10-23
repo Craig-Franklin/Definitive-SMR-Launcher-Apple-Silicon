@@ -448,6 +448,8 @@ struct NativeMapToolsView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Compatibility & Editions").font(.headline)
             Text("Separate editions retain separate saves. Successful creation and static checks do not prove gameplay compatibility.")
+            if let error = data["preparation_error"] as? String { Text(error).foregroundStyle(.orange) }
+            else if let preparation = data["preparation_text"] as? String { Text(preparation).textSelection(.enabled) }
             Text(data.text("checks_error", data.text("checks_text"))).textSelection(.enabled)
             Button("Run Import Checks") { run("refresh_checks") }.disabled(held)
             if let error = data["recipes_error"] as? String { Text(error).foregroundStyle(.orange) }

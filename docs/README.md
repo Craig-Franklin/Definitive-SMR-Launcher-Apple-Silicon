@@ -14,6 +14,8 @@ Use the guide for your task; historical reports are evidence, not active work qu
 | Understand UI behavior | [Interface](UI_DESIGN.md), [loading feedback](LOADING_FEEDBACK.md), [play-history decisions](MAP_CARD_HISTORY_DESIGN.md) |
 | Compare Mac features with the inherited launcher | [Feature comparison](FEATURE_PARITY.md) |
 | Work with prepared editions | [Compatibility rule contracts](COMPATIBILITY_RULES.md) |
+| Inspect an exact map without activation | [Read-only map inspection CLI](MAP_INSPECTION_CLI.md) |
+| Follow validation and verified-repair work | [Current plan and acceptance](MAP_VALIDATION_PLAN.md) |
 | Run authorized AI game tests | [AI game testing](AI_GAME_TESTING.md); [repository skill](../.agents/skills/smr-game-driver/SKILL.md) |
 | Interpret crash coverage and cross-map families | [Crash evidence](CRASH_EVIDENCE.md) |
 | Verify publication access | [Repository access](REPOSITORY_ACCESS.md) |

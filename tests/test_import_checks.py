@@ -41,8 +41,13 @@ class ImportChecksTests(unittest.TestCase):
             app.setup()
             record = app.import_archive(fixture.archive)
             report = app.import_checks(record)
-            self.assertEqual(report["xml_files_checked"], 1)
-            self.assertEqual(report["warnings"], [])
+            self.assertEqual(report["schema"], 2)
+            self.assertEqual(len(report["scenarios"]), 1)
+            self.assertEqual(report["scenarios"][0]["parse_status"], "unsupported")
+            self.assertTrue(any(f["rule_id"] == "scenario_root" for f in report["findings"]))
+            self.assertFalse(
+                any(f["category"] == "confirmed_invalid_condition" for f in report["findings"])
+            )
             self.assertIsNone(app.verification_for(record))
             self.assertEqual(
                 app.import_checks(record, refresh=True)["variant_id"], record.variant_id

@@ -936,6 +936,28 @@ class NativeBackendWindow(LauncherWindow):
                     operation = lambda: self.native_library.artwork(app, params)
                 elif method == "details":
                     operation = lambda: self.native_library.details(app, params)
+                elif method == "inspection.directory":
+                    from .map_inspection import report_text
+
+                    source = text(params, "path")
+                    if not source or not Path(source).is_absolute():
+                        raise ValueError("Choose an absolute map directory path")
+
+                    def operation():
+                        report = app.inspect_map_directory(Path(source))
+                        return dict(
+                            report_text=report_text(report),
+                            provenance_text=(
+                                "Observed: "
+                                + report["observation"]["finished_utc"]
+                                + "\nAnalyzer: "
+                                + report["analyzer"]["version"]
+                                + "; source: "
+                                + report["analyzer"]["source_sha256"]
+                                + "\nStock identity: "
+                                + str(report["game"]["stock_identity"])
+                            ),
+                        )
                 elif method == "briefing.translate":
                     operation = lambda: self.native_library.briefing_translate(app, params)
                 elif method == "annotations.save":
