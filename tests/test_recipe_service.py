@@ -186,6 +186,98 @@ class SyntheticRecipeServiceTests(unittest.TestCase):
         )
         self.assertEqual(binding_json["metadata_policy"], "preserve-imported-resource-mtimes-v1")
 
+    def restoration_fixture(self):
+        old = self.TARGET + " "
+        industry = self.industry_data.replace(b"Test Mill", old.encode())
+        scenario = (
+            b"<Scenario><IndustriesXMLFile>RRT_Industries_Synthetic.xml</IndustriesXMLFile>"
+            b"<OwnListItem><szObjectType>Industry</szObjectType>"
+            b"<szObjectName>Registered One</szObjectName></OwnListItem></Scenario>"
+        )
+        stock = self.stock_industries_data.replace(b"Stock Factory", self.TARGET.encode())
+        (self.source / self.INDUSTRY_PATH).write_bytes(industry)
+        (self.source / self.SCENARIO_PATH).write_bytes(scenario)
+        (self.stock / "RRT_Industries.xml").write_bytes(stock)
+        recipe = replace(
+            self._recipe(
+                industry=industry,
+                scenario=scenario,
+                stock_industries=stock,
+                aliases=((old, 0, self.TARGET),),
+            ),
+            industry_after=sha(
+                industry.replace(
+                    b"<szName>Registered One </szName>", b"<szName>Registered One</szName>"
+                )
+            ),
+            native_acceptance="synthetic-acceptance-only",
+            verified_stock_files_sha256=self.app._stock_file_context()["identity"],
+            preserved_goal_path=("Scenario", "OwnListItem", "szObjectName"),
+        )
+        return recipe, industry, scenario
+
+    def test_sealed_restoration_preserves_canonical_goal_and_all_other_bytes(self):
+        recipe, industry, scenario = self.restoration_fixture()
+        rules, binding = self.resolve(recipe)
+        self.assertEqual(len(rules[0].patches), 1)
+        self.assertEqual(rules[0].patches[0].old, industry)
+        self.assertEqual(
+            rules[0].patches[0].new,
+            industry.replace(
+                b"<szName>Registered One </szName>", b"<szName>Registered One</szName>"
+            ),
+        )
+        self.assertEqual((self.source / self.SCENARIO_PATH).read_bytes(), scenario)
+        self.assertEqual(binding.stock_files_sha256, recipe.verified_stock_files_sha256)
+        self.assertIn(recipe.native_acceptance, rules[0].provenance)
+        self.assertIn("new edition remains untested", rules[0].reason)
+
+    def test_sealed_restoration_refuses_changed_whole_stock_context(self):
+        recipe, _, _ = self.restoration_fixture()
+        (self.stock / "unrelated-model.kfm").write_bytes(b"changed dependency")
+        with self.assertRaisesRegex(RuleError, "acceptance context differs"):
+            self.resolve(recipe)
+
+    def test_sealed_restoration_does_not_relax_experimental_stock_collision_guard(self):
+        recipe, _, _ = self.restoration_fixture()
+        recipe = replace(
+            recipe, native_acceptance="", verified_stock_files_sha256="", preserved_goal_path=()
+        )
+        with self.assertRaisesRegex(RuleError, "collision or stock-absent"):
+            self.resolve(recipe)
+
+    def test_sealed_restoration_refuses_unaccepted_or_mixed_operations(self):
+        recipe, _, _ = self.restoration_fixture()
+        for change in (
+            dict(native_acceptance=""),
+            dict(verified_stock_files_sha256=""),
+            dict(preserved_goal_path=()),
+            dict(legacy_bank_path="other.nif"),
+            dict(scenario_after="a" * 64),
+        ):
+            with self.subTest(change=change), self.assertRaises(RuleError):
+                self.resolve(replace(recipe, **change))
+
+    def test_sealed_restoration_refuses_wrong_duplicate_or_extra_goal_occurrences(self):
+        recipe, _, scenario = self.restoration_fixture()
+        goal = scenario[scenario.index(b"<OwnListItem>") : scenario.index(b"</OwnListItem>") + 14]
+        cases = (
+            scenario.replace(b">Industry<", b">City<"),
+            scenario.replace(b"</Scenario>", goal + b"</Scenario>"),
+            scenario.replace(b"</Scenario>", b"<Other>Registered One</Other></Scenario>"),
+            scenario.replace(b"</Scenario>", b"<Other>Registered One </Other></Scenario>"),
+        )
+        for data in cases:
+            with self.subTest(data=data):
+                (self.source / self.SCENARIO_PATH).write_bytes(data)
+                altered = replace(
+                    recipe,
+                    scenario_sha256=sha(data),
+                    assets_sha256=assets_manifest_hash(self.source),
+                )
+                with self.assertRaises(RuleError):
+                    self.resolve(altered)
+
     def test_public_resolver_rejects_unknown_ids_without_touching_app(self):
         with self.assertRaisesRegex(RuleError, "Unknown compatibility recipe"):
             recipe_service.resolve_bundled_recipe(None, None, "not-bundled")

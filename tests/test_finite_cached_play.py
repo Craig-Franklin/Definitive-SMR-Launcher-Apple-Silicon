@@ -38,7 +38,8 @@ class FiniteCachedPlayTests(unittest.TestCase):
         )
         self.enterContext(
             patch.dict(
-                recipe_service._RECIPES, {self.binding.recipe_id: SimpleNamespace(additions=())}
+                recipe_service._RECIPES,
+                {self.binding.recipe_id: SimpleNamespace(additions=(), native_acceptance="")},
             )
         )
         self.library, self.launch = NativeLibrary(), Mock()

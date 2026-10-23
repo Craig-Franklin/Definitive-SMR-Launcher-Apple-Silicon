@@ -17,7 +17,13 @@ import stat
 from . import bank_model
 from .bank_applicability import assess_bank_applicability, compile_bank_patch
 from .activation import _assert_no_symlink_ancestor, _assert_regular_tree
-from .compatibility_recipes import COMPILER_VERSION, IdentityEdit, _parse, compile_identity_patch
+from .compatibility_recipes import (
+    COMPILER_VERSION,
+    IdentityEdit,
+    _parse,
+    compile_identity_patch,
+    compile_sealed_industry_restoration,
+)
 from .industry_registry import extract_supported_industry_registry
 from .recipe_identity import FILE_CONTEXT_ALGORITHM, RecipePreparationBinding, map_file_context
 from .rules import (
@@ -50,6 +56,9 @@ class _IdentityRecipe:
     scenario_after: str = ""
     ownership_edits: tuple[IdentityEdit, ...] = ()
     legacy_bank_path: str = ""
+    native_acceptance: str = ""
+    verified_stock_files_sha256: str = ""
+    preserved_goal_path: tuple[str, ...] = ()
 
 
 _HILL_COWHIDE_ADDITIONS = (
@@ -112,6 +121,34 @@ _HILL_COWHIDE_ADDITIONS = (
 
 
 _RECIPES = {
+    # One intentionally faulted, independently sealed authoring reference.
+    # Acceptance belongs to this transformation and context, not every new edition.
+    "controlled04-sealed-industry-restoration-v1": _IdentityRecipe(
+        recipe_id="controlled04-sealed-industry-restoration-v1",
+        archive_sha256="435667a7a388abdcaedacca77b3f92dbb7d253add4a4e91354e382cf47974a53",
+        game_sha256="981ca7180759d8578babf54cd9a4f76b93db503b33a7f1938c6b1427b95680f0",
+        assets_sha256="5010f853aec60b936702626fcb75bcad2bacab8d5eae5fa2ded95521b798224e",
+        scenario_path="UserMaps/M3ControlledFoodPlant04/RRT_Scenario_M3_Control_04.xml",
+        scenario_sha256="c217a0ebe68fcad59ad1c07ce6b35e7cfc5e885ef8b7f952bcc8ddf67b4fc11a",
+        industry_path="UserMaps/M3ControlledFoodPlant04/RRT_Industries_M3_Control_04.xml",
+        industry_before="1508b02ac2d1c5a7f7e3abffa001ffac6a9433e8f0cda98bfeae6815ea058f75",
+        industry_after="df81b2c7c06c56d6adc929b698b2910c6f02175d9ebee53851e795469d3d9e9e",
+        stock_industries_sha256="db8210cde6325ad9ffe0b40b53c1d01393e3ef3b9c7a9c5e82aa0599ef5342b6",
+        stock_depots_sha256="35c0bd07ed3f38e2ab1bad8ea5adc85499d0d737c6530e6e79414110686f7bd5",
+        aliases=(("Food Plant ", 23, "Food Plant"),),
+        native_acceptance="M3-reference04-20261023",
+        verified_stock_files_sha256="4c367d695711001e8f407daac69834e381aca4c13d59a5083b256e0f1ed7fb49",
+        preserved_goal_path=(
+            "RRTScenario",
+            "Eras",
+            "Era",
+            "VictoryConditions",
+            "Condition",
+            "OwnList",
+            "OwnListItem",
+            "szObjectName",
+        ),
+    ),
     # Experimental preparation; player availability is separate from gameplay acceptance.
     # This reproduces the historical three-file experiment, not a diagnosis
     # selected automatically from a crash fingerprint or legacy model header.
@@ -197,7 +234,7 @@ _RECIPES = {
 # availability in a frozen app. Bump this contract when compilation/preparation
 # semantics change. This digest identifies the contract, not binary code bytes.
 RECIPE_SERVICE_VERSION = (
-    "reviewed-stock-absent-city-v3-ownership-exact-bank-v1-existing-target-mtime-v1"
+    "reviewed-stock-absent-city-v3-ownership-exact-bank-v1-existing-target-mtime-v1-sealed-v1"
 )
 _HILL_COWHIDE_DONOR_ARCHIVE = "596c27fd554266b22424481670cd20c6c428a602f69570df3949873cd8c179df"
 
@@ -210,6 +247,15 @@ class RecipeChoice:
 
 
 _CHOICES = {
+    "controlled04-sealed-industry-restoration-v1": RecipeChoice(
+        "controlled04-sealed-industry-restoration-v1",
+        "Restore sealed author intent",
+        "Restores one intentionally faulted industry key to the independent controlled reference. "
+        "The exact reference passed gameplay, objectives, event and save/reopen acceptance. "
+        "All other authored bytes remain intact. Import preserves the original and creates a "
+        "separate edition. This newly prepared edition has no gameplay result of its own. "
+        "Other maps and arbitrary whitespace changes are not eligible.",
+    ),
     "az-canyon-v02-bank-and-industry-identifiers-v1": RecipeChoice(
         "az-canyon-v02-bank-and-industry-identifiers-v1",
         "Arizona — experimental repair",
@@ -438,6 +484,19 @@ def _resolve(app, record, recipe: _IdentityRecipe):
         raise RuleError("Recipe original asset inventory differs")
     source_context = map_file_context(source)
     stock_context = app._stock_file_context()
+    restoration = bool(recipe.native_acceptance)
+    if restoration and (
+        stock_context["identity"] != recipe.verified_stock_files_sha256
+        or len(recipe.aliases) != 1
+        or not recipe.preserved_goal_path
+        or recipe.additions
+        or recipe.ownership_edits
+        or recipe.scenario_after
+        or recipe.legacy_bank_path
+    ):
+        raise RuleError("Sealed restoration acceptance context differs")
+    if not restoration and (recipe.verified_stock_files_sha256 or recipe.preserved_goal_path):
+        raise RuleError("Sealed restoration requires explicit native acceptance")
     providers = _providers(stock_context, source_context)
     registry = extract_supported_industry_registry(
         _read(app.installation.executable, recipe.game_sha256, limit=512 * 1024 * 1024)
@@ -496,13 +555,15 @@ def _resolve(app, record, recipe: _IdentityRecipe):
             or old not in map_names
             or target in map_names
             or old in base_names
-            or target in base_names
+            or (target not in base_names if restoration else target in base_names)
             or old + " Annex" in base_annexes
             or target + " Annex" in base_annexes
             or old in aliases
             or target in aliases.values()
         ):
             raise RuleError("Recipe registry slot, collision or stock-absent precondition differs")
+        if restoration and old != target + " ":
+            raise RuleError("Sealed restoration requires the reviewed single-space fault")
         aliases[old] = target
         definition = next(
             n.parent for n in industry_nodes if n.path == key_path and n.raw_value == old
@@ -520,6 +581,7 @@ def _resolve(app, record, recipe: _IdentityRecipe):
     # occurrences outside the industry document. Only explicitly declared
     # scenario ownership references may change; other occurrences still refuse.
     relevant = set(aliases) | set(aliases.values())
+    preserved_goals = 0
     if bool(recipe.ownership_edits) != bool(recipe.scenario_after) or any(
         edit.kind != "industry-goal" or aliases.get(edit.source) != edit.target
         for edit in recipe.ownership_edits
@@ -532,12 +594,27 @@ def _resolve(app, record, recipe: _IdentityRecipe):
             if not path.casefold().endswith(".xml") or path == recipe.industry_path:
                 continue
             for node in _parse(_read(source / path, file["sha256"])):
+                preserved_goal = (
+                    restoration
+                    and path == recipe.scenario_path
+                    and node.path == recipe.preserved_goal_path
+                    and node.raw_value in aliases.values()
+                    and not node.children
+                    and [
+                        sibling.raw_value if not sibling.children else None
+                        for sibling in node.parent.children
+                        if sibling.path[-1] == "szObjectType"
+                    ]
+                    == ["Industry"]
+                )
+                if preserved_goal:
+                    preserved_goals += 1
                 declared_goal = path == recipe.scenario_path and any(
                     node.path == edit.path and node.raw_value == edit.source
                     for edit in recipe.ownership_edits
                 )
                 if (
-                    not declared_goal
+                    not (declared_goal or preserved_goal)
                     and (
                         node.raw_value in relevant
                         or node.path[-2:] == ("OwnListItem", "szObjectName")
@@ -548,13 +625,19 @@ def _resolve(app, record, recipe: _IdentityRecipe):
                     raise RuleError(
                         "Recipe has an unreviewed identity occurrence in another XML file"
                     )
-    patch = compile_identity_patch(
+    edits = tuple(IdentityEdit("industry", old, target) for old, target in aliases.items())
+    compile_arguments = dict(
         path=recipe.industry_path,
         data=source_data,
         before_sha256=recipe.industry_before,
         after_sha256=recipe.industry_after,
-        edits=tuple(IdentityEdit("industry", old, target) for old, target in aliases.items()),
     )
+    if restoration:
+        if preserved_goals != 1:
+            raise RuleError("Sealed restoration requires one preserved typed ownership goal")
+        patch = compile_sealed_industry_restoration(**compile_arguments, edit=edits[0])
+    else:
+        patch = compile_identity_patch(**compile_arguments, edits=edits)
     patches = [patch]
     if recipe.ownership_edits:
         patches.append(
@@ -619,11 +702,18 @@ def _resolve(app, record, recipe: _IdentityRecipe):
     rule = CompatibilityRule(
         recipe.recipe_id,
         2,
-        "Reviewed fixed-registry and exact original-input comparison",
+        (
+            "Sealed intent and native acceptance " + recipe.native_acceptance
+            if restoration
+            else "Reviewed fixed-registry and exact original-input comparison"
+        ),
         (
             "Experimental exact bank serialization and coupled industry ownership identities. "
             "Existing dependency concerns remain; rendering, collision and gameplay need separate validation."
             if recipe.legacy_bank_path
+            else "Restores only the sealed industry key; all other authored bytes are retained. "
+            "The exact reference passed native acceptance; this new edition remains untested."
+            if restoration
             else "Experimental distinct industry identities. Authored asset payload is preserved; internal aliases may remain visible. Gameplay must be tested separately."
         ),
         recipe.archive_sha256,

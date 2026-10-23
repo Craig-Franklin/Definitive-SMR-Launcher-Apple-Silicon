@@ -327,3 +327,57 @@ def compile_identity_patch(
     if hashlib.sha256(changed).hexdigest() != after_sha256:
         raise RuleError("Recipe output hash differs")
     return TokenPatch(path, before_sha256, after_sha256, data, changed)
+
+
+def compile_sealed_industry_restoration(
+    *,
+    path: str,
+    data: bytes,
+    before_sha256: str,
+    after_sha256: str,
+    edit: IdentityEdit,
+) -> TokenPatch:
+    """Restore one exact padded key to a separately established intended output.
+
+    The ordinary alias compiler deliberately refuses padded identities. This
+    separate operation accepts only one literal trailing ASCII space, with full
+    input/output hashes and one unambiguous definition span. It establishes byte
+    preservation, not author intent, engine applicability or runtime acceptance;
+    the recipe service must independently bind those before using this patch.
+    """
+    if hashlib.sha256(data).hexdigest() != before_sha256:
+        raise RuleError("Restoration source hash differs")
+    if (
+        not isinstance(edit, IdentityEdit)
+        or edit.kind != "industry"
+        or edit.count != 1
+        or edit.source != edit.target + " "
+        or edit.target != edit.target.strip()
+    ):
+        raise RuleError("Restoration requires one exact trailing-space industry key")
+    nodes = _parse(data)
+    keys = [node for node in nodes if node.path == _KINDS["industry"]]
+    records = [node for node in nodes if node.path == _KINDS["industry"][:-1]]
+    if (
+        len([node for node in nodes if node.path == _KINDS["industry"][:-2]]) != 1
+        or not records
+        or any(
+            len([child for child in record.children if child.path[-1] == "szName"]) != 1
+            for record in records
+        )
+        or any(node.children or not node.raw_value for node in keys)
+        or len({node.raw_value for node in keys}) != len(keys)
+        or edit.target in {node.raw_value for node in keys}
+    ):
+        raise RuleError("Restoration needs distinct, unambiguous industry definitions")
+    matches = [node for node in keys if node.raw_value == edit.source]
+    if len(matches) != 1:
+        raise RuleError("Restoration identity match count differs")
+    node = matches[0]
+    if data[node.start : node.end] != edit.source.encode("ascii"):
+        raise RuleError("Restoration requires literal plain identity text")
+    changed = data[: node.start] + edit.target.encode("ascii") + data[node.end :]
+    _parse(changed)
+    if hashlib.sha256(changed).hexdigest() != after_sha256:
+        raise RuleError("Restoration output differs from sealed intent")
+    return TokenPatch(path, before_sha256, after_sha256, data, changed)

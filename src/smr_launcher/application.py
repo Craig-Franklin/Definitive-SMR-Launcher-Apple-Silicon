@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from dataclasses import replace
 from datetime import datetime, timezone
 from contextlib import contextmanager, nullcontext
@@ -529,6 +529,7 @@ class LauncherApplication:
                 self._cool_library(keep=existing)
                 result = self._record_source(existing, remote) if remote else existing
                 self._discard_committed_download(source, inspection.source_sha256, remote)
+                self._restore_verified_import_locked(result)
                 return result
             archive = self._preserve_archive(source, inspection.source_sha256)
             if compact_library.config(self) is not None:
@@ -587,7 +588,36 @@ class LauncherApplication:
             )
             self._discard_committed_download(source, inspection.source_sha256, remote)
             self._cool_library(keep=record)
+            self._restore_verified_import_locked(record)
             return record
+
+    def _restore_verified_import_locked(self, record: MapRecord) -> None:
+        """Preserve the original first, then prepare only exact accepted recipes.
+
+        Caller owns the application lock. Experimental recipes never enter this
+        path, and each newly prepared edition retains its own untested status.
+        """
+        from .recipe_service import _RECIPES, recipe_choices, resolve_bundled_recipe
+        from .rules import RuleError
+
+        for choice in recipe_choices(record, self.installation.executable_sha256):
+            if not _RECIPES[choice.recipe_id].native_acceptance:
+                continue
+            self._warm_record(record)
+            try:
+                rules, binding = resolve_bundled_recipe(self, record, choice.recipe_id)
+                edition = self._create_compatibility_edition_locked(
+                    record,
+                    rules,
+                    label="sealed author intent",
+                    recipe_binding=binding,
+                    experimental=False,
+                )
+            except (RuleError, ApplicationError) as error:
+                raise ApplicationError(
+                    "Original imported and preserved; verified restoration withheld: " + str(error)
+                ) from error
+            self._cool_library(keep=edition)
 
     def _prepared_root(self, record: MapRecord) -> Path:
         return removal._leaf(self.prepared, record.prepared_directory, r"[0-9a-f]{32}")
@@ -1161,6 +1191,7 @@ class LauncherApplication:
         label: str,
         recipe_binding=None,
         recover_pending: bool = True,
+        experimental: bool = True,
     ) -> MapRecord:
         """Shared preparation transaction; caller must hold the application lock.
 
@@ -1183,6 +1214,15 @@ class LauncherApplication:
             raise ApplicationError("Compatibility edition needs explicit reviewed rules")
         if recipe_binding is not None and not isinstance(recipe_binding, RecipePreparationBinding):
             raise ApplicationError("Compiled edition needs a valid recipe binding")
+        accepted_transformation = ""
+        if recipe_binding is not None:
+            from .recipe_service import _RECIPES
+
+            recipe = _RECIPES.get(recipe_binding.recipe_id)
+            if recipe is not None:
+                accepted_transformation = recipe.native_acceptance
+        if not experimental and not accepted_transformation:
+            raise ApplicationError("Restored edition requires explicit native acceptance")
         self._stopped()
         self.profiles.recover(recover_pending=recover_pending)
         records = list(self.catalogue())
@@ -1265,7 +1305,9 @@ class LauncherApplication:
                 )
         new = replace(
             record,
-            name=record.name + " — Experimental " + label.strip(),
+            name=record.name
+            + (" — Experimental " if experimental else " — Restored ")
+            + label.strip(),
             variant_id=variant.variant_id,
             profile_id=profile_id,
             prepared_directory=prepared_name,
@@ -1295,6 +1337,8 @@ class LauncherApplication:
         )
         if variant.recipe_binding is not None:
             receipt.update(schema=2, recipe_binding=variant.recipe_binding)
+            if accepted_transformation:
+                receipt["verified_transformation"] = accepted_transformation
             new = replace(new, recipe_receipt_sha256=self._recipe_receipt_hash(receipt))
         receipts = self.library / "compatibility-preparations"
         _assert_no_symlink_ancestor(receipts)
@@ -1377,6 +1421,26 @@ class LauncherApplication:
             ):
                 raise ValueError("receipt binding differs")
             binding = receipt["recipe_binding"]
+            from .recipe_service import _RECIPES, compiler_contract_digest
+
+            recipe = _RECIPES.get(binding.get("recipe_id"))
+            if (
+                recipe is not None
+                and recipe.native_acceptance
+                and (
+                    binding["compiler_sha256"] != compiler_contract_digest()
+                    or binding["recipe_sha256"]
+                    != hashlib.sha256(
+                        json.dumps(asdict(recipe), sort_keys=True, separators=(",", ":")).encode()
+                    ).hexdigest()
+                    or binding["stock_files_sha256"] != recipe.verified_stock_files_sha256
+                )
+            ):
+                raise ValueError("verified transformation contract differs")
+            if receipt.get("verified_transformation") and (
+                recipe is None or receipt["verified_transformation"] != recipe.native_acceptance
+            ):
+                raise ValueError("verified transformation acceptance differs")
             root = (
                 self.profiles.live
                 if self.profiles._state()["active"] == record.profile_id

@@ -9,12 +9,14 @@ explains findings and missing coverage, and applies only independently verified,
 feature-preserving fixes to separate editions. The same inspection service must
 work on newly customized map directories without requiring import or activation.
 
-**Current step:** M3, complete the controlled, feature-preserving correction's
-native acceptance. M2.4 is accepted at the conditional mechanism scope below;
-exact live Liverpool/Manchester object attribution remains unresolved.
-M1 development/backend acceptance is complete. The installed launcher has not
-been replaced. M3's recorded native observations and narrow lifecycle pass remain
-separate from complete repair acceptance.
+**Current step:** final signed source checkpoint and programme audit. M4 passed
+its source, private packaged import and side-by-side installed development scopes.
+Publication remains pending the configured signer unlock; the programme is not
+complete. M3 acceptance belongs only to the exact sealed controlled reference.
+M2.4 remains accepted at its conditional mechanism scope; exact live
+Liverpool/Manchester object attribution remains unresolved. The existing notarized
+release is preserved beside the clearly named development installation. Other maps
+and historical experimental recipes do not inherit automatic repair eligibility.
 
 **Retained M2 limits:** a separate one-key Liverpool and Manchester 2
 diagnostic now loads a visible world; its original reached the six-GiB guard with
@@ -23,17 +25,19 @@ relevance of the key. Exact live object key/index and effective provider remain
 unobserved. Keeping authored display templates does not establish generic-menu
 name preservation. Resolve defaults, references and presentation before promoting
 a correction. Original Westeros remains the native loading counterexample. All
-completed trials restored independently; no automatic repair is eligible yet.
+completed trials restored independently. No automatic Liverpool/Manchester or
+other-map correction is eligible from that evidence. Only the separately accepted
+controlled reference restoration is eligible under M4.2.
 
 ## Milestones and observable acceptance
 
 | ID | Outcome | Status and acceptance |
 | --- | --- | --- |
 | M0 | Independent baseline and read-only CLI | Complete foundation. Independent research, exact-build controls, CLI and 221-original collection scan are retained. This does not establish verified repairs or universal compatibility. |
-| M1 | Better evidence coverage and launcher import reports | Complete for source/backend integration and private packaged acceptance. Unknown native selection remains explicit. Installed-app deployment and visual acceptance remain separate from these checks. |
+| M1 | Better evidence coverage and launcher import reports | Complete for source/backend integration and private packaged acceptance. Unknown native selection remains explicit. Installed-local development presentation is separately recorded under M4.3. |
 | M2 | One positively identified industry error class | Complete at the bounded conditional native-mechanism scope. Required construction/grouping predicates, independent controls, held-out intervention and loading counterexamples are recorded. Effective live key/index/provider attribution remains unresolved; a static registry miss alone is not confirmed map invalidity. |
-| M3 | One feature-preserving repair through native acceptance | Active, incomplete. Prove the correction and its complete reference/default closure. Prepare a separate edition, compare authored features, and verify load, representative play, relevant objectives/events, unique save, clean quit, exact reopen, continued play and restoration. No automatic repair promotion before these results. |
-| M4 | Import automation and customized-map workflow | Authoring slice complete at development/backend and isolated synthetic GUI scope; verified transformations remain pending M3. Automatically validate all imports. Apply only eligible verified transformations to separate editions; explain ambiguous corrections. Revalidate customized directories and invalidate stale evidence after content/build/dependency changes. The import and authoring paths must use the same rule implementation. |
+| M3 | One feature-preserving repair through native acceptance | Complete only for the exact controlled reference04 single-key restoration to its independently sealed intent. Resource/default and feature closure, actual Grain delivery/Food production, both objectives, Mail effect persistence/expiry/decay, named-save clean quit/exact reopen/continued play and independent restoration are recorded. Generic trimming, arbitrary aliases and other maps remain ineligible. Import promotion is M4.2. |
+| M4 | Import automation and customized-map workflow | Complete at the recorded local development installation scope: source/backend, actual private packaged import/reimport, installed correction-provenance and shared authoring/recheck consumers. Signed source publication remains outstanding. The existing notarized release is preserved. Automatically validate all imports. Apply only eligible verified transformations to separate editions; explain ambiguous corrections. Revalidate customized directories and invalidate stale evidence after content/build/dependency changes. The import and authoring paths must use the same rule implementation. |
 
 ### M1 acceptance checklist
 
@@ -100,19 +104,29 @@ previously sealed author-intent oracle; every remaining M3 requirement still app
 ### M4 acceptance checklist
 
 - [x] **M4.1 — Inspect customized directories.** Complete for development/backend
-  and isolated synthetic native-UI acceptance; installed deployment remains M4.3.
+  and isolated synthetic native-UI acceptance. Installed-local exact-candidate
+  authoring and recheck are additionally recorded under M4.3.
   Expose a read-only directory
   inspection action through the existing native launcher and shared inspection
   engine. Show exact inputs, build/analyzer provenance, categories and missing
   coverage. Recheck actual edited bytes; clear the prior observation if rechecking
   fails. Do not require import, activation or an enrolled catalogue record.
-- [ ] **M4.2 — Promote eligible transformations.** Integrate only M3-eligible
+- [x] **M4.2 — Promote eligible transformations.** Complete for exact controlled04
+  restoration at source and private packaged import scope. Integrate only M3-eligible
   verified transformations into import on separate editions, retaining source,
   output, dependency/build identities and feature-preservation evidence. Changed
   or ambiguous inputs must withhold promotion. No arbitrary industry aliases.
-- [ ] **M4.3 — Verify the complete workflow.** Exercise import and authoring
+- [x] **M4.3 — Verify the complete workflow.** Complete at the local side-by-side
+  development installation scope. Actual private package import/reimport combines
+  with unchanged import/recipe/compiler source and installed provenance/authoring
+  verification. The latest installed copy was not separately used to import.
+  Exercise import and authoring
   consumers, changed-input refusal, preservation and visible presentation. Keep
   synthetic/source/package checks distinct from M3's complete native acceptance.
+- [ ] **Final source checkpoint and audit.** Sign and push the reviewed original
+  source, synthetic tests and documentation; verify the exact published signature.
+  Retain the private requirement audit and honest unresolved research scope. Do
+  not complete the persistent goal until this remaining checkpoint is settled.
 
 ## How work stays on this plan
 
@@ -606,3 +620,156 @@ or inspection success is a universal compatibility certificate.
   failed attempt; the successful fresh trial used LaunchServices. This advances
   M4.3's private package/import presentation scope. Installed deployment, eligible
   transformations and complete M3/M4 acceptance remain open.
+
+- **23 October 2026 — Production applicability and continuation recovered.** The
+  same persistent goal resumed through its owning session; live status and unchanged
+  identity/history were verified. A specialist capacity failure had stalled ready
+  work. The latest game trial was already closed and independently restored; its
+  stale active-job resume note was corrected. That trial reopened the exact named
+  continuation save, retained 79,000 lifetime train revenue and increased it to
+  110,000. It created another uniquely named save and quit normally; that newest
+  save has not been reopened. Production and the connection objective remain open.
+  A bounded structural readback of the newest save found exactly one ordinary
+  industry, Food Works, and no Grain Farm. Installed-byte/disassembly checks explain
+  the initial placement: explicit industry locations select scenario placement,
+  and an empty retained location list creates no farm on that path. The normal
+  city-industry build action also excludes this noncity farm; the inspected random
+  event effects cannot create it. This does not prove every unexamined mechanism
+  impossible or diagnose other maps. Stop speculative construction toward an
+  assumed grain source. Preserve reference03, its positive evidence and incomplete
+  acceptance. Prepare a separate controlled reference with an explicit grain source
+  and four nearby eligible starting cities. Seal its intended features before
+  injecting the same single-key fault; the correction must restore that exact
+  oracle. Keep all existing models, production, placements, names, objectives,
+  events and effects, explicitly recording the new authoring additions. No native
+  acceptance transfers to the changed edition. Complete its full feature/resource
+  closure, gameplay, objective/event and named-save/reopen/restoration requirements
+  before any M3 or repair-promotion claim. M4.2 and full M4.3 remain open.
+
+- **23 October 2026 — Controlled reference and geometry checkpoints.** The new
+  sealed reference retained the intended features and placed a Grain Farm. Native
+  supply increased from one to four; the owned Food Works retained its name and
+  Grain-to-Food presentation. Actual delivery and conversion remain unproven.
+  Two exact named saves subsequently reopened with the authored farm, ownership,
+  railway and cash retained. Both trials quit normally and independently restored
+  protected data and preferences. A changed depot click still failed the native
+  proximity test. Independent saved-city/track and installed-code checks then
+  established that every existing rail curve lies outside New York's depot range;
+  another click on unchanged rail cannot resolve that geometry. A later bounded
+  construction trial cancelled before purchase because its required changed quote
+  could not be inspected through the available pointer controls. No new rail or
+  depot was purchased in that trial. Its newly named save remains unreopened; the
+  trial name does not establish a successful connection. Resolve the construction
+  input procedure before another attempt. Connection, actual production/delivery,
+  relevant event behavior, remaining resource/default closure and the complete
+  corresponding final save/reopen/restoration sequence remain required. No
+  automatic repair is eligible. The signed documentation checkpoint is waiting
+  for the configured signing application to be unlocked; no unsigned fallback or
+  publication of private evidence is permitted.
+
+- **23 October 2026 — Controlled connection objective verified.** The ordinary
+  two-click construction method built the justified city-directed extension. One
+  depot action then created the New York depot; settled cash changes and the
+  station report corroborated the result. Both authored ownership and connection
+  objectives displayed their success checks and the authored connection headline
+  appeared. The game wrote a new uniquely named save and quit normally; independent
+  readback verified all 97 protected roots and both preferences restored. That
+  newest save remains unreopened. A paused post-click preview saying the city
+  already had a depot described the resulting state, not proof of a preexisting
+  station or a refused purchase. The earlier atomic drag produced no construction
+  and remains a separate negative. Proceed to the actual farm-to-industry cargo
+  path, retaining event, resource/default and final lifecycle requirements. No
+  automatic repair is eligible from this objective checkpoint alone.
+
+- **23 October 2026 — Gentler farm approach and authored event.** An exact reopen
+  retained both objective success checks. A short farm spur was explicitly refused
+  as too sharp and cancelled without spending. The first longer-approach trial
+  expired during a host compaction capacity failure before any GUI action; its
+  original cleanup and independent restoration passed. It supplies no game result.
+  After host recovery and fresh finite admission, a longer New York-side approach
+  committed for 34,000. One annex action then cost 25,000; the native Grain Farm
+  Annex report showed four units of Grain, leaving 128,000 cash. The authored Mail
+  event headline appeared. The unique save made while paused records a nonneutral
+  Mail modifier and positive countdown; exact reopen and progression remain open.
+  Normal quit and independent readback restored all 100 protected roots and both
+  preferences. No train or Grain delivery occurred. The next test uses this exact
+  save to check annex persistence, a Grain route and actual Food production. Keep
+  material reference/default closure, event and final lifecycle acceptance, and
+  full M4 requirements open. No automatic repair is eligible.
+
+- **23 October 2026 — Controlled M3 acceptance.** The exact separate correction
+  restores the independently sealed reference04 intent, retaining authored models,
+  production, placements, names, typed references, both objectives and Mail effects.
+  A direct Grain train produced actual positive Food inventory; matching native
+  serializers and conversion instructions distinguish quantities from object IDs.
+  The explicitly named cargo save was written and quit cleanly, then that exact
+  save reopened and the same train continued. Train profit rose from 28,500 to
+  129,000, Food inventory from about 0.97 to 7.64, and both objectives remained
+  successful. Independent restoration passed after each operation. The authored
+  Mail effect persisted, expired, reset its countdown and decayed back to neutral
+  in bound saved samples. A later read-only native menu showed the intended icon;
+  no extra industry was purchased. The seven relevant stock candidates and actual
+  selected namespace matched the retained resource context. Defaults and unchanged
+  references have explicit consumer, unused-field or same-context preservation
+  dispositions; this is not proof that every animation or historical file-open was
+  observed. The latest normal quit restored all 103 protected roots and both
+  preferences. The private requirement audit accepts M3 only for this exact
+  controlled restoration. M4 must still bind an eligible compiler transformation
+  to exact inputs/build/dependencies, preserve separate editions and verify the
+  actual import and authoring workflow. No other map or historical recipe inherits
+  repair eligibility, and the programme remains incomplete.
+
+- **23 October 2026 — M4 exact-restoration source checkpoint.** Import now
+  prepares a separate restored edition only for the accepted controlled reference's
+  exact archive, executable, authored inventory and complete accepted stock context.
+  The compiler restores one literal industry key to the sealed intended hash;
+  the canonical typed ownership reference and all other authored bytes remain
+  unchanged. Historical experimental recipes retain their existing guards and
+  are not automatically applied. Every accepted preparation, including manual
+  preparation, records the transformation acceptance separately from the new
+  edition's own untested gameplay status. Changed compiler, acceptance, source,
+  stock or receipt inputs refuse the corresponding reuse. Independent review
+  found and closed a manual-first revocation gap. An initial full suite exposed
+  four historical-cache errors; narrowing the new contract check to accepted
+  transformations resolved them. The final suite passed 1,852 tests with 26
+  skips; quality and diff checks passed. An exact private resolver check produced
+  one patch whose four output files equal the sealed intended reference, with
+  source unchanged. These are source and mechanical correspondence results.
+  The rebuilt private package has not yet passed this complete import workflow;
+  installed deployment, visible presentation and preservation remain M4.3.
+  Signing is still waiting for the existing configured signer unlock. M4.2 and
+  M4.3 remain open pending their actual consumer acceptance.
+
+- **23 October 2026 — M4.2 private import acceptance.** The reviewed production
+  package imported the exact controlled defective archive and automatically created
+  its original plus one separately named restored edition. All four restored
+  authored files equal the independently sealed intent. Reimport reused those
+  exact two records. The visible restored view retained runtime-not-tested;
+  prepared and registered save folders remained empty. The same packaged service
+  inspected the separate authored directory and refreshed its observation on
+  recheck. Normal quit and independent readback preserved all 105 existing roots,
+  previous catalogue rows, managed state, preferences and executable metadata.
+  No activation or game occurred. M4.2 is accepted at that exact private consumer
+  scope. M4.3 remains open: show recorded correction provenance directly and verify
+  the installed local workflow. The existing installed Developer ID signed,
+  notarized release remains preserved. A clearly named development installation
+  can coexist with it. Development and release versions are stamped differently
+  by the existing release tooling. This is not a release authorization or
+  permission to replace signed software with an unlabelled development build.
+
+- **23 October 2026 — Installed-local M4.3 acceptance.** A uniquely named,
+  ad-hoc signed development copy was installed beside the unchanged notarized
+  release. Its newly compiled native frontend visibly showed the correction ID,
+  acceptance provenance, reason and before/after identities, while keeping the
+  new edition untested. Its shared read-only authoring inspection and recheck
+  displayed the exact directory, build, analyzer, stock context and refreshed
+  observation. Normal quit and independent readback preserved all 110 protected
+  roots, whole catalogue and managed state, preferences, executable and both app
+  bundles. No game, activation or save operation occurred. Independent audit
+  accepted composition with the earlier actual import/reimport consumer: the two
+  package source manifests differ only in the reviewed read-only provenance
+  response and native view. Import, recipe and compiler source are identical.
+  This is an installed local development workflow, not a release upgrade or a
+  claim that the latest installed copy itself repeated import. The final signed
+  source checkpoint remains pending the configured signer unlock; the persistent
+  programme remains active and incomplete.

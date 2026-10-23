@@ -335,6 +335,25 @@ def _dispatch(library, app, method, params, *, launch=None):
             result["checks_text"] = _checks_text(app.import_checks(record))
         except Exception as exc:
             result["checks_error"] = "Import checks need inspection: " + str(exc)
+        if record.recipe_receipt_sha256:
+            try:
+                receipt = app._validate_recipe_context(record, prepared_output=True)
+                result["preparation_text"] = (
+                    "Recorded preparation\n"
+                    + "\n\n".join(
+                        f"{rule['id']}\n{rule['provenance']}\n{rule['reason']}\n"
+                        + "\n".join(
+                            f"{file['path']}: {file['before']} → {file['after']}"
+                            for file in rule["files"]
+                        )
+                        for rule in receipt["rules"]
+                    )
+                    + "\n\nPreparation provenance does not award this edition gameplay verification."
+                )
+            except Exception as exc:
+                result["preparation_error"] = (
+                    "Recorded preparation is stale or unavailable: " + str(exc)
+                )
         try:
             result["legacy_text"] = LauncherWindow._verification_details(
                 app._legacy_verification_for(record)
