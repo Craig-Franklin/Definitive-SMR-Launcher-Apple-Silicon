@@ -9,14 +9,13 @@ explains findings and missing coverage, and applies only independently verified,
 feature-preserving fixes to separate editions. The same inspection service must
 work on newly customized map directories without requiring import or activation.
 
-**Current step:** final signed source checkpoint and programme audit. M4 passed
-its source, private packaged import and side-by-side installed development scopes.
-Publication remains pending the configured signer unlock; the programme is not
-complete. M3 acceptance belongs only to the exact sealed controlled reference.
-M2.4 remains accepted at its conditional mechanism scope; exact live
-Liverpool/Manchester object attribution remains unresolved. The existing notarized
-release is preserved beside the clearly named development installation. Other maps
-and historical experimental recipes do not inherit automatic repair eligibility.
+**Current step:** final completion readback. Local M0–M4 acceptance and the signed
+source checkpoint are verified. Commit `b460da7` is published on the authorized
+feature branch with GitHub's Verified/valid signature result. The final audit
+retains all scope limits below; persistent-goal completion follows this final
+record's publication and readback. The existing notarized release remains
+preserved beside the clearly named development installation. Other maps and
+historical experimental recipes do not inherit automatic repair eligibility.
 
 **Retained M2 limits:** a separate one-key Liverpool and Manchester 2
 diagnostic now loads a visible world; its original reached the six-GiB guard with
@@ -37,7 +36,7 @@ controlled reference restoration is eligible under M4.2.
 | M1 | Better evidence coverage and launcher import reports | Complete for source/backend integration and private packaged acceptance. Unknown native selection remains explicit. Installed-local development presentation is separately recorded under M4.3. |
 | M2 | One positively identified industry error class | Complete at the bounded conditional native-mechanism scope. Required construction/grouping predicates, independent controls, held-out intervention and loading counterexamples are recorded. Effective live key/index/provider attribution remains unresolved; a static registry miss alone is not confirmed map invalidity. |
 | M3 | One feature-preserving repair through native acceptance | Complete only for the exact controlled reference04 single-key restoration to its independently sealed intent. Resource/default and feature closure, actual Grain delivery/Food production, both objectives, Mail effect persistence/expiry/decay, named-save clean quit/exact reopen/continued play and independent restoration are recorded. Generic trimming, arbitrary aliases and other maps remain ineligible. Import promotion is M4.2. |
-| M4 | Import automation and customized-map workflow | Complete at the recorded local development installation scope: source/backend, actual private packaged import/reimport, installed correction-provenance and shared authoring/recheck consumers. Signed source publication remains outstanding. The existing notarized release is preserved. Automatically validate all imports. Apply only eligible verified transformations to separate editions; explain ambiguous corrections. Revalidate customized directories and invalidate stale evidence after content/build/dependency changes. The import and authoring paths must use the same rule implementation. |
+| M4 | Import automation and customized-map workflow | Complete at the recorded local development installation scope: source/backend, actual private packaged import/reimport, installed correction-provenance and shared authoring/recheck consumers. Signed source checkpoint `b460da7` is published and GitHub Verified. The existing notarized release is preserved. Automatically validate all imports. Apply only eligible verified transformations to separate editions; explain ambiguous corrections. Revalidate customized directories and invalidate stale evidence after content/build/dependency changes. The import and authoring paths must use the same rule implementation. |
 
 ### M1 acceptance checklist
 
@@ -123,10 +122,11 @@ previously sealed author-intent oracle; every remaining M3 requirement still app
   Exercise import and authoring
   consumers, changed-input refusal, preservation and visible presentation. Keep
   synthetic/source/package checks distinct from M3's complete native acceptance.
-- [ ] **Final source checkpoint and audit.** Sign and push the reviewed original
-  source, synthetic tests and documentation; verify the exact published signature.
-  Retain the private requirement audit and honest unresolved research scope. Do
-  not complete the persistent goal until this remaining checkpoint is settled.
+- [x] **Final source checkpoint and audit.** Reviewed original source, synthetic
+  tests and documentation were signed and pushed as `b460da7`; the exact remote
+  commit is GitHub Verified/valid. The requirement audit retains unresolved
+  research scope. Complete the same persistent goal only after this final
+  acceptance record is also published and read back.
 
 ## How work stays on this plan
 
@@ -773,3 +773,16 @@ or inspection success is a universal compatibility certificate.
   claim that the latest installed copy itself repeated import. The final signed
   source checkpoint remains pending the configured signer unlock; the persistent
   programme remains active and incomplete.
+
+- **23 October 2026 — Signed source publication.** The configured signer produced
+  source checkpoint `b460da7`, and the authorized feature branch points to that
+  exact commit. GitHub reports its SSH signature as Verified/valid. The final
+  suite ran 1,853 tests: 1,827 passed and 26 skipped, in 141.434 seconds. Quality
+  checks and the staged diff check passed. Independent code and final acceptance
+  reviews cover the recorded source and composed local workflow. Feature-branch
+  pushes do not trigger this repository's main/PR workflow; no remote CI run,
+  main merge, PR or release is claimed. All proprietary and raw evidence remains
+  private outside Git. The earlier signing failures remain in private history.
+  This closes publication of the implementation; the final documentation record
+  and exact goal completion readback follow. No scope is transferred to other
+  maps, arbitrary aliases, unknown native providers or unimplemented checks.
