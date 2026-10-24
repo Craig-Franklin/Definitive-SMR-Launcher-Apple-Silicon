@@ -11,9 +11,12 @@ work on newly customized map directories without requiring import or activation.
 
 **Current step:** A2 in the Austrian Monarchy section below, tracked in
 [issue #251](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/251).
-The new persistent goal was approved on 24 October 2026. Craig has explicitly
-confirmed he has finished playing; runtime still requires fresh finite admission
-against his actual post-play return state. The original M0–M4 and fresh-install
+The new persistent goal was approved on 24 October 2026. Craig now operates the
+launcher and game manually. Agent runtime control is withdrawn; diagnosis,
+separate candidate preparation and read-only evidence analysis continue. The
+unused automated job is retired, with no active lease or controller. Each manual
+attempt needs one explicit question, setup, memory/time bounds and retained
+evidence before another attempt is proposed. The original M0–M4 and fresh-install
 F1–F5 programmes remain
 complete at their recorded scopes. The historical reset authority below does
 not authorize new deletion. Original packages, maps, profiles and saves remain
@@ -905,8 +908,10 @@ not transfer acceptance to this map.
   Arbitrary aliases, blanket trimming, removed features, disabled animation,
   raised memory limits and engine patches are ineligible. Retain a precise
   refusal when feature preservation cannot be demonstrated.
-- [ ] **A4 — Accept the complete native lifecycle.** Wait for Craig's explicit
-  finished-playing confirmation and finite admission. Verify bounded loading/RAM,
+- [ ] **A4 — Accept the complete native lifecycle.** Craig operates the launcher
+  and game manually under an agreed bounded test. Agents must not send input,
+  stop his session, restore its profile or change live settings/saves. No debugger
+  attachment or automatic sampling is authorized. Verify bounded loading/RAM,
   representative gameplay, affected authored behavior, a named unique save,
   clean quit, exact-save reopen, continued play and restoration. Retain failures;
   a protection stop or deadline is not a spontaneous crash.
@@ -940,5 +945,20 @@ the existing goal identity/objective and exact subject to a sole primary actor i
 a distinct native runtime namespace, with all existing per-purpose admission,
 source, native ownership, observer, lease, deadline and final-input guards retained.
 Focused synthetic controls and bounded independent source review cover this
-ownership change. A fresh exact job, operational review and real preflight remain
-required. No game launch, map correction or native repair acceptance follows.
+ownership change. This automated approach was subsequently withdrawn before
+preflight or execution. No game launch, map correction or native repair acceptance
+follows.
+
+**24 October manual-testing checkpoint:** Craig retains all launcher/game input,
+launch, selection and quit operations. Read-only settlement found no controller,
+stop helper, sampler, active lease or waiting ticket. The unused case-local job
+is retired and cannot supply current admission. Retained evidence confirms one
+resource-limit incident with no stack; the bounded Apple-report search found no
+crash attributable to that session, and no retained game log was available.
+The next proposed diagnostic is one unchanged Original-edition load, with one
+human-triggered three-second sample if growth occurs, a six-GB Activity Monitor
+Memory threshold and a sixty-second limit from scenario Start. Displayed Memory
+and the historical native physical-footprint metric must remain distinct. Review
+the evidence and make one next decision before another attempt. No correction
+candidate is justified yet; all authored map bytes remain unchanged. A2–A5 stay
+open, including full feature, gameplay, unique-save and exact-reopen acceptance.
