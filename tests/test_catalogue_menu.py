@@ -2267,6 +2267,57 @@ class ServiceLifetimeTests(unittest.TestCase):
 
 
 class CatalogueCompositionTests(unittest.TestCase):
+    def test_observer_arms_from_tracked_staging_without_legacy_private_helper(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            packet = root / "observer"
+            packet.mkdir(mode=0o700)
+            (packet / "ready.json").write_text("{}")
+            (packet / "bootstrap.json").write_text("{}")
+            staged = root / "stop-support"
+            staged.mkdir(mode=0o700)
+            for name in ("pins.json", "proposal.json"):
+                (staged / name).write_bytes(
+                    (ROOT / "scripts/research/individual_stop_support" / name).read_bytes()
+                )
+            owner = SimpleNamespace(
+                root=root / "missing-private-support",
+                directory=root,
+                helper_packet=packet,
+                job=dict(job="synthetic-observer", closure=[]),
+                anchor=time.monotonic(),
+                launch_deadline=time.monotonic() + 5,
+                app=SimpleNamespace(installation=SimpleNamespace(executable="/synthetic/game")),
+                controller_identity=dict(executable=sys.executable),
+                creation=[],
+                publish=lambda *args: None,
+                write=lambda *args: None,
+                tick=lambda: None,
+                mutation_guard=nullcontext,
+            )
+            common = SimpleNamespace(
+                stage_stop_support=lambda directory, closure: staged,
+                verify_observer_bootstrap=lambda *args: None,
+            )
+            child = SimpleNamespace(pid=123)
+            process = Process(123, 1, sys.executable)
+            with (
+                patch.object(
+                    sys, "path", [str(ROOT / "scripts/research/individual_stop_support"), *sys.path]
+                ),
+                patch("frozen_mac_processes.MacProcesses") as processes,
+                patch.object(menu.subprocess, "Popen", return_value=child) as spawn,
+            ):
+                processes.return_value.inspect.return_value = process
+                try:
+                    menu.arm_observer(owner, common)
+                finally:
+                    if hasattr(owner, "helper_log"):
+                        owner.helper_log.close()
+            self.assertFalse(owner.root.exists())
+            self.assertEqual(spawn.call_args.args[0][2], str(staged / "host.py"))
+            self.assertEqual(owner.creation[0]["pid"], 123)
+
     def test_same_active_world_observation_requests_no_pause_or_gameplay(self):
         cls = menu.pilot_class(SimpleNamespace(), object)
         owner = cls.__new__(cls)

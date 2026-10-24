@@ -11,6 +11,11 @@ work on newly customized map directories without requiring import or activation.
 
 **Current step:** A2 in the Austrian Monarchy section below, tracked in
 [issue #251](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/251).
+**Runtime availability:** Craig is playing again. Runtime work is on hold until
+he explicitly confirms he has finished; only offline source and evidence work
+continues. No agent may control, sample, attach to or stop his game, or mutate its
+live profile, settings or saves.
+
 The new persistent goal was approved on 24 October 2026. Craig subsequently
 authorized needed diagnostics, a bounded stack capture and agent launch/Ok, with
 no gameplay input if the map loads. This requires a fresh finite job; the earlier
@@ -977,3 +982,16 @@ and Ok, with no gameplay if loading succeeds. A narrow explicit same-active
 direct-LOAD mode avoids an unnecessary profile exchange for the already active
 map. It preserves prior logs and restores mutable preferences only after owned
 exit; source controls and review remain below runtime admission or acceptance.
+
+**24 October observer portability checkpoint:** Two finite attempts refused before
+any game launch or input. The first fresh configuration lacked an explicit
+unpaused flag. The corrected packet then exposed a legacy private-helper path in
+the packaged observer route. That route now stages the reviewed tracked helper
+and invokes its maintained host. A real observer bootstrap control passed with
+the legacy private directory absent; the owned control child was reaped. The
+focused synthetic suite passed 117 tests and quality passed. Both failed owners
+were independently settled, preservation matched and their leases were released.
+No stack sample or new game attempt occurred. Craig then reported playing again;
+the queue is empty, old job controls are fenced terminal, and no successor is
+armed. This source checkpoint supplies no map diagnosis, correction or lifecycle
+acceptance. A2–A5 remain open.

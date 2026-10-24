@@ -871,7 +871,7 @@ def arm_observer(owner, common):
     from frozen_mac_processes import MacProcesses
     from wrapper import bounded
 
-    helper = owner.root / "stop-helper"
+    helper = common.stage_stop_support(owner.directory / "stop-support", owner.job["closure"])
     owner.code = sha(read_plain(helper / "pins.json"))
     owner.nonce = uuid.uuid4().hex
     admission = dict(
@@ -908,7 +908,7 @@ def arm_observer(owner, common):
     before = time.monotonic()
     with owner.mutation_guard():
         owner.observer = subprocess.Popen(
-            [sys.executable, "-B", str(helper / "agent_host.py"), str(owner.helper_packet)],
+            [sys.executable, "-B", str(helper / "host.py"), str(owner.helper_packet)],
             stdout=owner.helper_log,
             stderr=subprocess.STDOUT,
         )
