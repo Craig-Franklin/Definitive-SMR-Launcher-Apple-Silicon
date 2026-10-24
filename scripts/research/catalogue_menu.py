@@ -500,8 +500,21 @@ def verify_sibling_saves(owner):
     )
 
 
+def same_active_load(job):
+    """Select only the explicitly admitted direct load of the current profile."""
+    return (
+        job.get("purpose") == DIRECT_LOAD_PURPOSE
+        and job.get("catalogue_menu", {}).get("same_active_load") is True
+    )
+
+
 def verify_config(job):
     config = job["catalogue_menu"]
+    active_load = config.get("same_active_load", False)
+    require(
+        type(active_load) is bool and (not active_load or job["purpose"] == DIRECT_LOAD_PURPOSE),
+        "Same-active mode is direct LOAD only",
+    )
     if "window_probe" in config:
         verify_window_probe(job)
     target = config["target"]
@@ -576,7 +589,11 @@ def verify_config(job):
     )
     require(
         target["profile_id"] == "map-" + target["variant_id"]
-        and target["profile_id"] != job["return_profile"]
+        and (
+            target["profile_id"] == job["return_profile"]
+            if active_load
+            else target["profile_id"] != job["return_profile"]
+        )
         and (
             len(target["scenarios"]) in (1, 2)
             and len({Path(s).name.casefold() for s in target["scenarios"]})
@@ -989,6 +1006,7 @@ def restore_catalogue(owner):
     p = owner.profiles
     target_id = owner.config["target"]["profile_id"]
     return_id = owner.job["return_profile"]
+    active_load = same_active_load(owner.job)
     with owner.app._locked(nonblocking=True, recover_removal=False), restoration_guard(owner):
         active = p._state()["active"]
         require(active in (target_id, return_id), "Foreign active profile; restoration refused")
@@ -997,8 +1015,11 @@ def restore_catalogue(owner):
             "Unexpected return activation after dispatch",
         )
         target = p.live if active == target_id else p._profile_path(target_id)
-        returned = p._profile_path(return_id) if active == target_id else p.live
-        require(tree_files(returned) == owner.baseline["return_files"], "Return profile changed")
+        if not active_load:
+            returned = p._profile_path(return_id) if active == target_id else p.live
+            require(
+                tree_files(returned) == owner.baseline["return_files"], "Return profile changed"
+            )
         target_files_unchanged(owner, target)
         verify_sibling_saves(owner)
         p._marker(target, target_id)
@@ -1013,12 +1034,25 @@ def restore_catalogue(owner):
                 sha(read_plain(row["copy"], maximum=262144)) == row["sha256"],
                 "Declared preimage changed",
             )
+        log_preimages = getattr(owner, "active_log_preimages", ())
+        if active_load:
+            require(
+                {row["name"] for row in log_preimages}
+                == {name for name in owner.baseline["target_files"] if name.startswith("Logs/")},
+                "Active-profile log preimages incomplete",
+            )
+        for row in log_preimages:
+            actual = file_facts(row["copy"])
+            require(
+                all(actual[k] == row["facts"][k] for k in ("sha256", "bytes", "mode", "mtime_ns")),
+                "Preserved active-profile log changed",
+            )
         target_post = tree_files(target)
-        if active == target_id:
+        if active == target_id and not active_load:
             # The outer restoration guard already holds the same STATE lock.
             # Keep that fence through the maintained exchange without reentry.
             p.switch(return_id, mutation_guard=nullcontext)
-        target = p._profile_path(target_id)
+        target = p.live if active_load else p._profile_path(target_id)
         for index, row in enumerate(owner.preimages):
             path = target / "Settings.ini" if row["role"] == "settings" else Path(row["path"])
             before = read_plain(row["copy"], maximum=262144)
@@ -1049,9 +1083,14 @@ def restore_catalogue(owner):
                 and actual["mtime_ns"] == row["mtime_ns"],
                 "Declared preimage readback failed",
             )
-        require(
-            tree_files(p.live) == owner.baseline["return_files"], "Return profile readback differs"
-        )
+        if active_load:
+            require(p._state()["active"] == target_id, "Same-active profile changed")
+            existing_target_unchanged(p.live, owner.baseline["return_files"])
+        else:
+            require(
+                tree_files(p.live) == owner.baseline["return_files"],
+                "Return profile readback differs",
+            )
         after = target_files_unchanged(owner, target)
         require(
             all(
@@ -1408,7 +1447,7 @@ def pilot_class(common, agent_class):
                 and list(record.scenarios) == target["scenarios"],
                 "Catalogue target drift",
             )
-            root = p._profile_path(record.profile_id)
+            root = p.live if same_active_load(self.job) else p._profile_path(record.profile_id)
             p._marker(root, record.profile_id)
             require(
                 (root / "Logs").is_dir() and not (root / "Logs").is_symlink(),
@@ -1459,6 +1498,16 @@ def pilot_class(common, agent_class):
                 "Archive drift",
             )
             self.baseline = baseline
+            self.active_log_preimages = []
+            if same_active_load(self.job):
+                for name, facts in baseline["target_files"].items():
+                    if name.startswith("Logs/"):
+                        copy = self.directory / "log-preimages" / name.removeprefix("Logs/")
+                        copy.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                        preserve_autosave_preimage(root / name, copy, facts)
+                        self.active_log_preimages.append(
+                            dict(name=name, copy=str(copy), facts=facts)
+                        )
             if self.job["purpose"] == GAMEPLAY_PURPOSE:
                 proof = gameplay_origin(self.job)
                 self.gameplay_autosave_preimages = {
@@ -1496,6 +1545,7 @@ def pilot_class(common, agent_class):
                     target=target,
                     baseline=baseline,
                     mutable_preimages=self.preimages,
+                    active_log_preimages=self.active_log_preimages,
                     **(
                         {
                             "owned_test_autosave_preimages": {
@@ -1716,7 +1766,13 @@ def pilot_class(common, agent_class):
                             if self.job["purpose"] == DIRECT_LOAD_PURPOSE
                             else ""
                         )
-                        + " before starting once. Observe its playable world, HUD funds/year and actual city; pause using the visible control. No construction, purchases, Load, saves or settings changes. If the exact scenario cannot be verified or loading cannot finish promptly, return partial with no input; normal quit follows.",
+                        + " before starting once. Observe its playable world, HUD funds/year and actual city; "
+                        + (
+                            "send no gameplay or pause input; normal quit follows. "
+                            if same_active_load(self.job)
+                            else "pause using the visible control. "
+                        )
+                        + "No construction, purchases, Load, saves or settings changes. If the exact scenario cannot be verified or loading cannot finish promptly, return partial with no input; normal quit follows.",
                     ),
                 )
             self.menu_work_active = True

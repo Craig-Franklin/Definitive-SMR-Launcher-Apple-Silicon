@@ -129,6 +129,80 @@ class FreshOriginalPrepareTests(unittest.TestCase):
         self.assertFalse(self.original.exists())
         self.assertEqual(len(self.owner.preimages), 3)
 
+    def prepare_same_active(self):
+        owner = self.owner
+        target = owner.config["target"]["profile_id"]
+        owner.app.activate(target)
+        (owner.profiles.live / "Logs/prior.log").write_bytes(b"prior diagnostic")
+        owner.config["same_active_load"] = True
+        owner.job.update(return_profile=target, catalogue_menu=owner.config)
+        baseline = owner.config["preservation"]
+        baseline.update(
+            return_files=menu.tree_files(owner.profiles.live),
+            target_files=menu.tree_files(owner.profiles.live),
+            sibling_saves=menu.sibling_saves(owner.app, target, target),
+        )
+        baseline["immutable"].update(
+            {
+                str(self.original / name): facts
+                for name, facts in menu.tree_files(self.original).items()
+            }
+        )
+        owner.config["mutable_preimages"]["settings"] = menu.file_facts(
+            owner.profiles.live / "Settings.ini"
+        )
+        self.prepare()
+        owner.__dict__.update(
+            dispatch_settled=True,
+            open_attempted=True,
+            service=None,
+            anchor=time.monotonic(),
+            journal=SimpleNamespace(append=lambda *args: None),
+            require_settled_input=lambda: None,
+            control=SimpleNamespace(cleanup_guard=nullcontext),
+        )
+
+    def test_same_active_load_restores_in_place_and_retains_old_and_new_logs(self):
+        self.prepare_same_active()
+        owner = self.owner
+        active = owner.profiles._state()["active"]
+        settings = (owner.profiles.live / "Settings.ini").read_bytes()
+        (owner.profiles.live / "Settings.ini").write_bytes(b"changed by game")
+        (owner.profiles.live / "Logs/prior.log").write_bytes(b"updated diagnostic")
+        (owner.profiles.live / "Logs/new.log").write_bytes(b"new diagnostic")
+        with patch.object(owner.profiles, "switch", side_effect=AssertionError("No exchange")):
+            self.assertTrue(menu.restore_catalogue(owner))
+        self.assertEqual(owner.profiles._state()["active"], active)
+        self.assertFalse(owner.profiles._profile_path(active).exists())
+        self.assertEqual((owner.profiles.live / "Settings.ini").read_bytes(), settings)
+        self.assertEqual(
+            (owner.profiles.live / "Logs/prior.log").read_bytes(), b"updated diagnostic"
+        )
+        self.assertEqual(
+            (owner.directory / "log-preimages/prior.log").read_bytes(), b"prior diagnostic"
+        )
+        self.assertEqual((owner.profiles.live / "Logs/new.log").read_bytes(), b"new diagnostic")
+
+    def test_same_active_load_preserved_log_drift_refuses_before_restore(self):
+        self.prepare_same_active()
+        (self.owner.directory / "log-preimages/prior.log").write_bytes(b"corrupted")
+        with self.assertRaisesRegex(ControlRefused, "Preserved active-profile log changed"):
+            menu.restore_catalogue(self.owner)
+
+    def test_same_active_load_requires_every_prior_log_preimage(self):
+        self.prepare_same_active()
+        self.owner.active_log_preimages.clear()
+        with self.assertRaisesRegex(ControlRefused, "log preimages incomplete"):
+            menu.restore_catalogue(self.owner)
+
+    def test_same_active_load_refuses_existing_asset_changes(self):
+        self.prepare_same_active()
+        before = self.owner.baseline["target_files"]
+        name = next(name for name in before if name.startswith("UserMaps/"))
+        (self.owner.profiles.live / name).write_bytes(b"changed authored map")
+        with self.assertRaisesRegex(ControlRefused, "Existing target file changed"):
+            menu.restore_catalogue(self.owner)
+
     def test_fresh_original_real_switch_and_restore_keeps_return_exact(self):
         self.prepare()
         owner = self.owner
@@ -1619,6 +1693,23 @@ class CatalogueRestoreTests(unittest.TestCase):
     def test_single_scenario_direct_load_real_entry_decisions_world_and_normal_quit(self):
         self.assert_direct_load_lifecycle(1)
 
+    def test_same_active_direct_load_requires_explicit_exact_mode(self):
+        job, admission = self.direct_load_entry(1)
+        job["return_profile"] = job["catalogue_menu"]["target"]["profile_id"]
+        with self.assertRaisesRegex(ControlRefused, "Distinct edition"):
+            driver.verify_entry(job, admission, "a" * 64)
+        job["catalogue_menu"]["same_active_load"] = True
+        driver.verify_entry(job, admission, "a" * 64)
+        job["catalogue_menu"]["same_active_load"] = "true"
+        with self.assertRaisesRegex(ControlRefused, "Same-active mode"):
+            driver.verify_entry(job, admission, "a" * 64)
+
+    def test_same_active_mode_cannot_authorize_other_purposes(self):
+        job, admission = self.entry_contract(driver.CACHED_LOAD_PURPOSE)
+        job["catalogue_menu"]["same_active_load"] = True
+        with self.assertRaisesRegex(ControlRefused, "Same-active mode"):
+            driver.verify_entry(job, admission, "a" * 64)
+
     def assert_direct_load_lifecycle(self, scenario_count):
         job, admission = self.direct_load_entry(scenario_count)
         route = route_fixtures.AgentRouteTests()
@@ -2176,6 +2267,28 @@ class ServiceLifetimeTests(unittest.TestCase):
 
 
 class CatalogueCompositionTests(unittest.TestCase):
+    def test_same_active_world_observation_requests_no_pause_or_gameplay(self):
+        cls = menu.pilot_class(SimpleNamespace(), object)
+        owner = cls.__new__(cls)
+        owner.config = dict(
+            scenario_title="Synthetic Canyon", scenario_subtitle="Version 2", same_active_load=True
+        )
+        owner.job = dict(purpose=menu.DIRECT_LOAD_PURPOSE, catalogue_menu=owner.config)
+        owner.anchor = time.monotonic()
+        calls = []
+
+        def stage(name, instruction):
+            calls.append(name)
+            if name == "world":
+                self.assertIn("send no gameplay or pause input", instruction)
+                self.assertNotIn("pause using the visible control", instruction)
+            return dict(stage=name)
+
+        owner.decisions = SimpleNamespace(stage=stage)
+        owner.normal_quit = lambda *args: calls.append("quit")
+        owner.observe()
+        self.assertEqual(calls, ["launcher", "world", "quit"])
+
     def test_load_owner_observes_only_exact_world_then_existing_quit(self):
         cls = menu.pilot_class(SimpleNamespace(), object)
         owner = cls.__new__(cls)

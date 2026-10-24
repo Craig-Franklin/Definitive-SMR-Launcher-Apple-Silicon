@@ -93,6 +93,17 @@ restoration and terminal settlement succeeds. Before removing a worker checkout,
 verify that required reusable source is tracked and its session/owned cleanup is
 settled; preserve private receipts and current user data separately.
 
+For an explicitly authorized direct catalogue LOAD of the already active edition,
+`catalogue_menu.same_active_load: true` binds target and return to that same profile.
+This mode still requires empty initial saves and the complete fresh admission.
+Preparation reads the live target and preserves existing log preimages. Cleanup
+requires settled input, dispatch and exact game absence before restoring declared
+mutable preferences in place; it performs no profile exchange. Existing assets,
+saved files, sibling saves and immutable inputs retain their checks, while new
+diagnostic files and updated logs are retained. The world observation requests no
+pause or gameplay input, then uses normal Quit. Other purposes and ordinary LOAD
+keep their distinct-profile requirement. This mode authorizes no sampler by itself.
+
 ## Launcher entry points
 
 The existing command bridge already provides structured status and launch:

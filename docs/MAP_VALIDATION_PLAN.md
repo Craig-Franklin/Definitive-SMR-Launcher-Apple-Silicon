@@ -11,12 +11,13 @@ work on newly customized map directories without requiring import or activation.
 
 **Current step:** A2 in the Austrian Monarchy section below, tracked in
 [issue #251](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/251).
-The new persistent goal was approved on 24 October 2026. Craig now operates the
-launcher and game manually. Agent runtime control is withdrawn; diagnosis,
-separate candidate preparation and read-only evidence analysis continue. The
-unused automated job is retired, with no active lease or controller. Each manual
-attempt needs one explicit question, setup, memory/time bounds and retained
-evidence before another attempt is proposed. The original M0–M4 and fresh-install
+The new persistent goal was approved on 24 October 2026. Craig subsequently
+authorized needed diagnostics, a bounded stack capture and agent launch/Ok, with
+no gameplay input if the map loads. This requires a fresh finite job; the earlier
+unused automated job remains retired. Current authority does not permit taking
+over a user-owned game or restoring a profile underneath one. Each attempt needs
+one explicit question, setup, memory/time bounds and retained evidence before
+another attempt is proposed. The original M0–M4 and fresh-install
 F1–F5 programmes remain
 complete at their recorded scopes. The historical reset authority below does
 not authorize new deletion. Original packages, maps, profiles and saves remain
@@ -908,10 +909,11 @@ not transfer acceptance to this map.
   Arbitrary aliases, blanket trimming, removed features, disabled animation,
   raised memory limits and engine patches are ineligible. Retain a precise
   refusal when feature preservation cannot be demonstrated.
-- [ ] **A4 — Accept the complete native lifecycle.** Craig operates the launcher
-  and game manually under an agreed bounded test. Agents must not send input,
-  stop his session, restore its profile or change live settings/saves. No debugger
-  attachment or automatic sampling is authorized. Verify bounded loading/RAM,
+- [ ] **A4 — Accept the complete native lifecycle.** Use manual observations or
+  the specifically authorized finite launch/capture scope. Current delegated
+  input ends at loading; no gameplay input follows a visible world. Never stop a
+  user-owned session or restore its profile underneath it. All diagnostic access
+  needs its actual current authorization and exact-process binding. Verify bounded loading/RAM,
   representative gameplay, affected authored behavior, a named unique save,
   clean quit, exact-save reopen, continued play and restoration. Retain failures;
   a protection stop or deadline is not a spontaneous crash.
@@ -962,3 +964,16 @@ and the historical native physical-footprint metric must remain distinct. Review
 the evidence and make one next decision before another attempt. No correction
 candidate is justified yet; all authored map bytes remain unchanged. A2–A5 stay
 open, including full feature, gameplay, unique-save and exact-reopen acceptance.
+
+**24 October observed growth and renewed diagnostic authority:** One human-operated
+attempt produced a native physical-footprint curve and another exact-process/map
+resource-limit incident. Memory grew by about 2.73 GB over two seconds; the last
+observer reading was 7.59 GB, while the independent launcher incident recorded
+13.59 GiB. Monitor time is not exact scenario-start time. No causal stack was
+captured: its permission arrived after the capture bound. The bounded report
+search found no attributable Apple crash report. No map correction or feature
+acceptance follows. Craig then authorized needed diagnostic capture plus launch
+and Ok, with no gameplay if loading succeeds. A narrow explicit same-active
+direct-LOAD mode avoids an unnecessary profile exchange for the already active
+map. It preserves prior logs and restores mutable preferences only after owned
+exit; source controls and review remain below runtime admission or acceptance.
