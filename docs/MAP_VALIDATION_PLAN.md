@@ -9,15 +9,14 @@ explains findings and missing coverage, and applies only independently verified,
 feature-preserving fixes to separate editions. The same inspection service must
 work on newly customized map directories without requiring import or activation.
 
-**Current step:** F1–F5 accepted for the separately approved fresh-install
-follow-on below. This final documentation checkpoint records the audit; native
-goal completion follows its signed remote publication and status readback.
-The original M0–M4 programme is complete at its recorded scopes; its goal completion
-and signed source publication are retained. Craig approved a new persistent goal
-on 23 October 2026 for fresh-state GUI acceptance, PR/merge and the resulting
-signed release. Old launcher-managed maps and saves are disposable. Research,
-Ghidra, the installed game and files outside the launcher reset remain preserved.
-Other maps and historical recipes do not inherit automatic repair eligibility.
+**Current step:** A2 in the Austrian Monarchy section below, tracked in
+[issue #251](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/251).
+The new persistent goal was approved on 24 October 2026. Work is offline while
+Craig plays; runtime requires his explicit finished-playing confirmation and
+finite admission. The original M0–M4 and fresh-install F1–F5 programmes remain
+complete at their recorded scopes. The historical reset authority below does
+not authorize new deletion. Original packages, maps, profiles and saves remain
+preserved. Other maps and historical recipes do not inherit repair eligibility.
 
 **Retained M2 limits:** a separate one-key Liverpool and Manchester 2
 diagnostic now loads a visible world; its original reached the six-GiB guard with
@@ -791,7 +790,7 @@ or inspection success is a universal compatibility certificate.
 
 ## Fresh-install follow-on — approved 23 October 2026
 
-This is the only active checklist. The private execution plan and compact resume
+This completed checklist is retained as history. The private execution plan and compact resume
 provide operational details. Use existing helpers and candidate evidence; do not
 repeat the completed research, collection scan or native programme.
 
@@ -880,3 +879,52 @@ release F3/F4 artifact delivery 30%, installed release GUI acceptance/final audi
   readback before native goal completion. This does not extend automatic repair
   eligibility to India or other maps, award gameplay verification to a new import,
   or resolve the documented native-provider and unimplemented-check limits.
+
+## Austrian Monarchy RAM-load repair — approved 24 October 2026
+
+This is the sole active checklist, tracked in
+[issue #251](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/251).
+The goal covers this exact map and a feature-preserving separate edition.
+Diagnosis or successful loading alone cannot complete it. Existing native
+findings and original-map counterexamples constrain the investigation; they do
+not transfer acceptance to this map.
+
+- [x] **A1 — Bind the offline case.** Verify the exact original archive, selected
+  variant/scenario, retained report and resource-limit incident. Preserve imported
+  and prepared sources and work on separate stat-fenced copies. Match native
+  build, UUID and slice to existing research. Retain one compact private resume.
+- [ ] **A2 — Establish exact-map cause.** Reconcile incident timing and test the
+  conditional industry-allocation mechanism against effective definitions,
+  placements, construction and registry lookup. Separate confirmed facts from
+  unresolved providers and actual runtime reachability. Change approach after
+  two unsuccessful hypotheses or 15 minutes without decision-changing evidence.
+- [ ] **A3 — Preserve the authored map.** Produce only a justified separate
+  candidate. Account for defaults/list merges, models, production, placements,
+  names, typed references, objectives, events/effects and save identities.
+  Arbitrary aliases, blanket trimming, removed features, disabled animation,
+  raised memory limits and engine patches are ineligible. Retain a precise
+  refusal when feature preservation cannot be demonstrated.
+- [ ] **A4 — Accept the complete native lifecycle.** Wait for Craig's explicit
+  finished-playing confirmation and finite admission. Verify bounded loading/RAM,
+  representative gameplay, affected authored behavior, a named unique save,
+  clean quit, exact-save reopen, continued play and restoration. Retain failures;
+  a protection stop or deadline is not a spontaneous crash.
+- [ ] **A5 — Integrate and audit only the accepted transformation.** Reuse the
+  existing inspector, typed edits, preservation and separate-edition services.
+  Dispatch a genuinely different recipe explicitly without weakening sealed
+  restoration guards. Add independent positive/negative/counterexample and
+  changed-input controls. Keep new editions runtime-not-tested. Complete required
+  review, focused checks, signed publication and GitHub Verified readback, then
+  audit every requirement before completing this goal. No release or installed
+  app replacement is authorized.
+
+**24 October offline checkpoint:** The exact archive and four retained receipts
+verified; the private 474-file source copy matches the import and cached map
+content. The bound incident records 14.1844 GiB with loading unknown. The separate
+15.1 GiB display lacks retained timing correspondence. Static inspection finds
+31 industry definitions, 20 outside the fixed registry, with 63 explicit locations
+across 18 outside-registry definitions. None is a whitespace/case-only canonical
+correction. These are conditional leads; successful animation construction,
+effective native providers and the actual failing consumer are unobserved.
+No correction is accepted, no launcher recipe was added, and no game or live
+profile operation occurred.
