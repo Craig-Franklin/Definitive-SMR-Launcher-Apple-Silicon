@@ -30,6 +30,7 @@ from active_job_control import (
     sha,
 )
 from finite_operation import run_calibration
+from goal_owner import verify_root_scope
 from smr_launcher.scenario_evidence import canonical
 from save_cycle import observe_save_cycle
 from unique_save_file import SaveIntent, SaveScope, finite
@@ -1532,9 +1533,9 @@ def verify_entry(job, admission, job_sha):
         and str(Path.cwd()) == actor["cwd"],
         "Actual delegated caller required",
     )
+    verify_root_scope(job, actor)
     require(
-        job["root"]["run"] == "run_9c111880b18c"
-        and admission["decision"] == admission_decision
+        admission["decision"] == admission_decision
         and admission["job_sha256"] == job_sha
         and admission["runtime_owner"] == actor["terminal"]
         and admission["root"] == job["root"],
@@ -1614,6 +1615,7 @@ def verify_entry(job, admission, job_sha):
         str(repository / "scripts/research" / name)
         for name in (
             "active_job_control.py",
+            "goal_owner.py",
             "individual_stop_support/host.py",
             "finite_operation.py",
             "save_cycle.py",

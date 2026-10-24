@@ -11,9 +11,10 @@ work on newly customized map directories without requiring import or activation.
 
 **Current step:** A2 in the Austrian Monarchy section below, tracked in
 [issue #251](https://github.com/Craig-Franklin/Definitive-SMR-Launcher-Apple-Silicon/issues/251).
-The new persistent goal was approved on 24 October 2026. Work is offline while
-Craig plays; runtime requires his explicit finished-playing confirmation and
-finite admission. The original M0–M4 and fresh-install F1–F5 programmes remain
+The new persistent goal was approved on 24 October 2026. Craig has explicitly
+confirmed he has finished playing; runtime still requires fresh finite admission
+against his actual post-play return state. The original M0–M4 and fresh-install
+F1–F5 programmes remain
 complete at their recorded scopes. The historical reset authority below does
 not authorize new deletion. Original packages, maps, profiles and saves remain
 preserved. Other maps and historical recipes do not inherit repair eligibility.
@@ -928,3 +929,16 @@ correction. These are conditional leads; successful animation construction,
 effective native providers and the actual failing consumer are unobserved.
 No correction is accepted, no launcher recipe was added, and no game or live
 profile operation occurred.
+
+**24 October post-play ownership checkpoint:** The same persistent goal resumed
+after Craig's explicit confirmation. Read-only checks found no game or matching
+launcher process, an idle shared queue, granted native permissions and no pending
+activation journal. The actual return profile differs from both Original and the
+target map. The maintained driver needed an explicit current-goal ownership path;
+the legacy path keeps its named Run and generation restriction. The new path binds
+the existing goal identity/objective and exact subject to a sole primary actor in
+a distinct native runtime namespace, with all existing per-purpose admission,
+source, native ownership, observer, lease, deadline and final-input guards retained.
+Focused synthetic controls and bounded independent source review cover this
+ownership change. A fresh exact job, operational review and real preflight remain
+required. No game launch, map correction or native repair acceptance follows.

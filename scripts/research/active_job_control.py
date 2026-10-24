@@ -208,10 +208,17 @@ def command(row):
 
 def binding_for(job):
     root, control = job["root"], job["active_control"]
+    minimum_generation = 9
+    job_prefix = "finite-uk-calibration"
+    if "goal_scope" in job:
+        from goal_owner import verify_root_scope
+
+        minimum_generation = verify_root_scope(job, job["actor_binding"]["driver_actor"])
+        job_prefix = "finite-goal"
     require(
         set(root) == {"run", "consumer_generation", "session", "coordinator"}
         and type(root["consumer_generation"]) is int
-        and root["consumer_generation"] >= 9
+        and root["consumer_generation"] >= minimum_generation
         and type(root["run"]) is str
         and re.fullmatch(r"run_[0-9a-f]{12}", root["run"])
         and type(root["coordinator"]) is str
@@ -241,11 +248,11 @@ def binding_for(job):
     timestamp(control["not_before"])
     require(
         job["job"]
-        == f"finite-uk-calibration-{root['session']}-generation{root['consumer_generation']}-{control['nonce']}"
+        == f"{job_prefix}-{root['session']}-generation{root['consumer_generation']}-{control['nonce']}"
         and job["actor_binding"]["root"] == root
         and job["actor_binding"]["root_actor"]["session"] == root["session"]
         and job["actor_binding"]["root_actor"]["terminal"] == root["coordinator"],
-        "Fresh exact UK job/actor binding required; historical jobs cannot be substituted",
+        "Fresh exact job/actor binding required; historical jobs cannot be substituted",
     )
     return dict(
         job=job["job"], root=root, rollout=job["actor_binding"]["root_actor"]["rollout"], **control

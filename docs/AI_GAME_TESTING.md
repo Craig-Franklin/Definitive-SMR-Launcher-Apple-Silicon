@@ -64,6 +64,18 @@ claim current game availability, runtime admission, cleanup or compatibility.
 The normal three-argument entry below retains its independent live owner/queue
 checks before mutation.
 
+For a separately authorized current goal, an explicit `goal_scope` may bind a
+fresh runtime namespace to the sole primary actor. Its frozen supported-host
+readback must match the existing active goal identity, creation time and objective
+digest; the exact map subject and current root coordinator/session must also match.
+The legacy admission path retains its original named-Run restriction. This scope
+does not create a Run, admission or permission to launch, and the readback is not
+a live GUI grant. The actual native Run/generation, fresh reviewed job, complete
+source closure (including `goal_owner.py`), provider, one-use lease, independently
+armed observer, cancellation, deadlines and final-input checks remain mandatory.
+Do not copy an unrelated programme's Run, STATE, job or consumed admission to use
+this path. Source controls alone do not establish runtime readiness.
+
 The owner must supply current installation/provider capabilities, source closure,
 private configuration/reviews, one-use job/admission, queue ledger and current
 post-play or post-reset preservation. `common_root` selects private configuration
